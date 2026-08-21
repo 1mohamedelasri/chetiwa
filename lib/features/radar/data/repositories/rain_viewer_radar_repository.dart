@@ -1,0 +1,71 @@
+import '../../../../core/location/coordinates.dart';
+import '../../../../core/weather/weather_data_provenance.dart';
+import '../../../../core/weather/weather_data_health.dart';
+import '../../domain/entities/radar_frame.dart';
+import '../../domain/repositories/radar_repository.dart';
+import '../cache/radar_cache_data_source.dart';
+import '../providers/rain_viewer_radar_provider.dart';
+
+final class RainViewerRadarRepository implements RadarRepository {
+  const RainViewerRadarRepository({
+    required RainViewerRadarProvider provider,
+    required RadarCacheDataSource cache,
+  }) : _provider = provider,
+       _cache = cache;
+
+  final RainViewerRadarProvider _provider;
+  final RadarCacheDataSource _cache;
+
+  @override
+  Future<CachedRadarFrames?> getCachedFrames(Coordinates coordinates) =>
+      _cache.read(coordinates);
+
+  @override
+  Future<List<RadarFrame>> getFrames(Coordinates coordinates) async {
+    final response = await _provider.fetchMetadata();
+    final host = response['host'];
+    final radar = response['radar'];
+    if (host is! String || radar is! Map<String, dynamic>) {
+      throw const WeatherDataException(
+        WeatherDataIssue.invalidResponse,
+        'Métadonnées radar incomplètes',
+      );
+    }
+    final past = radar['past'] as List<dynamic>? ?? const [];
+    final nowcast = radar['nowcast'] as List<dynamic>? ?? const [];
+    final rawFrames = [
+      ...past.map(
+        (frame) => (json: frame as Map<String, dynamic>, forecast: false),
+      ),
+      ...nowcast.map(
+        (frame) => (json: frame as Map<String, dynamic>, forecast: true),
+      ),
+    ];
+    if (rawFrames.isEmpty) {
+      throw const WeatherDataException(
+        WeatherDataIssue.noRadarCoverage,
+        'Aucune image radar disponible pour cette zone',
+      );
+    }
+
+    final frames = List.generate(rawFrames.length, (index) {
+      final raw = rawFrames[index];
+      final path = raw.json['path'] as String;
+      return RadarFrame(
+        time: DateTime.fromMillisecondsSinceEpoch(
+          (raw.json['time'] as num).toInt() * 1000,
+          isUtc: true,
+        ),
+        progress: rawFrames.length == 1 ? 1 : index / (rawFrames.length - 1),
+        // RainViewer's first option enables server-side smoothing. It keeps
+        // genuine precipitation cells legible without manufacturing echoes.
+        tileUrlTemplate: '$host$path/256/{z}/{x}/{y}/2/1_0.png',
+        kind: raw.forecast
+            ? WeatherDataKind.radarNowcast
+            : WeatherDataKind.radarObservation,
+      );
+    }, growable: false);
+    await _cache.write(coordinates, frames);
+    return frames;
+  }
+}

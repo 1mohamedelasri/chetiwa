@@ -1,0 +1,7 @@
+{
+  "location": "Paris, France",
+  "temperature_c": 16,
+  "wind_kph": 28,
+  "brief": {"type": "raining", "headline": "Forte pluie maintenant", "detail": "Accalmie possible dans 42 min", "intensity": "heavy", "rain_start_min": -12, "rain_end_min": 42},
+  "points": [[0,5.8],[10,7.2],[20,5.1],[30,3.4],[40,1.5],[50,0.2],[60,0],[120,0]]
+}

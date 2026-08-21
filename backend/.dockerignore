@@ -1,0 +1,6 @@
+.dart_tool
+.git
+build
+coverage
+test
+*.env

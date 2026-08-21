@@ -1,0 +1,7 @@
+{
+  "location": "Paris, France",
+  "temperature_c": 18,
+  "wind_kph": 12,
+  "brief": {"type": "dry", "headline": "Pas de pluie prévue", "detail": "Restez au sec pendant au moins 2 h", "intensity": "none"},
+  "points": [[0,0],[30,0],[60,0],[90,0],[120,0],[240,0],[480,0],[720,0],[1440,0]]
+}

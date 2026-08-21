@@ -1,0 +1,7 @@
+{
+  "location": "Paris, France",
+  "temperature_c": 15,
+  "wind_kph": 45,
+  "brief": {"type": "imminent", "headline": "Orage dans 24 min", "detail": "Épisode intense · évitez les déplacements", "intensity": "heavy", "rain_start_min": 24, "rain_end_min": 96},
+  "points": [[0,0],[15,0.1],[25,2.2],[35,8.5],[45,12.3],[60,9.4],[75,4.1],[90,1.2],[105,0],[120,0]]
+}

@@ -1,0 +1,17 @@
+name: chetiwa_backend
+description: Modular Chetiwa API for Cloud Run.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.8.1
+
+dependencies:
+  crypto: ^3.0.7
+  http: ^1.6.0
+  shelf: ^1.4.2
+  shelf_router: ^1.1.4
+
+dev_dependencies:
+  lints: ^5.1.1
+  test: ^1.25.15

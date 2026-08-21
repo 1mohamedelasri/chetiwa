@@ -1,0 +1,8 @@
+services:
+  api:
+    build: .
+    environment:
+      CHETIWA_ENV: local
+      PORT: 8080
+    ports:
+      - "8080:8080"

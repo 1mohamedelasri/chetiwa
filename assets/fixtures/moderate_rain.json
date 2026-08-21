@@ -1,0 +1,20 @@
+{
+  "location": "Paris, France",
+  "temperature_c": 17,
+  "wind_kph": 16,
+  "brief": {
+    "type": "raining",
+    "headline": "Pluie modérée en cours",
+    "detail": "Modérée · fin progressive",
+    "intensity": "moderate"
+  },
+  "points": [
+    [0, 0.8],
+    [15, 1.6],
+    [30, 3.2],
+    [45, 2.1],
+    [60, 0.7],
+    [75, 0],
+    [120, 0]
+  ]
+}

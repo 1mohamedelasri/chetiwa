@@ -1,0 +1,20 @@
+{
+  "location": "Paris, France",
+  "temperature_c": 19,
+  "wind_kph": 9,
+  "brief": {
+    "type": "raining",
+    "headline": "Pluie faible en cours",
+    "detail": "Faible · fin proche",
+    "intensity": "light"
+  },
+  "points": [
+    [0, 0.18],
+    [15, 0.32],
+    [30, 0.42],
+    [45, 0.2],
+    [60, 0],
+    [90, 0],
+    [120, 0]
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "location": "Paris, France",
+  "temperature_c": 17,
+  "wind_kph": 15,
+  "brief": {"type": "multipleEpisodes", "headline": "Deux averses à venir", "detail": "Première dans 12 min · seconde vers 19:05", "intensity": "moderate", "rain_start_min": 12, "rain_end_min": 88},
+  "points": [[0,0],[10,0],[15,0.8],[25,1.6],[35,0.2],[45,0],[70,0],[90,1.4],[105,0.7],[120,0]]
+}

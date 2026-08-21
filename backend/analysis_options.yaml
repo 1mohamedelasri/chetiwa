@@ -1,0 +1,7 @@
+include: package:lints/recommended.yaml
+
+linter:
+  rules:
+    avoid_print: true
+    directives_ordering: true
+    prefer_final_locals: true

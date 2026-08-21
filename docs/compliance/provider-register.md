@@ -1,0 +1,40 @@
+# Chetiwa — registre fournisseurs v1
+
+Dernière vérification initiale : 2026-08-20.
+
+Ce registre n’est pas un avis juridique. Les conditions officielles et contrats
+signés prévalent. Une revue finale juridique/confidentialité est obligatoire
+avant monétisation.
+
+| Fournisseur | Usage | Stade autorisé | Coût/limite suivie | Attribution/contrat | Repli |
+| --- | --- | --- | --- | --- | --- |
+| Open-Meteo | Forecast, Graph, geocoding | Gratuit en prototype non commercial ; plan commercial avant pubs/abonnements | Standard 1 M appels/mois, prix checkout à confirmer | Attribution CC BY ; conditions commerciales archivées | Dernier cache + message données anciennes |
+| RainViewer | Radar prototype actuel | Développement temporaire uniquement | API publique sans SLA commercial public | Attribution obligatoire ; ne pas lancer commercialement sans écrit | Fixtures/cache, puis Rainbow |
+| Rainbow | Radar Tiles et nowcast cible | Production après validation contrat | 30 k tiles/mois puis 0,20 $/1 k ; nowcast 5 k puis 0,10 $/1 k selon page officielle actuelle | Conditions, attribution, cache et DPA à archiver | Limiter frames + cache + désactivation |
+| OpenFreeMap | Fond vectoriel standard | Commercial autorisé, sans SLA | Instance publique annoncée gratuite sans limite | Attribution OpenMapTiles/OpenStreetMap | Fond minimal/cache ou PMTiles self-hosted |
+| Esri | Satellite Premium optionnel | Désactivé jusqu’à configuration officielle | 2 M tuiles gratuites puis 0,15 $/1 k selon tarification actuelle | Token et attribution Esri/data | OpenFreeMap |
+| Google Cloud/Firebase | API, devices, push, config, observabilité | Staging/prod après DPA et région UE | Free tiers + pay-as-you-go, budgets et max instances | DPA, sous-traitants et rétention à archiver | Cache mobile, runbook panne |
+| RevenueCat | Entitlements abonnements | Sandbox puis production | Gratuit jusqu’au seuil MTR officiel, puis pourcentage actuel | DPA, webhooks et politique de données | Validation store directe future |
+| Google AdMob/UMP | Ads et consentement | Production après consentement/config stores | Pas de coût fournisseur fixe attendu ; revenu variable | CMP, ATT si requis, Data Safety/App Privacy | Ads désactivées |
+| Apple/Google Play | Distribution et paiements | Production | Frais comptes et commissions selon contrats actifs | Contrats développeur, fiscalité, privacy | Aucun pour distribution native |
+
+## Champs à compléter avant Gate 6
+
+- Entité légale contractante et contact support.
+- DPA signé/accepté et localisation des traitements.
+- Sous-traitants et transferts internationaux.
+- Durée de conservation et suppression.
+- SLA/support et procédure incident.
+- Copie datée des conditions acceptées.
+- Clé/token propriétaire, rotation et date d’expiration.
+
+## Liens officiels
+
+- [Open-Meteo terms](https://open-meteo.com/en/terms)
+- [Open-Meteo pricing](https://open-meteo.com/en/pricing)
+- [RainViewer API](https://www.rainviewer.com/api.html)
+- [Rainbow developer](https://developer.rainbow.ai/)
+- [OpenFreeMap](https://openfreemap.org/)
+- [Esri basemap pricing](https://developers.arcgis.com/rest/static-basemap-tiles/)
+- [Firebase pricing](https://firebase.google.com/pricing)
+- [RevenueCat pricing](https://www.revenuecat.com/pricing)
