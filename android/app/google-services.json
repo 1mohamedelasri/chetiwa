@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "892383784494",
+    "project_id": "chetiwa",
+    "storage_bucket": "chetiwa.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:892383784494:android:3dc9cde5dc0c58f57179bf",
+        "android_client_info": {
+          "package_name": "com.ezplatforms.chetiwa"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDTjJOdKPUF58Y3vJayuLR8NkkHXeR49DY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

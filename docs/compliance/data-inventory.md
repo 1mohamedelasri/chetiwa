@@ -2,8 +2,11 @@
 
 Ce document décrit le comportement réellement embarqué dans le MVP. Il devra être
 relu avec les textes Privacy Policy/Terms et par un conseil compétent avant toute
-distribution externe. Les éléments backend/push/achats/analytics sont reportés :
-ils ne doivent pas être déclarés comme actifs ni activés implicitement.
+distribution externe. Les éléments backend/push/achats sont reportés. Firebase
+Analytics est configuré techniquement, mais sa collecte est désactivée par
+défaut. Elle ne peut être activée qu'après un choix explicite et réversible dans
+Réglages ; la déclaration stores doit refléter le comportement effectivement
+publié.
 
 | Donnée | Finalité | Stockage prévu | Rétention cible | Suppression |
 | --- | --- | --- | --- | --- |
@@ -16,7 +19,8 @@ ils ne doivent pas être déclarés comme actifs ni activés implicitement.
 
 - hash d'identifiant d'installation, token APNs/FCM, alertes distantes ;
 - compte, sauvegarde cloud, achats ou droits Premium ;
-- analytics, crash reporting, publicité ou identifiant publicitaire.
+- crash reporting, publicité ou identifiant publicitaire ;
+- analytics Firebase tant que l'utilisateur n'a pas activé le choix dédié.
 
 Règles d’implémentation :
 

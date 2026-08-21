@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -6,6 +8,7 @@ import '../../../core/notifications/notification_permission_gateway.dart';
 import '../../../core/location/active_location_controller.dart';
 import '../application/alert_preferences_controller.dart';
 import '../data/chetiwa_alert_api.dart';
+import '../../analytics/application/analytics_tracker.dart';
 
 final class AlertsSetupScreen extends StatefulWidget {
   const AlertsSetupScreen({super.key});
@@ -36,9 +39,8 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
   }
 
   Future<void> _toggleAlerts(bool enable) async {
-    final preferences = context.read<AlertPreferencesController>();
     if (!enable) {
-      await preferences.setEnabled(false);
+      await _setAlertsEnabled(false);
       return;
     }
 
@@ -46,7 +48,7 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
     final status = _authorization ?? await gateway.status();
     if (!mounted) return;
     if (status.canSend) {
-      await preferences.setEnabled(true);
+      await _setAlertsEnabled(true);
       return;
     }
     if (status == NotificationAuthorization.permanentlyDenied ||
@@ -70,7 +72,17 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
     if (!mounted) return;
     setState(() => _authorization = result);
     if (result.canSend) {
-      await preferences.setEnabled(true);
+      await _setAlertsEnabled(true);
+    }
+  }
+
+  Future<void> _setAlertsEnabled(bool enabled) async {
+    await context.read<AlertPreferencesController>().setEnabled(enabled);
+    if (mounted) {
+      final analytics = context.read<AnalyticsTracker?>();
+      if (analytics != null) {
+        unawaited(analytics.alertPreferenceChanged(enabled));
+      }
     }
   }
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -11,6 +13,7 @@ import '../../../../core/widgets/weather_data_status.dart';
 import '../../../radar/application/radar_bloc.dart';
 import '../../../radar/domain/repositories/radar_repository.dart';
 import '../../../radar/presentation/widgets/radar_pane.dart';
+import '../../../analytics/application/analytics_tracker.dart';
 import '../../application/forecast_bloc.dart';
 import '../../application/graph_horizon_cubit.dart';
 import '../../application/weather_section_cubit.dart';
@@ -113,6 +116,11 @@ final class _WeatherViewState extends State<_WeatherView>
                 child: LocationSelector(
                   locationName: forecast.locationName,
                   onLocationSelected: (location) {
+                    unawaited(
+                      context.read<AnalyticsTracker>().locationSelected(
+                        location.acquisition.name,
+                      ),
+                    );
                     context.read<ActiveLocationController>().setActive(
                       location,
                     );

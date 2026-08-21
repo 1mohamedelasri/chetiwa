@@ -121,6 +121,21 @@ final class ChetiwaLocalizations {
   String get mainLocation => _fr ? 'Lieu principal' : 'Main location';
   String get temperature => _fr ? 'Température' : 'Temperature';
   String get privacy => _fr ? 'Confidentialité' : 'Privacy';
+  String get analyticsTitle =>
+      _fr ? 'Statistiques d’utilisation' : 'Usage analytics';
+  String get analyticsDisabledDetail => _fr
+      ? 'Désactivées · aucune statistique Firebase envoyée'
+      : 'Off · no Firebase analytics is sent';
+  String get analyticsEnabledDetail => _fr
+      ? 'Activées · uniquement des événements d’usage anonymisés'
+      : 'On · only anonymised usage events';
+  String get analyticsEnableDetail => _fr
+      ? 'Chetiwa enverra des statistiques d’usage limitées pour améliorer l’application. Elles ne contiennent ni adresse, ni recherche saisie, ni coordonnées précises. Vous pourrez désactiver ce choix à tout moment.'
+      : 'Chetiwa will send limited usage statistics to improve the app. They contain no address, typed search, or precise coordinates. You can turn this off at any time.';
+  String get analyticsEnable => _fr ? 'Activer' : 'Enable';
+  String get analyticsUpdateFailed => _fr
+      ? 'Impossible de modifier ce choix pour le moment.'
+      : 'This choice could not be updated right now.';
   String get terms => _fr ? 'Conditions d’utilisation' : 'Terms of use';
   String get weatherData => _fr ? 'Données météo' : 'Weather data';
   String get sourcesLicenses =>

@@ -15,14 +15,21 @@ import 'di/chetiwa_dependencies.dart';
 import 'router/app_router.dart';
 import 'preferences/app_preferences_controller.dart';
 import '../features/alerts/application/alert_preferences_controller.dart';
+import '../features/analytics/application/analytics_consent_controller.dart';
+import '../features/analytics/application/analytics_tracker.dart';
 import '../features/monetization/domain/ads_repository.dart';
 import '../features/monetization/domain/consent_repository.dart';
 import 'theme/chetiwa_theme.dart';
 
 final class ChetiwaApp extends StatefulWidget {
-  const ChetiwaApp({this.dependencies, super.key});
+  const ChetiwaApp({
+    this.dependencies,
+    this.analyticsConsent = false,
+    super.key,
+  });
 
   final ChetiwaDependencies? dependencies;
+  final bool analyticsConsent;
 
   @override
   State<ChetiwaApp> createState() => _ChetiwaAppState();
@@ -31,11 +38,14 @@ final class ChetiwaApp extends StatefulWidget {
 final class _ChetiwaAppState extends State<ChetiwaApp> {
   late final ChetiwaDependencies _dependencies =
       widget.dependencies ?? ChetiwaDependencies.live();
+  late final AnalyticsConsentController _analyticsConsentController =
+      AnalyticsConsentController(initiallyEnabled: widget.analyticsConsent);
   late final GoRouter _router = createAppRouter();
 
   @override
   void dispose() {
     _router.dispose();
+    _analyticsConsentController.dispose();
     _dependencies.dispose();
     super.dispose();
   }
@@ -43,55 +53,63 @@ final class _ChetiwaAppState extends State<ChetiwaApp> {
   @override
   Widget build(BuildContext context) => ChangeNotifierProvider.value(
     value: _dependencies.preferencesController,
-    child: MultiRepositoryProvider(
-      providers: [
-        RepositoryProvider<ForecastRepository>.value(
-          value: _dependencies.forecastRepository,
-        ),
-        RepositoryProvider<RadarRepository>.value(
-          value: _dependencies.radarRepository,
-        ),
-        RepositoryProvider<LocationRepository>.value(
-          value: _dependencies.locationRepository,
-        ),
-        RepositoryProvider<WeatherClock>.value(
-          value: _dependencies.weatherClock,
-        ),
-        RepositoryProvider<NotificationPermissionGateway>.value(
-          value: _dependencies.notificationPermissionGateway,
-        ),
-        RepositoryProvider<AdsRepository>.value(
-          value: _dependencies.adsRepository,
-        ),
-        RepositoryProvider<ConsentRepository>.value(
-          value: _dependencies.consentRepository,
-        ),
-      ],
-      child: MultiProvider(
+    child: ChangeNotifierProvider<AnalyticsConsentController>.value(
+      value: _analyticsConsentController,
+      child: MultiRepositoryProvider(
         providers: [
-          ChangeNotifierProvider<AlertPreferencesController>.value(
-            value: _dependencies.alertPreferencesController,
+          RepositoryProvider<ForecastRepository>.value(
+            value: _dependencies.forecastRepository,
           ),
-          ChangeNotifierProvider<ActiveLocationController>.value(
-            value: _dependencies.activeLocationController,
+          RepositoryProvider<RadarRepository>.value(
+            value: _dependencies.radarRepository,
+          ),
+          RepositoryProvider<LocationRepository>.value(
+            value: _dependencies.locationRepository,
+          ),
+          RepositoryProvider<WeatherClock>.value(
+            value: _dependencies.weatherClock,
+          ),
+          RepositoryProvider<NotificationPermissionGateway>.value(
+            value: _dependencies.notificationPermissionGateway,
+          ),
+          RepositoryProvider<AdsRepository>.value(
+            value: _dependencies.adsRepository,
+          ),
+          RepositoryProvider<ConsentRepository>.value(
+            value: _dependencies.consentRepository,
+          ),
+          RepositoryProvider<AnalyticsTracker>(
+            create: (context) => AnalyticsTracker(
+              consent: context.read<AnalyticsConsentController>(),
+            ),
           ),
         ],
-        child: Consumer<AppPreferencesController>(
-          builder: (context, preferences, _) => MaterialApp.router(
-            onGenerateTitle: (context) => context.l10n.appTitle,
-            debugShowCheckedModeBanner: false,
-            theme: ChetiwaTheme.light,
-            darkTheme: ChetiwaTheme.dark,
-            themeMode: preferences.themeMode,
-            locale: preferences.locale,
-            supportedLocales: ChetiwaLocalizations.supportedLocales,
-            localizationsDelegates: const [
-              ChetiwaLocalizations.delegate,
-              GlobalMaterialLocalizations.delegate,
-              GlobalWidgetsLocalizations.delegate,
-              GlobalCupertinoLocalizations.delegate,
-            ],
-            routerConfig: _router,
+        child: MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AlertPreferencesController>.value(
+              value: _dependencies.alertPreferencesController,
+            ),
+            ChangeNotifierProvider<ActiveLocationController>.value(
+              value: _dependencies.activeLocationController,
+            ),
+          ],
+          child: Consumer<AppPreferencesController>(
+            builder: (context, preferences, _) => MaterialApp.router(
+              onGenerateTitle: (context) => context.l10n.appTitle,
+              debugShowCheckedModeBanner: false,
+              theme: ChetiwaTheme.light,
+              darkTheme: ChetiwaTheme.dark,
+              themeMode: preferences.themeMode,
+              locale: preferences.locale,
+              supportedLocales: ChetiwaLocalizations.supportedLocales,
+              localizationsDelegates: const [
+                ChetiwaLocalizations.delegate,
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+              routerConfig: _router,
+            ),
           ),
         ),
       ),

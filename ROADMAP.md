@@ -217,8 +217,9 @@ base cloud, un moteur push ou Remote Config pour la bêta frugale.
   distribution publique l'imposent.
 - ⬜ Remplacer le fond principal par OpenFreeMap/MapLibre avec attribution.
 - ⬜ Garder Esri satellite désactivé par défaut et réservé à Chetiwa+.
-- ⬜ Implémenter les limites de zoom, nombre de frames, préchargement et cache afin
-  de maîtriser le nombre de tuiles.
+- 🟡 Limite locale de 24 frames par rafraîchissement, cache borné par lieu et
+  repli stale-if-error livrés. Restent les limites de zoom et préchargement de
+  tuiles après validation de la licence du fond de carte.
 - ✅ Écran « Sources et licences » accessible depuis Settings, avec attributions
   et liens vers les conditions des sources actuellement visibles.
 
@@ -397,15 +398,18 @@ et sélection d'un lieu sans accorder l'accès GPS.
 
 ## Mesure produit — Firebase Analytics uniquement (facultatif)
 
-- ⬜ Après la bêta, intégrer uniquement Firebase Analytics pour comprendre les
-  usages essentiels et, si AdMob est actif, rapprocher revenus publicitaires et
-  parcours produit.
-- ⬜ Limiter les événements aux décisions produit utiles : ouverture, changement
-  d’onglet, recherche de lieu, activation d’alerte, affichage de publicité et
-  achat/restauration. Ne pas envoyer d’adresse, de coordonnées précises ni de
-  texte saisi par l’utilisateur.
-- ⬜ Demander/recueillir le consentement requis et documenter Firebase Analytics
-  dans la politique de confidentialité et les déclarations App Store/Play.
+- 🟡 Firebase Core et Firebase Analytics sont configurés pour iOS/Android, avec
+  collecte désactivée par défaut et un choix local, explicite et réversible dans
+  Réglages. Après la bêta, limiter les événements aux usages essentiels et, si
+  AdMob est actif, rapprocher revenus publicitaires et parcours produit.
+- 🟡 Les événements anonymes MVP sont limités au changement d’onglet, lancement
+  d’une recherche de lieu, sélection de lieu (source seulement) et changement
+  d’alerte. Ne pas envoyer d’adresse, de coordonnées précises, de texte saisi,
+  de valeur météo ni d’identifiant publicitaire. Ajouter publicité et
+  achat/restauration seulement si ces produits sont réellement activés.
+- 🟡 Le choix Analytics est recueilli localement avant activation ; compléter la
+  politique de confidentialité et les déclarations App Store/Play avec le
+  comportement final avant une distribution externe.
 - ⬜ Rester sur les produits Analytics gratuits : ne pas activer Firestore, Realtime
   Database, Cloud Functions, Cloud Storage, FCM, Remote Config, Crashlytics ou
   tout produit Google Cloud sans nouvelle décision, budget et plafond de coût.
@@ -440,8 +444,11 @@ et sélection d'un lieu sans accorder l'accès GPS.
   revue compétente restent obligatoires avant distribution externe.
 - ⬜ Expliquer clairement l’usage de : localisation, notifications, identifiants
   publicitaires, analytics, crash logs, achats et lieux enregistrés.
-- ⬜ Tenir un inventaire des données : finalité, base légale, durée, stockage,
-  destinataires et pays de traitement.
+- 🟡 Inventaire MVP local-first rédigé dans
+  [`docs/compliance/data-inventory.md`](docs/compliance/data-inventory.md) :
+  finalité, stockage, rétention et suppression sont couverts. Restent les bases
+  légales, destinataires/pays et la mise à jour obligatoire avant tout SDK ou
+  service externe.
 - ⬜ Signer/archiver les DPA nécessaires avec les sous-traitants.
 - ⬜ Définir des durées de rétention courtes et une purge automatique.
 - 🟡 Le MVP sans compte propose maintenant l'effacement des lieux, caches et
@@ -511,7 +518,9 @@ et sélection d'un lieu sans accorder l'accès GPS.
 - 🟡 Zones tactiles principales couvertes par les composants Material ; les
   animations non essentielles respectent désormais « Réduire les animations ».
   Une vérification tactile simple sur appareils physiques reste à réaliser.
-- ⬜ Tester réseau 3G, mode économie d’énergie et appareils bas de gamme.
+- 🟡 Résilience réseau automatisée (coupure, reprise, cache et panne fournisseur)
+  couverte ; les essais 3G, économie d’énergie et appareils bas de gamme restent
+  manuels avant bêta externe.
 
 ## CI/CD
 
@@ -520,7 +529,9 @@ et sélection d'un lieu sans accorder l'accès GPS.
   revue conservé 7 jours. Le build iOS signé reste à brancher après création du
   compte Apple et des certificats.
 - ⬜ Signature et secrets uniquement dans le système CI sécurisé.
-- ⬜ Génération reproductible des builds, numéros de version et changelog.
+- 🟡 Génération reproductible des builds, numéros de version et changelog :
+  version visible depuis le package installé et métadonnées de release
+  documentées ; automatisation CI et distribution bêta restent à faire.
 - ⬜ Distribution automatique vers TestFlight et Play Internal Testing.
 - ⬜ Crash reporting et symboles/dSYM/proguard mappings correctement envoyés.
 
@@ -536,7 +547,9 @@ et sélection d'un lieu sans accorder l'accès GPS.
 
 ## Identité et contenu
 
-- ⬜ Valider nom, marque, bundle ID/application ID et domaines.
+- 🟡 Identifiant technique aligné sur `com.ezplatforms.chetiwa` pour iOS et
+  Android ; valider ce même identifiant dans App Store Connect, Play Console,
+  les domaines et les éléments de marque avant la première publication.
 - ⬜ Finaliser icône, splash, captures, vidéo éventuelle et textes localisés.
 - ⬜ Créer URL support, confidentialité, conditions et page marketing.
 - ⬜ Préparer FAQ : précision météo, radar, alertes, achats et suppression.
@@ -609,8 +622,9 @@ et sélection d'un lieu sans accorder l'accès GPS.
 
 ## Ordre d’exécution immédiat
 
-1. Implémenter « Choisir sur la carte », terminer les permissions GPS et les
-   tests sur appareils physiques — sans nouveau fournisseur payant.
+1. Exécuter la matrice déjà préparée pour « Choisir sur la carte » et les
+   permissions GPS sur appareils physiques iOS/Android — sans nouveau
+   fournisseur payant.
 2. Réaliser une bêta fermée locale-first, sans publicité, achat, satellite ni
    alerte distante, puis mesurer quatre semaines de rétention, fiabilité et
    trafic radar.

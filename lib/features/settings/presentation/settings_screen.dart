@@ -5,11 +5,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../app/theme/chetiwa_tokens.dart';
 import '../../../app/preferences/app_preferences_controller.dart';
+import '../../../core/app/app_version.dart';
 import '../../../core/location/coordinates.dart';
 import '../../../core/location/location_repository.dart';
 import '../../../core/location/active_location_controller.dart';
 import '../../../core/l10n/chetiwa_localizations.dart';
 import '../../alerts/application/alert_preferences_controller.dart';
+import '../../analytics/application/analytics_consent_controller.dart';
 
 final class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -20,11 +22,13 @@ final class SettingsScreen extends StatefulWidget {
 
 final class _SettingsScreenState extends State<SettingsScreen> {
   late Future<ChetiwaLocation?> _mainLocation;
+  late Future<String> _appVersion;
 
   @override
   void initState() {
     super.initState();
     _mainLocation = context.read<LocationRepository>().getMainLocation();
+    _appVersion = AppVersion.displayLabel();
   }
 
   Future<void> _clearMainLocation() async {
@@ -54,6 +58,8 @@ final class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _clearLocalData() async {
+    await context.read<AnalyticsConsentController>().clear();
+    if (!mounted) return;
     final preferences = await SharedPreferences.getInstance();
     final keys = preferences.getKeys().where(
       (key) =>
@@ -70,6 +76,38 @@ final class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     context.read<ActiveLocationController>().clear();
     setState(() => _mainLocation = Future.value(null));
+  }
+
+  Future<void> _changeAnalyticsConsent(bool enabled) async {
+    if (enabled) {
+      final accepted = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(context.l10n.analyticsTitle),
+          content: Text(context.l10n.analyticsEnableDetail),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(context.l10n.close),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(context.l10n.analyticsEnable),
+            ),
+          ],
+        ),
+      );
+      if (accepted != true || !mounted) return;
+    }
+
+    final changed = await context.read<AnalyticsConsentController>().setEnabled(
+      enabled,
+    );
+    if (!changed && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.analyticsUpdateFailed)),
+      );
+    }
   }
 
   @override
@@ -212,6 +250,25 @@ final class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: ChetiwaSpacing.x3),
             _SettingsCard(
               children: [
+                ListenableBuilder(
+                  listenable: context.read<AnalyticsConsentController>(),
+                  builder: (context, _) {
+                    final analytics = context
+                        .read<AnalyticsConsentController>();
+                    return SwitchListTile(
+                      key: const Key('analytics-consent-toggle'),
+                      secondary: const Icon(Icons.query_stats_outlined),
+                      title: Text(strings.analyticsTitle),
+                      subtitle: Text(
+                        analytics.isEnabled
+                            ? strings.analyticsEnabledDetail
+                            : strings.analyticsDisabledDetail,
+                      ),
+                      value: analytics.isEnabled,
+                      onChanged: _changeAnalyticsConsent,
+                    );
+                  },
+                ),
                 ListTile(
                   title: Text(strings.privacy),
                   trailing: const Icon(Icons.chevron_right),
@@ -236,8 +293,12 @@ final class _SettingsScreenState extends State<SettingsScreen> {
                   onTap: _confirmClearLocalData,
                 ),
                 ListTile(
+                  key: const Key('app-version'),
                   title: Text(strings.version),
-                  trailing: const Text('0.2.0 (MVP)'),
+                  trailing: FutureBuilder<String>(
+                    future: _appVersion,
+                    builder: (context, snapshot) => Text(snapshot.data ?? '—'),
+                  ),
                 ),
               ],
             ),

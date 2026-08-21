@@ -2,10 +2,12 @@
 
 ## Périmètre actuel
 
-Chetiwa ne comporte ni compte, ni achat, ni publicité, ni analytics, ni push
-distant. Les données météo et de carte sont demandées à des fournisseurs via
-l'application ou le proxy Chetiwa selon la configuration. Les préférences et
-lieux enregistrés restent locaux.
+Chetiwa ne comporte ni compte, ni achat, ni publicité, ni push distant. Firebase
+Analytics est le seul SDK cloud embarqué : il est désactivé par défaut et ne
+reçoit qu'une liste fermée d'événements anonymes après un choix explicite. Les
+données météo et de carte sont demandées à des fournisseurs via l'application ou
+le proxy Chetiwa selon la configuration. Les préférences et lieux enregistrés
+restent locaux.
 
 ## Risques et contrôles
 
@@ -17,13 +19,15 @@ lieux enregistrés restent locaux.
 | Abus du proxy public | Coût/indisponibilité | Limite locale et ETag déjà présents | Quotas distribués après Gate cloud |
 | Dépendance compromise | Exécution de code vulnérable | CI et Dependabot hebdomadaire | Revue des mises à jour critiques |
 | Faux sentiment de sécurité des alertes | Mauvaise décision utilisateur | Aucune alerte temps réel active pendant la bêta frugale | Mesure silencieuse avant push |
+| Mesure d'usage trop intrusive | Atteinte à la vie privée | Opt-in local, retrait dans Réglages, liste fermée sans lieu/texte/valeur météo | Vérifier l'inventaire, la politique et les déclarations stores |
 
 ## Hors périmètre MVP, à réviser avant activation
 
-L'ajout d'achats, publicité, compte, analytics, crash reporting, push ou base
-cloud impose une révision de ce document, de l'inventaire de données, des
-déclarations stores et du modèle de consentement. Les secrets et certificats ne
-doivent alors exister que dans le CI sécurisé ou le gestionnaire de secrets de
+L'ajout d'achats, publicité, compte, crash reporting, push, autre produit
+Firebase ou base cloud impose une révision de ce document, de l'inventaire de
+données, des déclarations stores et du modèle de consentement. Tout nouvel
+événement Analytics suit la même règle. Les secrets et certificats ne doivent
+alors exister que dans le CI sécurisé ou le gestionnaire de secrets de
 l'hébergeur, jamais dans le dépôt ou l'application.
 
 ## Réponse incident minimale

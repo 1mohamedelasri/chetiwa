@@ -3,6 +3,7 @@ import '../../../../core/weather/weather_data_provenance.dart';
 import '../../../../core/weather/weather_data_health.dart';
 import '../../domain/entities/radar_frame.dart';
 import '../../domain/repositories/radar_repository.dart';
+import '../../domain/services/radar_frame_policy.dart';
 import '../cache/radar_cache_data_source.dart';
 import '../providers/rain_viewer_radar_provider.dart';
 
@@ -33,14 +34,16 @@ final class RainViewerRadarRepository implements RadarRepository {
     }
     final past = radar['past'] as List<dynamic>? ?? const [];
     final nowcast = radar['nowcast'] as List<dynamic>? ?? const [];
-    final rawFrames = [
-      ...past.map(
-        (frame) => (json: frame as Map<String, dynamic>, forecast: false),
-      ),
-      ...nowcast.map(
-        (frame) => (json: frame as Map<String, dynamic>, forecast: true),
-      ),
-    ];
+    final rawFrames = RadarFramePolicy.select(
+      past
+          .whereType<Map<String, dynamic>>()
+          .map((frame) => (json: frame, forecast: false))
+          .toList(growable: false),
+      nowcast
+          .whereType<Map<String, dynamic>>()
+          .map((frame) => (json: frame, forecast: true))
+          .toList(growable: false),
+    );
     if (rawFrames.isEmpty) {
       throw const WeatherDataException(
         WeatherDataIssue.noRadarCoverage,
@@ -48,23 +51,32 @@ final class RainViewerRadarRepository implements RadarRepository {
       );
     }
 
-    final frames = List.generate(rawFrames.length, (index) {
-      final raw = rawFrames[index];
-      final path = raw.json['path'] as String;
-      return RadarFrame(
-        time: DateTime.fromMillisecondsSinceEpoch(
-          (raw.json['time'] as num).toInt() * 1000,
-          isUtc: true,
-        ),
-        progress: rawFrames.length == 1 ? 1 : index / (rawFrames.length - 1),
-        // RainViewer's first option enables server-side smoothing. It keeps
-        // genuine precipitation cells legible without manufacturing echoes.
-        tileUrlTemplate: '$host$path/256/{z}/{x}/{y}/2/1_0.png',
-        kind: raw.forecast
-            ? WeatherDataKind.radarNowcast
-            : WeatherDataKind.radarObservation,
-      );
-    }, growable: false);
+    final frames = RadarFramePolicy.normalizeProgress(
+      List.generate(rawFrames.length, (index) {
+        final raw = rawFrames[index];
+        final path = raw.json['path'];
+        final timestamp = raw.json['time'];
+        if (path is! String || timestamp is! num || path.isEmpty) {
+          throw const WeatherDataException(
+            WeatherDataIssue.invalidResponse,
+            'Image radar invalide',
+          );
+        }
+        return RadarFrame(
+          time: DateTime.fromMillisecondsSinceEpoch(
+            timestamp.toInt() * 1000,
+            isUtc: true,
+          ),
+          progress: 0,
+          // RainViewer's first option enables server-side smoothing. It keeps
+          // genuine precipitation cells legible without manufacturing echoes.
+          tileUrlTemplate: '$host$path/256/{z}/{x}/{y}/2/1_0.png',
+          kind: raw.forecast
+              ? WeatherDataKind.radarNowcast
+              : WeatherDataKind.radarObservation,
+        );
+      }, growable: false),
+    );
     await _cache.write(coordinates, frames);
     return frames;
   }

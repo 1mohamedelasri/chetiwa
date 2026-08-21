@@ -10,6 +10,7 @@ import '../../../../core/location/location_repository.dart';
 import '../../../../core/l10n/chetiwa_localizations.dart';
 import '../../../../core/time/weather_clock.dart';
 import '../../../../core/weather/temperature_formatter.dart';
+import '../../../analytics/application/analytics_tracker.dart';
 import 'map_location_picker_screen.dart';
 import '../../application/weather_section_cubit.dart';
 import '../../domain/entities/forecast.dart';
@@ -211,47 +212,55 @@ final class WeatherBottomNavigation extends StatelessWidget {
   const WeatherBottomNavigation({super.key});
 
   @override
-  Widget build(BuildContext context) =>
-      BlocBuilder<WeatherSectionCubit, WeatherSection>(
-        builder: (context, section) => Container(
-          height: 60,
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainer,
-            borderRadius: BorderRadius.circular(ChetiwaRadius.large),
-            border: Border.all(color: Theme.of(context).colorScheme.outline),
-            boxShadow: ChetiwaElevation.floating,
+  Widget build(
+    BuildContext context,
+  ) => BlocBuilder<WeatherSectionCubit, WeatherSection>(
+    builder: (context, section) => Container(
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(ChetiwaRadius.large),
+        border: Border.all(color: Theme.of(context).colorScheme.outline),
+        boxShadow: ChetiwaElevation.floating,
+      ),
+      child: Row(
+        children: [
+          _NavigationItem(
+            label: context.l10n.graph,
+            icon: Icons.show_chart_rounded,
+            selected: section == WeatherSection.graph,
+            onTap: () {
+              context.read<WeatherSectionCubit>().select(WeatherSection.graph);
+              unawaited(context.read<AnalyticsTracker>().tabSelected('graph'));
+            },
           ),
-          child: Row(
-            children: [
-              _NavigationItem(
-                label: context.l10n.graph,
-                icon: Icons.show_chart_rounded,
-                selected: section == WeatherSection.graph,
-                onTap: () => context.read<WeatherSectionCubit>().select(
-                  WeatherSection.graph,
-                ),
-              ),
-              _NavigationItem(
-                label: context.l10n.radar,
-                icon: Icons.radar_rounded,
-                selected: section == WeatherSection.radar,
-                onTap: () => context.read<WeatherSectionCubit>().select(
-                  WeatherSection.radar,
-                ),
-              ),
-              _NavigationItem(
-                label: context.l10n.forecasts,
-                icon: Icons.cloud_outlined,
-                selected: section == WeatherSection.forecast,
-                onTap: () => context.read<WeatherSectionCubit>().select(
-                  WeatherSection.forecast,
-                ),
-              ),
-            ],
+          _NavigationItem(
+            label: context.l10n.radar,
+            icon: Icons.radar_rounded,
+            selected: section == WeatherSection.radar,
+            onTap: () {
+              context.read<WeatherSectionCubit>().select(WeatherSection.radar);
+              unawaited(context.read<AnalyticsTracker>().tabSelected('radar'));
+            },
           ),
-        ),
-      );
+          _NavigationItem(
+            label: context.l10n.forecasts,
+            icon: Icons.cloud_outlined,
+            selected: section == WeatherSection.forecast,
+            onTap: () {
+              context.read<WeatherSectionCubit>().select(
+                WeatherSection.forecast,
+              );
+              unawaited(
+                context.read<AnalyticsTracker>().tabSelected('forecast'),
+              );
+            },
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 final class AdaptiveAdBannerSlot extends StatelessWidget {
@@ -344,6 +353,9 @@ final class _LocationPickerState extends State<_LocationPicker> {
   }
 
   Future<void> _search(String query) async {
+    if (mounted) {
+      unawaited(context.read<AnalyticsTracker>().locationSearchRequested());
+    }
     final generation = ++_searchGeneration;
     setState(() {
       _isSearching = true;

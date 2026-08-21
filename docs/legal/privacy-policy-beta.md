@@ -24,8 +24,10 @@ votre position en arrière-plan.
 | Préférences d'alertes | Configurer l'interface locale | Sur votre appareil |
 | Autorisation de notifications | Afficher les alertes locales lorsqu'elles seront activées | Gérée par le système ; aucun token push distant dans le MVP |
 
-Le MVP n'utilise ni compte utilisateur, ni publicité, ni abonnement, ni SDK
-d'analytics/crash reporting, ni profil publicitaire. Il ne transmet pas de
+Le MVP n'utilise ni compte utilisateur, ni publicité, ni abonnement, ni profil
+publicitaire. Le SDK Firebase Analytics est configuré, mais sa collecte est
+désactivée par défaut. L'utilisateur peut l'activer depuis Réglages après une
+explication claire, puis retirer ce choix au même endroit. Il ne transmet pas de
 coordonnées à un serveur Chetiwa dans sa configuration bêta locale.
 
 ## Fournisseurs de données
