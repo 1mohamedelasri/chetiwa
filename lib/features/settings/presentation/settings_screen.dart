@@ -59,11 +59,14 @@ final class _SettingsScreenState extends State<SettingsScreen> {
       (key) =>
           key.startsWith('locations:') ||
           key.startsWith('forecast:v2:') ||
-          key.startsWith('radar:v2:'),
+          key.startsWith('radar:v2:') ||
+          key.startsWith('privacy:'),
     );
     await Future.wait(keys.map(preferences.remove));
     if (!mounted) return;
     await context.read<AlertPreferencesController>().clear();
+    if (!mounted) return;
+    await context.read<AppPreferencesController>().clear();
     if (!mounted) return;
     context.read<ActiveLocationController>().clear();
     setState(() => _mainLocation = Future.value(null));

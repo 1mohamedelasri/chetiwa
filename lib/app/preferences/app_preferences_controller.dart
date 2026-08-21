@@ -60,6 +60,21 @@ final class AppPreferencesController extends ChangeNotifier {
     }
   }
 
+  /// Restores the local-only presentation preferences after a privacy reset.
+  Future<void> clear() async {
+    _themeMode = ThemeMode.system;
+    _language = ChetiwaLanguage.french;
+    _temperatureUnit = TemperatureUnit.celsius;
+    notifyListeners();
+    if (!_persist) return;
+    final preferences = await SharedPreferences.getInstance();
+    await Future.wait([
+      preferences.remove(_themeKey),
+      preferences.remove(_languageKey),
+      preferences.remove(_temperatureUnitKey),
+    ]);
+  }
+
   Future<void> _restore() async {
     final preferences = await SharedPreferences.getInstance();
     final themeName = preferences.getString(_themeKey);

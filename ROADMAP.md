@@ -445,8 +445,9 @@ et sélection d'un lieu sans accorder l'accès GPS.
 - ⬜ Signer/archiver les DPA nécessaires avec les sous-traitants.
 - ⬜ Définir des durées de rétention courtes et une purge automatique.
 - 🟡 Le MVP sans compte propose maintenant l'effacement des lieux, caches et
-  préférences locales depuis Réglages. Export/suppression côté serveur seront
-  requis uniquement si un compte ou stockage cloud est ajouté.
+  préférences locales, alertes et identifiant d'installation depuis Réglages.
+  Export/suppression côté serveur seront requis uniquement si un compte ou
+  stockage cloud est ajouté.
 - ⬜ Fournir une adresse de contact confidentialité/support (à choisir par le
   propriétaire avant publication).
 - ⬜ Remplir Apple Privacy Nutrition Labels et Google Play Data Safety à partir du
