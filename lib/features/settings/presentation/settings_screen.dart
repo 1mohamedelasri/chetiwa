@@ -19,7 +19,6 @@ final class SettingsScreen extends StatefulWidget {
 }
 
 final class _SettingsScreenState extends State<SettingsScreen> {
-  var _celsius = true;
   late Future<ChetiwaLocation?> _mainLocation;
 
   @override
@@ -153,12 +152,24 @@ final class _SettingsScreenState extends State<SettingsScreen> {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => context.push('/alerts'),
                 ),
-                SwitchListTile(
-                  secondary: const Icon(Icons.thermostat_outlined),
-                  title: Text(strings.temperature),
-                  subtitle: Text(_celsius ? 'Celsius' : 'Fahrenheit'),
-                  value: _celsius,
-                  onChanged: (value) => setState(() => _celsius = value),
+                ListenableBuilder(
+                  listenable: preferences,
+                  builder: (context, _) => SwitchListTile(
+                    secondary: const Icon(Icons.thermostat_outlined),
+                    title: Text(strings.temperature),
+                    subtitle: Text(
+                      preferences.temperatureUnit == TemperatureUnit.celsius
+                          ? 'Celsius'
+                          : 'Fahrenheit',
+                    ),
+                    value:
+                        preferences.temperatureUnit == TemperatureUnit.celsius,
+                    onChanged: (value) => preferences.setTemperatureUnit(
+                      value
+                          ? TemperatureUnit.celsius
+                          : TemperatureUnit.fahrenheit,
+                    ),
+                  ),
                 ),
               ],
             ),

@@ -12,6 +12,7 @@ import '../../../../app/theme/chetiwa_tokens.dart';
 import '../../../../core/config/api_config.dart';
 import '../../../../core/l10n/chetiwa_localizations.dart';
 import '../../../../core/time/weather_clock.dart';
+import '../../../../core/weather/temperature_formatter.dart';
 import '../../../../core/widgets/weather_data_status.dart';
 import '../../../forecast/domain/entities/forecast.dart';
 import '../../../forecast/domain/services/forecast_snapshot_builder.dart';
@@ -599,7 +600,7 @@ final class _CompactRadarStatus extends StatelessWidget {
             const _StatusDivider(),
             if (isLatestObservation) ...[
               Text(
-                '${forecast.temperatureCelsius.round()}°',
+                formatTemperature(context, forecast.temperatureCelsius),
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,

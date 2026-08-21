@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../app/theme/chetiwa_tokens.dart';
 import '../../../../core/time/weather_clock.dart';
 import '../../../../core/l10n/chetiwa_localizations.dart';
+import '../../../../core/weather/temperature_formatter.dart';
 import '../../domain/entities/forecast.dart';
 import '../../domain/services/forecast_snapshot_builder.dart';
 import '../forecast_strings.dart';
@@ -138,7 +139,7 @@ final class _CurrentConditions extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                '${forecast.temperatureCelsius.round()}°',
+                formatTemperature(context, forecast.temperatureCelsius),
                 style: const TextStyle(
                   color: ChetiwaColors.textPrimary,
                   height: 0.95,
@@ -158,7 +159,7 @@ final class _CurrentConditions extends StatelessWidget {
               if (today != null) ...[
                 const SizedBox(height: 4),
                 Text(
-                  'Max. ${today!.temperatureMax.round()}°  ·  Min. ${today!.temperatureMin.round()}°',
+                  'Max. ${formatTemperature(context, today!.temperatureMax)}  ·  Min. ${formatTemperature(context, today!.temperatureMin)}',
                   style: const TextStyle(
                     color: ChetiwaColors.textSecondary,
                     fontSize: 13,
@@ -273,7 +274,7 @@ final class _Hour extends StatelessWidget {
           const SizedBox(height: 12),
         const Spacer(),
         Text(
-          '${item.temperatureCelsius.round()}°',
+          formatTemperature(context, item.temperatureCelsius),
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
         ),
       ],
@@ -354,7 +355,7 @@ final class _Day extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           Text(
-            '${item.temperatureMin.round()}°',
+            formatTemperature(context, item.temperatureMin),
             style: const TextStyle(
               color: ChetiwaColors.textSecondary,
               fontSize: 18,
@@ -380,7 +381,7 @@ final class _Day extends StatelessWidget {
           SizedBox(
             width: 34,
             child: Text(
-              '${item.temperatureMax.round()}°',
+              formatTemperature(context, item.temperatureMax),
               textAlign: TextAlign.end,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
             ),

@@ -24,6 +24,8 @@ import '../../features/radar/data/repositories/rain_viewer_radar_repository.dart
 import '../../features/radar/data/providers/rain_viewer_radar_provider.dart';
 import '../../features/radar/domain/repositories/radar_repository.dart';
 import '../../features/alerts/application/alert_preferences_controller.dart';
+import '../../features/monetization/domain/ads_repository.dart';
+import '../../features/monetization/domain/consent_repository.dart';
 import '../preferences/app_preferences_controller.dart';
 import 'development_fallback_repositories.dart';
 
@@ -37,6 +39,8 @@ final class ChetiwaDependencies {
     required this.preferencesController,
     required this.alertPreferencesController,
     required this.notificationPermissionGateway,
+    required this.adsRepository,
+    required this.consentRepository,
     http.Client? client,
   }) : _client = client;
 
@@ -73,6 +77,8 @@ final class ChetiwaDependencies {
         alertPreferencesController: AlertPreferencesController(),
         notificationPermissionGateway:
             const SystemNotificationPermissionGateway(),
+        adsRepository: const DisabledAdsRepository(),
+        consentRepository: const DisabledConsentRepository(),
         forecastRepository: directForecast,
         radarRepository: directRadar,
         locationRepository: directLocation,
@@ -104,6 +110,8 @@ final class ChetiwaDependencies {
       alertPreferencesController: AlertPreferencesController(),
       notificationPermissionGateway:
           const SystemNotificationPermissionGateway(),
+      adsRepository: const DisabledAdsRepository(),
+      consentRepository: const DisabledConsentRepository(),
       forecastRepository: fallback
           ? DevelopmentFallbackForecastRepository(
               backendForecast,
@@ -123,6 +131,8 @@ final class ChetiwaDependencies {
     preferencesController: AppPreferencesController(persist: false),
     alertPreferencesController: AlertPreferencesController(persist: false),
     notificationPermissionGateway: FixtureNotificationPermissionGateway(),
+    adsRepository: const DisabledAdsRepository(),
+    consentRepository: const DisabledConsentRepository(),
     forecastRepository: const FixtureForecastRepository(
       FixtureForecastDataSource(),
     ),
@@ -142,6 +152,8 @@ final class ChetiwaDependencies {
     AppPreferencesController? preferencesController,
     AlertPreferencesController? alertPreferencesController,
     NotificationPermissionGateway? notificationPermissionGateway,
+    AdsRepository? adsRepository,
+    ConsentRepository? consentRepository,
   }) => ChetiwaDependencies._(
     forecastRepository: forecastRepository,
     radarRepository: radarRepository,
@@ -157,6 +169,8 @@ final class ChetiwaDependencies {
         AlertPreferencesController(persist: false),
     notificationPermissionGateway:
         notificationPermissionGateway ?? FixtureNotificationPermissionGateway(),
+    adsRepository: adsRepository ?? const DisabledAdsRepository(),
+    consentRepository: consentRepository ?? const DisabledConsentRepository(),
   );
 
   final ForecastRepository forecastRepository;
@@ -167,6 +181,8 @@ final class ChetiwaDependencies {
   final AppPreferencesController preferencesController;
   final AlertPreferencesController alertPreferencesController;
   final NotificationPermissionGateway notificationPermissionGateway;
+  final AdsRepository adsRepository;
+  final ConsentRepository consentRepository;
   final http.Client? _client;
 
   void dispose() {

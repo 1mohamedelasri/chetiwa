@@ -9,6 +9,7 @@ import '../../../../core/location/coordinates.dart';
 import '../../../../core/location/location_repository.dart';
 import '../../../../core/l10n/chetiwa_localizations.dart';
 import '../../../../core/time/weather_clock.dart';
+import '../../../../core/weather/temperature_formatter.dart';
 import 'map_location_picker_screen.dart';
 import '../../application/weather_section_cubit.dart';
 import '../../domain/entities/forecast.dart';
@@ -150,7 +151,11 @@ final class LiveMetrics extends StatelessWidget {
           ),
           _Metric(
             label: 'TEMP.',
-            value: '${forecast.temperatureCelsius.round()}°C',
+            value: formatTemperature(
+              context,
+              forecast.temperatureCelsius,
+              unit: true,
+            ),
           ),
           _Metric(
             label: context.l10n.wind,

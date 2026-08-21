@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 enum ChetiwaLanguage { system, french, english }
 
+enum TemperatureUnit { celsius, fahrenheit }
+
 final class AppPreferencesController extends ChangeNotifier {
   AppPreferencesController({bool persist = true}) : _persist = persist {
     if (persist) unawaited(_restore());
@@ -12,13 +14,16 @@ final class AppPreferencesController extends ChangeNotifier {
 
   static const _themeKey = 'appearance.theme_mode';
   static const _languageKey = 'appearance.language';
+  static const _temperatureUnitKey = 'weather.temperature_unit';
 
   final bool _persist;
   ThemeMode _themeMode = ThemeMode.system;
   ChetiwaLanguage _language = ChetiwaLanguage.french;
+  TemperatureUnit _temperatureUnit = TemperatureUnit.celsius;
 
   ThemeMode get themeMode => _themeMode;
   ChetiwaLanguage get language => _language;
+  TemperatureUnit get temperatureUnit => _temperatureUnit;
   Locale? get locale => switch (_language) {
     ChetiwaLanguage.system => null,
     ChetiwaLanguage.french => const Locale('fr'),
@@ -45,10 +50,21 @@ final class AppPreferencesController extends ChangeNotifier {
     }
   }
 
+  Future<void> setTemperatureUnit(TemperatureUnit value) async {
+    if (_temperatureUnit == value) return;
+    _temperatureUnit = value;
+    notifyListeners();
+    if (_persist) {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(_temperatureUnitKey, value.name);
+    }
+  }
+
   Future<void> _restore() async {
     final preferences = await SharedPreferences.getInstance();
     final themeName = preferences.getString(_themeKey);
     final languageName = preferences.getString(_languageKey);
+    final temperatureUnitName = preferences.getString(_temperatureUnitKey);
     _themeMode = ThemeMode.values.firstWhere(
       (value) => value.name == themeName,
       orElse: () => ThemeMode.system,
@@ -56,6 +72,10 @@ final class AppPreferencesController extends ChangeNotifier {
     _language = ChetiwaLanguage.values.firstWhere(
       (value) => value.name == languageName,
       orElse: () => ChetiwaLanguage.french,
+    );
+    _temperatureUnit = TemperatureUnit.values.firstWhere(
+      (value) => value.name == temperatureUnitName,
+      orElse: () => TemperatureUnit.celsius,
     );
     notifyListeners();
   }

@@ -19,10 +19,11 @@ reste la référence technique détaillée pour les données météo.
 
 Le travail actif porte sur la bêta locale-first : météo, Radar, recherche,
 choix sur carte, GPS à la demande, cache, qualité et conformité minimale. Les
-achats, la publicité, Firebase/push, analytics/crash reporting, satellite
-commercial et synchronisation de compte sont **retirés du périmètre v1**. Ils
-restent documentés comme options post-bêta et ne doivent pas être implémentés
-avant décision de revenus, licences écrites et budget validé.
+achats, la publicité, le satellite commercial et la synchronisation de compte
+restent **hors périmètre de la bêta**. Après validation des revenus, la seule
+intégration Firebase autorisée est **Firebase Analytics** (sans base de données,
+Functions, Storage, Remote Config, Crashlytics ni push). Les publicités passent
+directement par **AdMob / Google Mobile Ads**, qui ne requiert pas Firebase.
 
 ## Principes non négociables
 
@@ -41,6 +42,8 @@ avant décision de revenus, licences écrites et budget validé.
 9. Aucune brique cloud ou fournisseur payant n'est un prérequis de la bêta : elle
    est activée uniquement après le gate défini dans
    [`ADR-0008`](docs/decisions/0008-lean-mvp-cost-gates.md).
+10. Firebase Analytics est facultatif, gratuit et ne doit jamais entraîner
+    l'activation implicite de produits Firebase facturables.
 
 ## Cible fournisseurs : mode MVP frugal
 
@@ -250,7 +253,10 @@ base cloud, un moteur push ou Remote Config pour la bêta frugale.
   confirme le point et ses coordonnées sans ajouter de fournisseur.
 - ✅ Boutons : « Ma position », « Rechercher », « Confirmer ce lieu » et annuler.
 - ✅ Afficher ville, région, pays et coordonnées si aucune adresse n’est trouvée.
-- ⬜ Associer correctement fuseau horaire, locale et unité au lieu choisi.
+- 🟡 Associer correctement fuseau horaire, locale et unité au lieu choisi : le
+  fuseau vient déjà du fournisseur, la langue est persistée et le choix
+  Celsius/Fahrenheit est désormais persistant et appliqué aux résumés, cartes
+  horaires et quotidiennes.
 - ✅ Mettre à jour Graph, Radar, Prévisions et alertes avec un objet `Location`
   unique et immuable : le lieu actif est partagé en mémoire et le lieu principal
   persiste localement ; les alertes locales affichent ce même lieu.
@@ -377,8 +383,11 @@ et sélection d'un lieu sans accorder l'accès GPS.
 
 ## Publicité
 
-- ⬜ Intégrer le SDK publicitaire derrière `AdsRepository` seulement si la voie
-  publicité est retenue après la bêta.
+- 🟡 Frontières `AdsRepository` et `ConsentRepository` créées en mode désactivé :
+  aucune dépendance publicitaire, requête ni collecte n'est embarquée. Intégrer
+  le SDK publicitaire seulement si la voie publicité est retenue après la bêta.
+- ⬜ Utiliser `google_mobile_ads` et un compte AdMob : **Firebase n'est pas
+  requis** pour afficher, mesurer ou rémunérer les publicités.
 - ⬜ Intégrer une CMP/UMP derrière `ConsentRepository`.
 - ⬜ N’initialiser les publicités qu’après consentement lorsque requis.
 - ⬜ Utiliser uniquement le slot réservé entre contenu et navigation.
@@ -386,9 +395,27 @@ et sélection d'un lieu sans accorder l'accès GPS.
 - ⬜ Supprimer totalement le slot pour Chetiwa+.
 - ⬜ Ajouter option de modifier/retirer le consentement dans Settings.
 
+## Mesure produit — Firebase Analytics uniquement (facultatif)
+
+- ⬜ Après la bêta, intégrer uniquement Firebase Analytics pour comprendre les
+  usages essentiels et, si AdMob est actif, rapprocher revenus publicitaires et
+  parcours produit.
+- ⬜ Limiter les événements aux décisions produit utiles : ouverture, changement
+  d’onglet, recherche de lieu, activation d’alerte, affichage de publicité et
+  achat/restauration. Ne pas envoyer d’adresse, de coordonnées précises ni de
+  texte saisi par l’utilisateur.
+- ⬜ Demander/recueillir le consentement requis et documenter Firebase Analytics
+  dans la politique de confidentialité et les déclarations App Store/Play.
+- ⬜ Rester sur les produits Analytics gratuits : ne pas activer Firestore, Realtime
+  Database, Cloud Functions, Cloud Storage, FCM, Remote Config, Crashlytics ou
+  tout produit Google Cloud sans nouvelle décision, budget et plafond de coût.
+
 ## Protection économique
 
 - ⬜ Mesurer revenu et coût par utilisateur Free/Premium.
+- ⬜ Si Firebase Analytics est activé, lier AdMob à Firebase uniquement pour lire
+  les métriques agrégées ; cette liaison reste facultative et ne change pas
+  l'intégration publicitaire dans l'application.
 - ⬜ Fixer un plafond de frames Radar et requêtes par session Free.
 - ⬜ Rendre le satellite disponible uniquement lorsque les revenus couvrent son
   coût avec marge de sécurité.

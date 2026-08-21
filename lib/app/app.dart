@@ -15,6 +15,8 @@ import 'di/chetiwa_dependencies.dart';
 import 'router/app_router.dart';
 import 'preferences/app_preferences_controller.dart';
 import '../features/alerts/application/alert_preferences_controller.dart';
+import '../features/monetization/domain/ads_repository.dart';
+import '../features/monetization/domain/consent_repository.dart';
 import 'theme/chetiwa_theme.dart';
 
 final class ChetiwaApp extends StatefulWidget {
@@ -57,6 +59,12 @@ final class _ChetiwaAppState extends State<ChetiwaApp> {
         ),
         RepositoryProvider<NotificationPermissionGateway>.value(
           value: _dependencies.notificationPermissionGateway,
+        ),
+        RepositoryProvider<AdsRepository>.value(
+          value: _dependencies.adsRepository,
+        ),
+        RepositoryProvider<ConsentRepository>.value(
+          value: _dependencies.consentRepository,
         ),
       ],
       child: MultiProvider(
