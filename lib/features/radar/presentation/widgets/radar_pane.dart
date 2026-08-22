@@ -207,6 +207,7 @@ final class _RadarMapState extends State<_RadarMap> {
                         duration: Duration(milliseconds: 140),
                         reloadStartOpacity: 0.25,
                       ),
+                      evictErrorTileStrategy: EvictErrorTileStrategy.notVisible,
                       tileBuilder: (context, tileWidget, tile) =>
                           _buildRadarTile(tileWidget),
                     ),
@@ -922,14 +923,10 @@ final class RadarTimeline extends StatelessWidget {
         height: 150,
         padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              timelineColors.surface.withValues(alpha: 0.94),
-              timelineColors.surface,
-            ],
-          ),
+          // The map must never bleed through time labels or the scrubber.
+          // Full opacity also keeps this panel readable over bright satellite
+          // imagery and dense city labels.
+          color: timelineColors.surface,
           border: Border(top: BorderSide(color: timelineColors.outline)),
         ),
         child: Column(

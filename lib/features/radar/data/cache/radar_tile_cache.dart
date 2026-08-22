@@ -67,14 +67,17 @@ final class RadarTileMetrics {
 /// This wrapper keeps those behaviours in one place and records anonymous
 /// cache/cost metrics without storing coordinates.
 final class RadarTileCache {
+  static const _cacheSchemaVersion = 'v3';
+  static const _maxProviderZoom = 7;
+
   RadarTileCache._({http.Client? client})
     : metrics = RadarTileMetrics(),
       _client = client ?? http.Client(),
       _disk = BuiltInMapCachingProvider.getOrCreateInstance(
-        // A dedicated cache directory avoids making tile caching depend on a
-        // path_provider plugin call during widget tests and still lives on
-        // the platform's temporary disk cache on iOS/Android.
-        cacheDirectory: Directory.systemTemp.path,
+        // A versioned, app-specific directory prevents old responses (such
+        // as an HTML error body cached as a tile) from surviving an upgrade.
+        cacheDirectory:
+            '${Directory.systemTemp.path}/chetiwa-radar-tiles-$_cacheSchemaVersion',
         maxCacheSize: 64 * 1024 * 1024,
         overrideFreshAge: const Duration(hours: 6),
       ) {
@@ -82,6 +85,9 @@ final class RadarTileCache {
       abortObsoleteRequests: true,
       httpClient: _client,
       cachingProvider: _instrumentedDisk,
+      // A CDN error page is never a valid radar image. Do not pass its body to
+      // Android's image decoder; silently retry/skip it instead.
+      attemptDecodeOfHttpErrorResponses: false,
       silenceExceptions: true,
     );
   }
@@ -113,6 +119,7 @@ final class RadarTileCache {
       templates,
       margin: 1,
       maxTiles: maxTiles,
+      maxZoom: _maxProviderZoom,
     );
     await Future.wait(urls.map(_prefetchOne), eagerError: false);
   }
@@ -128,14 +135,19 @@ final class RadarTileCache {
 
   Future<void> _downloadAndCache(String url) async {
     final cached = await _disk.getTile(url);
-    if (cached != null && !cached.metadata.isStale) {
+    if (cached != null &&
+        !cached.metadata.isStale &&
+        isSupportedImageBytes(cached.bytes)) {
       metrics.recordCacheLookup(url, hit: true);
       return;
     }
     metrics.recordCacheLookup(url, hit: false);
     try {
       final response = await _client.get(Uri.parse(url));
-      if (response.statusCode != 200 || response.bodyBytes.isEmpty) return;
+      if (response.statusCode != 200 ||
+          !isSupportedImageBytes(response.bodyBytes)) {
+        return;
+      }
       final bytes = Uint8List.fromList(response.bodyBytes);
       await _disk.putTile(
         url: url,
@@ -150,6 +162,32 @@ final class RadarTileCache {
     } on Object {
       // The visible TileLayer remains the source of truth if prefetch fails.
     }
+  }
+
+  /// Reject non-image responses before Flutter sends them to Android's image
+  /// decoder. Platform decoding still validates the full image afterwards.
+  static bool isSupportedImageBytes(List<int> bytes) {
+    if (bytes.length < 12) return false;
+    final png =
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47 &&
+        bytes[4] == 0x0D &&
+        bytes[5] == 0x0A &&
+        bytes[6] == 0x1A &&
+        bytes[7] == 0x0A;
+    final jpeg = bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF;
+    final webp =
+        bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46 &&
+        bytes[8] == 0x57 &&
+        bytes[9] == 0x45 &&
+        bytes[10] == 0x42 &&
+        bytes[11] == 0x50;
+    return png || jpeg || webp;
   }
 }
 
@@ -168,6 +206,10 @@ final class _MetricsCachingProvider implements MapCachingProvider {
   @override
   Future<CachedMapTile?> getTile(String url) async {
     final value = await delegate.getTile(url);
+    if (value != null && !RadarTileCache.isSupportedImageBytes(value.bytes)) {
+      metrics.recordCacheLookup(url, hit: false);
+      return null;
+    }
     metrics.recordCacheLookup(
       url,
       hit: value != null && !value.metadata.isStale,
@@ -181,6 +223,7 @@ final class _MetricsCachingProvider implements MapCachingProvider {
     required CachedMapTileMetadata metadata,
     Uint8List? bytes,
   }) async {
+    if (bytes != null && !RadarTileCache.isSupportedImageBytes(bytes)) return;
     await delegate.putTile(url: url, metadata: metadata, bytes: bytes);
     if (bytes != null) metrics.recordDownload(url, bytes.length);
   }
@@ -194,8 +237,11 @@ final class TileViewport {
     Iterable<String> templates, {
     int margin = 1,
     int maxTiles = 24,
+    int? maxZoom,
   }) {
-    final zoom = camera.zoom.floor();
+    final zoom = maxZoom == null
+        ? camera.zoom.floor()
+        : camera.zoom.floor().clamp(0, maxZoom).toInt();
     final world = 1 << zoom;
     final bounds = camera.visibleBounds;
     final west = _longitudeToX(bounds.west, world);
