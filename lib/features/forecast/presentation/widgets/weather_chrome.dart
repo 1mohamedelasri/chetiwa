@@ -43,24 +43,13 @@ final class ChetiwaHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: 44,
+    height: 52,
     child: Row(
       children: [
-        const Flexible(
-          flex: 2,
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'Chetiwa',
-              maxLines: 1,
-              style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
-            ),
-          ),
-        ),
-        const SizedBox(width: ChetiwaSpacing.x2),
+        const Expanded(flex: 5, child: _ChetiwaBrand()),
+        const SizedBox(width: ChetiwaSpacing.x1),
         Expanded(
-          flex: 3,
+          flex: 7,
           child: LocationSelector(
             locationName: locationName,
             onLocationSelected: onLocationSelected,
@@ -69,6 +58,71 @@ final class ChetiwaHeader extends StatelessWidget {
       ],
     ),
   );
+}
+
+/// Compact brand lockup: a recognizable mark plus a restrained wordmark keeps
+/// the header distinctive without taking space away from the selected place.
+final class _ChetiwaBrand extends StatelessWidget {
+  const _ChetiwaBrand();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      label: 'Chetiwa',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [scheme.primary, ChetiwaColors.accentPrimary],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(ChetiwaRadius.small),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x2679DDDA),
+                  blurRadius: 10,
+                  offset: Offset(0, 3),
+                ),
+              ],
+            ),
+            child: const SizedBox(
+              width: 29,
+              height: 29,
+              child: Icon(
+                Icons.water_drop_rounded,
+                size: 17,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(width: ChetiwaSpacing.x2),
+          Flexible(
+            child: ShaderMask(
+              blendMode: BlendMode.srcIn,
+              shaderCallback: (bounds) => LinearGradient(
+                colors: [scheme.onSurface, scheme.primary],
+              ).createShader(bounds),
+              child: const Text(
+                'Chetiwa',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
+                  height: 1,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 final class LocationSelector extends StatelessWidget {
@@ -86,8 +140,16 @@ final class LocationSelector extends StatelessWidget {
     button: true,
     label: context.l10n.selectedLocationLabel(locationName),
     child: Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
+      color: Theme.of(
+        context,
+      ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.72),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
+        side: BorderSide(
+          color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.65),
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () async {
           final repository = context.read<LocationRepository>();
@@ -105,7 +167,11 @@ final class LocationSelector extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.location_on_outlined, size: 18),
+                Icon(
+                  Icons.location_on_outlined,
+                  size: 19,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
                 const SizedBox(width: ChetiwaSpacing.x2),
                 Flexible(
                   child: Text(
