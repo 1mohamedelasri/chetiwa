@@ -71,13 +71,10 @@ void main() {
     expect(find.text('Clair'), findsOneWidget);
     expect(find.text('Routes'), findsOneWidget);
     expect(find.text('Radar de précipitations'), findsOneWidget);
-    expect(find.text('Réduction du bruit'), findsOneWidget);
-    expect(find.text('Échos faibles'), findsOneWidget);
     expect(
-      find.byKey(const Key('readable-radar-palette-toggle')),
+      find.byKey(const Key('radar-precipitation-explanation')),
       findsOneWidget,
     );
-    expect(find.byKey(const Key('weak-radar-echoes-toggle')), findsOneWidget);
     await tester.tap(find.text('Clair'));
     await tester.pump();
     await tester.tapAt(const Offset(8, 8));

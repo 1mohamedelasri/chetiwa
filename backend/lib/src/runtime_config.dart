@@ -20,6 +20,7 @@ final class RuntimeConfig {
     required this.port,
     required this.googleCloudProject,
     required this.openMeteoForecastUri,
+    required this.openMeteoMeteoFranceUri,
     required this.openMeteoGeocodingUri,
     required this.openMeteoApiKey,
     required this.radarMetadataUri,
@@ -78,6 +79,10 @@ final class RuntimeConfig {
         'OPEN_METEO_FORECAST_URL',
         'https://api.open-meteo.com/v1/forecast',
       ),
+      openMeteoMeteoFranceUri: readUri(
+        'OPEN_METEO_METEOFRANCE_URL',
+        'https://api.open-meteo.com/v1/meteofrance',
+      ),
       openMeteoGeocodingUri: readUri(
         'OPEN_METEO_GEOCODING_URL',
         'https://geocoding-api.open-meteo.com/v1/search',
@@ -123,6 +128,7 @@ final class RuntimeConfig {
   final int port;
   final String? googleCloudProject;
   final Uri openMeteoForecastUri;
+  final Uri openMeteoMeteoFranceUri;
   final Uri openMeteoGeocodingUri;
   final String? openMeteoApiKey;
   final Uri radarMetadataUri;

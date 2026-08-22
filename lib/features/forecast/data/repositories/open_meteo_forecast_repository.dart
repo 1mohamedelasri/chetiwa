@@ -75,6 +75,7 @@ final class OpenMeteoForecastRepository implements ForecastRepository {
       brief: summary.brief,
       points: points,
       windows: summary.windows,
+      providerName: _provider.providerNameFor(coordinates),
       hourly: hourly,
       daily: daily,
     );

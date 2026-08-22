@@ -31,27 +31,42 @@ final class ProviderGateway {
         message: 'Commercial forecast credentials are not configured',
       );
     }
-    final raw = await _getJson(
-      _config.openMeteoForecastUri.replace(
-        queryParameters: <String, String>{
-          'latitude': latitude.toString(),
-          'longitude': longitude.toString(),
-          'current': 'temperature_2m,weather_code,precipitation,wind_speed_10m',
-          'minutely_15': 'precipitation,temperature_2m,wind_speed_10m',
-          'hourly':
-              'temperature_2m,weather_code,precipitation_probability,precipitation,wind_speed_10m',
-          'daily':
-              'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset',
-          'forecast_minutely_15': '96',
-          'past_minutely_15': '8',
-          'forecast_days': '10',
-          'timezone': 'auto',
-          'timeformat': 'unixtime',
-          if (_config.openMeteoApiKey case final key?) 'apikey': key,
-        },
-      ),
+    final usesMeteoFranceNowcast = _isMetropolitanFrance(
+      latitude: latitude,
+      longitude: longitude,
     );
-    return _normalizeForecast(raw, latitude: latitude, longitude: longitude);
+    final raw = await _getJson(
+      (usesMeteoFranceNowcast
+              ? _config.openMeteoMeteoFranceUri
+              : _config.openMeteoForecastUri)
+          .replace(
+            queryParameters: <String, String>{
+              'latitude': latitude.toString(),
+              'longitude': longitude.toString(),
+              'current':
+                  'temperature_2m,weather_code,precipitation,wind_speed_10m',
+              'minutely_15': 'precipitation,temperature_2m,wind_speed_10m',
+              'hourly':
+                  'temperature_2m,weather_code,precipitation_probability,precipitation,wind_speed_10m',
+              'daily':
+                  'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset',
+              'forecast_minutely_15': '96',
+              'past_minutely_15': '8',
+              'forecast_days': '10',
+              'timezone': 'auto',
+              'timeformat': 'unixtime',
+              if (_config.openMeteoApiKey case final key?) 'apikey': key,
+            },
+          ),
+    );
+    return _normalizeForecast(
+      raw,
+      latitude: latitude,
+      longitude: longitude,
+      providerId: usesMeteoFranceNowcast
+          ? 'meteofrance-arome-15m-via-open-meteo'
+          : 'open-meteo-best-match',
+    );
   }
 
   Future<Map<String, Object?>> searchLocations({
@@ -184,7 +199,9 @@ final class ProviderGateway {
     }
 
     appendFrames(radar['past'], 'observation');
-    appendFrames(radar['nowcast'], 'nowcast');
+    // RainViewer stopped serving future frames in 2026. Keep the development
+    // path truthful even if a legacy response happens to contain that field.
+    if (!usesRainViewer) appendFrames(radar['nowcast'], 'nowcast');
     if (frames.isEmpty) {
       throw const ApiException(
         statusCode: 502,
@@ -307,10 +324,18 @@ final class ProviderGateway {
   }
 }
 
+/// AROME's operational high-resolution domain is metropolitan France and
+/// nearby border areas. Overseas locations keep the global best-match route.
+bool _isMetropolitanFrance({
+  required double latitude,
+  required double longitude,
+}) => latitude >= 41 && latitude <= 52 && longitude >= -5.8 && longitude <= 10;
+
 Map<String, Object?> _normalizeForecast(
   Map<String, dynamic> raw, {
   required double latitude,
   required double longitude,
+  required String providerId,
 }) {
   final current = _map(raw['current']);
   final minutely = _map(raw['minutely_15']);
@@ -397,7 +422,7 @@ Map<String, Object?> _normalizeForecast(
               },
             )
             .toList(growable: false),
-    'provider': const <String, Object?>{'id': 'open-meteo', 'kind': 'forecast'},
+    'provider': <String, Object?>{'id': providerId, 'kind': 'model-forecast'},
   };
 }
 

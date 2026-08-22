@@ -12,6 +12,19 @@ final class OpenMeteoForecastProvider {
 
   final http.Client _client;
 
+  /// AROME gives France a genuine 15-minute, short-range model forecast.
+  /// It is still a model forecast, never presented as observed radar.
+  bool usesMeteoFranceNowcast(Coordinates coordinates) =>
+      coordinates.latitude >= 41 &&
+      coordinates.latitude <= 52 &&
+      coordinates.longitude >= -5.8 &&
+      coordinates.longitude <= 10;
+
+  String providerNameFor(Coordinates coordinates) =>
+      usesMeteoFranceNowcast(coordinates)
+      ? 'Météo-France AROME via Open-Meteo'
+      : 'Open-Meteo';
+
   Future<Map<String, dynamic>> fetch(Coordinates coordinates) async {
     final query = <String, String>{
       'latitude': coordinates.latitude.toString(),
@@ -31,7 +44,10 @@ final class OpenMeteoForecastProvider {
       if (ApiConfig.openMeteoApiKey.isNotEmpty)
         'apikey': ApiConfig.openMeteoApiKey,
     };
-    final uri = Uri.https(ApiConfig.openMeteoHost, '/v1/forecast', query);
+    final path = usesMeteoFranceNowcast(coordinates)
+        ? '/v1/meteofrance'
+        : '/v1/forecast';
+    final uri = Uri.https(ApiConfig.openMeteoHost, path, query);
     Object? lastError;
     var terminalIssue = WeatherDataIssue.offline;
     for (var attempt = 0; attempt < 3; attempt++) {

@@ -33,16 +33,16 @@ final class RainViewerRadarRepository implements RadarRepository {
       );
     }
     final past = radar['past'] as List<dynamic>? ?? const [];
-    final nowcast = radar['nowcast'] as List<dynamic>? ?? const [];
+    // RainViewer retired future/nowcast frames on 1 January 2026. Never
+    // surface a stale or legacy `nowcast` field as a forecast to the user.
+    // A licensed production provider can still return true nowcast frames via
+    // ChetiwaRadarRepository, which keeps the domain support intact.
     final rawFrames = RadarFramePolicy.select(
       past
           .whereType<Map<String, dynamic>>()
           .map((frame) => (json: frame, forecast: false))
           .toList(growable: false),
-      nowcast
-          .whereType<Map<String, dynamic>>()
-          .map((frame) => (json: frame, forecast: true))
-          .toList(growable: false),
+      const [],
     );
     if (rawFrames.isEmpty) {
       throw const WeatherDataException(

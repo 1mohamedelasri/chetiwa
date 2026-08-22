@@ -34,6 +34,7 @@ void main() {
       MockClient((request) async {
         calls++;
         expect(request.url.queryParameters['timeformat'], 'unixtime');
+        expect(request.url.path, '/v1/meteofrance');
         return http.Response(jsonEncode(_forecastFixture), 200);
       }),
     );
@@ -168,7 +169,7 @@ void main() {
     expect(text, isNot(contains('test-key')));
   });
 
-  test('radar frames identify observations and nowcast frames', () async {
+  test('RainViewer radar frames remain observations only', () async {
     final app = appWith(
       MockClient(
         (request) async => http.Response(
@@ -201,9 +202,8 @@ void main() {
     final frames = data['frames'] as List<Object?>;
 
     expect(response.statusCode, 200);
-    expect(frames, hasLength(2));
+    expect(frames, hasLength(1));
     expect((frames.first as Map<String, Object?>)['kind'], 'observation');
-    expect((frames.last as Map<String, Object?>)['kind'], 'nowcast');
   });
 
   test('invalid public input returns a stable 400 error', () async {

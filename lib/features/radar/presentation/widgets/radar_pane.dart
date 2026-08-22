@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -81,8 +80,6 @@ final class _RadarMapState extends State<_RadarMap> {
   _RadarBaseMap _baseMap = _RadarBaseMap.satellite;
   double _radarOpacity = 0.96;
   bool _radarVisible = true;
-  bool _readableRadarPalette = true;
-  bool _showWeakRadarEchoes = false;
   LatLng? _lastCenter;
 
   @override
@@ -90,32 +87,6 @@ final class _RadarMapState extends State<_RadarMap> {
     super.initState();
     _tileCache.beginSession();
   }
-
-  // Preserve the provider palette. A small contrast adjustment makes actual
-  // echoes easier to read over satellite imagery without adding blurred or
-  // synthetic layers that can make a low-resolution source look phantom-like.
-  static const _radarContrastFilter = ColorFilter.matrix(<double>[
-    1.08,
-    0,
-    0,
-    0,
-    -5,
-    0,
-    1.08,
-    0,
-    0,
-    -5,
-    0,
-    0,
-    1.08,
-    0,
-    -5,
-    0,
-    0,
-    0,
-    1,
-    0,
-  ]);
 
   @override
   void dispose() {
@@ -260,9 +231,7 @@ final class _RadarMapState extends State<_RadarMap> {
                   Expanded(
                     child: _CompactRadarStatus(
                       forecast: widget.forecast,
-                      snapshot: widget.snapshot,
                       selectedInstant: frame.time,
-                      isLatestObservation: state.isAtLatestObservation,
                       isNowcast: frame.isNowcast,
                     ),
                   ),
@@ -314,8 +283,6 @@ final class _RadarMapState extends State<_RadarMap> {
               bottom: _timelineHeight + 12,
               child: _RadarLegend(
                 radarVisible: _radarVisible,
-                readablePalette: _readableRadarPalette,
-                showWeakEchoes: _showWeakRadarEchoes,
                 providerName: frame.providerName,
               ),
             ),
@@ -341,17 +308,12 @@ final class _RadarMapState extends State<_RadarMap> {
   );
 
   Widget _buildRadarTile(Widget tileWidget) {
-    final opacity = _radarOpacity * (_showWeakRadarEchoes ? 1 : 0.88);
-    if (!_readableRadarPalette) {
-      return Opacity(opacity: opacity, child: tileWidget);
-    }
     return Opacity(
-      key: const Key('readable-radar-tile'),
-      opacity: opacity,
-      child: ColorFiltered(
-        colorFilter: _radarContrastFilter,
-        child: tileWidget,
-      ),
+      // Universal Blue is the provider's actual precipitation palette. Keep
+      // it untouched: it is not a cloud layer and recolouring it is misleading.
+      key: const Key('native-radar-precipitation-tile'),
+      opacity: _radarOpacity,
+      child: tileWidget,
     );
   }
 
@@ -417,40 +379,6 @@ final class _RadarMapState extends State<_RadarMap> {
                     setSheetState(() {});
                   },
                 ),
-                SwitchListTile.adaptive(
-                  key: const Key('readable-radar-palette-toggle'),
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(context.l10n.noiseReduction),
-                  subtitle: Text(
-                    context.l10n.isFrench
-                        ? 'Couleurs radar natives, contraste léger et contours nets'
-                        : 'Native radar colors, light contrast and sharp edges',
-                  ),
-                  value: _readableRadarPalette,
-                  onChanged: _radarVisible
-                      ? (value) {
-                          setState(() => _readableRadarPalette = value);
-                          setSheetState(() {});
-                        }
-                      : null,
-                ),
-                SwitchListTile.adaptive(
-                  key: const Key('weak-radar-echoes-toggle'),
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(context.l10n.weakEchoes),
-                  subtitle: Text(
-                    context.l10n.isFrench
-                        ? 'Peuvent contenir du bruit radar ou de la pluie qui n’atteint pas le sol'
-                        : 'May contain radar noise or rain that does not reach the ground',
-                  ),
-                  value: _showWeakRadarEchoes,
-                  onChanged: _radarVisible && _readableRadarPalette
-                      ? (value) {
-                          setState(() => _showWeakRadarEchoes = value);
-                          setSheetState(() {});
-                        }
-                      : null,
-                ),
                 Row(
                   children: [
                     Text(context.l10n.opacity),
@@ -476,9 +404,10 @@ final class _RadarMapState extends State<_RadarMap> {
                   ],
                 ),
                 Text(
+                  key: const Key('radar-precipitation-explanation'),
                   context.l10n.isFrench
-                      ? 'Gris : écho faible ou incertain, pas une pluie confirmée. Orange/rouge : signal radar plus intense. Le radar ne représente pas les nuages.'
-                      : 'Grey: weak or uncertain echo, not confirmed rain. Orange/red: stronger radar signal. Radar does not show clouds.',
+                      ? 'Bleu = précipitations détectées par le radar, du plus clair au plus soutenu. Ce calque ne montre jamais les nuages. La prévision des 2 h est affichée séparément dans Graph.'
+                      : 'Blue = precipitation detected by radar, from lighter to deeper blue. This layer never shows clouds. The 2-hour forecast is shown separately in Graph.',
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontSize: 12,
@@ -570,25 +499,20 @@ final class _CompactRadarStatus extends StatelessWidget {
   const _CompactRadarStatus({
     required this.forecast,
     required this.selectedInstant,
-    required this.isLatestObservation,
     required this.isNowcast,
-    required this.snapshot,
   });
 
   final Forecast forecast;
   final DateTime selectedInstant;
-  final bool isLatestObservation;
   final bool isNowcast;
-  final ForecastSnapshot snapshot;
 
   @override
   Widget build(BuildContext context) {
-    final rain = isLatestObservation
-        ? snapshot.currentRain.rateMmPerHour
-        : forecast.rainPointAt(selectedInstant)?.rateMmPerHour ?? 0;
     final frameState = isNowcast
-        ? (context.l10n.isFrench ? 'prévision' : 'forecast')
-        : (context.l10n.isFrench ? 'observation' : 'observation');
+        ? (context.l10n.isFrench ? 'prévision radar' : 'radar forecast')
+        : (context.l10n.isFrench
+              ? 'précipitations observées'
+              : 'observed precipitation');
     return Container(
       height: 42,
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -605,14 +529,14 @@ final class _CompactRadarStatus extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                Icons.water_drop_outlined,
+              Icon(
+                isNowcast ? Icons.auto_graph_rounded : Icons.radar_rounded,
                 size: 15,
                 color: ChetiwaColors.accentPrimary,
               ),
               const SizedBox(width: 5),
               Text(
-                '${rain.toStringAsFixed(rain < 0.05 ? 0 : 1)} mm/h',
+                context.l10n.isFrench ? 'Radar' : 'Radar',
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
@@ -701,16 +625,9 @@ final class _MapStyleOption extends StatelessWidget {
 }
 
 final class _RadarLegend extends StatelessWidget {
-  const _RadarLegend({
-    required this.radarVisible,
-    required this.readablePalette,
-    required this.showWeakEchoes,
-    required this.providerName,
-  });
+  const _RadarLegend({required this.radarVisible, required this.providerName});
 
   final bool radarVisible;
-  final bool readablePalette;
-  final bool showWeakEchoes;
   final String providerName;
 
   @override
@@ -749,8 +666,8 @@ final class _RadarLegend extends StatelessWidget {
                   ),
                   Tooltip(
                     message: context.l10n.isFrench
-                        ? 'Le radar ne montre pas les nuages. Gris clair et gris foncé indiquent des échos faibles ou incertains; orange et rouge indiquent un signal plus intense.'
-                        : 'Radar does not show clouds. Light and dark grey indicate weak or uncertain echoes; orange and red indicate a stronger signal.',
+                        ? 'Bleu = précipitations détectées, pas des nuages. La couleur devient plus soutenue avec l’intensité du signal radar.'
+                        : 'Blue = detected precipitation, not clouds. The colour deepens with radar-signal intensity.',
                     child: const Icon(Icons.info_outline_rounded, size: 11),
                   ),
                 ],
@@ -761,34 +678,27 @@ final class _RadarLegend extends StatelessWidget {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(ChetiwaRadius.full),
                   gradient: LinearGradient(
-                    colors: readablePalette
-                        ? const [
-                            Color(0xFFD6DBD7),
-                            Color(0xFF5E6663),
-                            Color(0xFFFF7300),
-                            Color(0xFFFF3B30),
-                            Color(0xFF8E1010),
-                          ]
-                        : const [
-                            Color(0xFF9DEBFF),
-                            Color(0xFF009FE3),
-                            Color(0xFFFFE000),
-                            Color(0xFFFF8A00),
-                            Color(0xFFFF3B30),
-                          ],
+                    colors: const [
+                      Color(0xFF9DEBFF),
+                      Color(0xFF43C7EF),
+                      Color(0xFF008BD2),
+                      Color(0xFF1254A3),
+                    ],
                   ),
                 ),
               ),
               const SizedBox(height: 4),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    readablePalette
-                        ? (context.l10n.isFrench ? 'Écho faible' : 'Weak echo')
-                        : (context.l10n.isFrench ? 'Faible' : 'Light'),
-                    style: const TextStyle(fontSize: 7),
+                  Expanded(
+                    child: Text(
+                      context.l10n.isFrench ? 'Pluie faible' : 'Light rain',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 7),
+                    ),
                   ),
+                  const SizedBox(width: 4),
                   Text(
                     context.l10n.isFrench ? 'Forte' : 'Heavy',
                     style: const TextStyle(fontSize: 7),
@@ -1056,7 +966,6 @@ final class RadarTimeline extends StatelessWidget {
                     painter: _RadarTimeRulerPainter(
                       frames: state.frames,
                       selectedIndex: state.selectedIndex,
-                      rainPoints: forecast.points,
                       timeZone: forecast.timeZone,
                       now: nowInstant,
                       colors: timelineColors,
@@ -1110,7 +1019,6 @@ final class _RadarTimeRulerPainter extends CustomPainter {
   const _RadarTimeRulerPainter({
     required this.frames,
     required this.selectedIndex,
-    required this.rainPoints,
     required this.timeZone,
     required this.now,
     required this.colors,
@@ -1118,7 +1026,6 @@ final class _RadarTimeRulerPainter extends CustomPainter {
 
   final List<RadarFrame> frames;
   final int selectedIndex;
-  final List<RainPoint> rainPoints;
   final String timeZone;
   final DateTime now;
   final _RadarTimelineColors colors;
@@ -1151,21 +1058,6 @@ final class _RadarTimeRulerPainter extends CustomPainter {
                 (time.millisecondsSinceEpoch - start.millisecondsSinceEpoch) /
                 durationMs)
             .toDouble();
-
-    _paintRainProfile(canvas, size, start, end, xForTime, chartTop, trackY);
-
-    final profileLabel = TextPainter(
-      text: TextSpan(
-        text: 'ESTIMATION AU POINT',
-        style: TextStyle(
-          color: colors.muted,
-          fontSize: 7,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    profileLabel.paint(canvas, Offset(0, chartTop));
 
     final track = Paint()
       ..color = colors.outline
@@ -1248,46 +1140,6 @@ final class _RadarTimeRulerPainter extends CustomPainter {
 
   DateTime _wallTime(DateTime instant) =>
       WeatherTimeZone.wallTime(instant, timeZone);
-
-  void _paintRainProfile(
-    Canvas canvas,
-    Size size,
-    DateTime start,
-    DateTime end,
-    double Function(DateTime) xForTime,
-    double chartTop,
-    double trackY,
-  ) {
-    final points = rainPoints
-        .where(
-          (point) => !point.time.isBefore(start) && !point.time.isAfter(end),
-        )
-        .toList(growable: false);
-    if (points.length < 2 ||
-        !points.any((point) => RainRateScale.isRain(point.rateMmPerHour))) {
-      return;
-    }
-
-    final chartHeight = math.max(12.0, trackY - chartTop - 12);
-    final area = ui.Path()..moveTo(xForTime(points.first.time), trackY);
-    for (final point in points) {
-      area.lineTo(
-        xForTime(point.time).clamp(0, size.width).toDouble(),
-        trackY - RainRateScale.normalized(point.rateMmPerHour) * chartHeight,
-      );
-    }
-    area
-      ..lineTo(xForTime(points.last.time), trackY)
-      ..close();
-    canvas.drawPath(
-      area,
-      Paint()
-        ..shader = ui.Gradient.linear(Offset(0, chartTop), Offset(0, trackY), [
-          ChetiwaColors.rainModerate.withValues(alpha: 0.9),
-          ChetiwaColors.rainLight.withValues(alpha: 0.3),
-        ]),
-    );
-  }
 
   void _paintTimeLabels(
     Canvas canvas,
@@ -1387,7 +1239,6 @@ final class _RadarTimeRulerPainter extends CustomPainter {
   bool shouldRepaint(covariant _RadarTimeRulerPainter oldDelegate) =>
       frames != oldDelegate.frames ||
       selectedIndex != oldDelegate.selectedIndex ||
-      rainPoints != oldDelegate.rainPoints ||
       timeZone != oldDelegate.timeZone ||
       now != oldDelegate.now ||
       colors != oldDelegate.colors;

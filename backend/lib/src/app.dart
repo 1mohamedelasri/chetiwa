@@ -107,7 +107,10 @@ Handler createApp({
           request: request,
           cache: responseCache,
           now: clock,
-          key: 'forecast:${_coordinateKey(latitude, longitude)}',
+          // A 0.01° cell is about 1 km. It is within AROME's 1.5–2.5 km
+          // resolution while allowing nearby users to share one five-minute
+          // upstream response without exposing their exact coordinates.
+          key: 'forecast:${_forecastCoordinateKey(latitude, longitude)}',
           policy: const CachePolicy(
             freshFor: Duration(minutes: 5),
             staleIfErrorFor: Duration(hours: 6),
@@ -205,7 +208,9 @@ Handler createApp({
           request: request,
           cache: responseCache,
           now: clock,
-          key: 'radar:${_coordinateKey(latitude, longitude)}',
+          // Frame metadata is a provider-wide timeline, not location data.
+          // One response serves all users; tiles stay keyed by frame/z/x/y.
+          key: 'radar:frames',
           policy: const CachePolicy(
             freshFor: Duration(minutes: 2),
             staleIfErrorFor: Duration(minutes: 30),
@@ -576,6 +581,9 @@ Response _cachedResponse(
 
 String _coordinateKey(double latitude, double longitude) =>
     '${latitude.toStringAsFixed(3)},${longitude.toStringAsFixed(3)}';
+
+String _forecastCoordinateKey(double latitude, double longitude) =>
+    '${latitude.toStringAsFixed(2)},${longitude.toStringAsFixed(2)}';
 
 String _installationOwnerHash(Request request) {
   final installationId = request.headers['x-chetiwa-device-id']?.trim();

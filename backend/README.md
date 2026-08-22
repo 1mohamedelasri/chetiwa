@@ -69,6 +69,7 @@ Firestore n’est pas injecté.
 | --- | --- |
 | `OPEN_METEO_API_KEY` | clé commerciale prévisions/geocoding en production |
 | `OPEN_METEO_FORECAST_URL` | remplacement contrôlé de l’URL de prévisions |
+| `OPEN_METEO_METEOFRANCE_URL` | route AROME 15 min pour la France métropolitaine |
 | `OPEN_METEO_GEOCODING_URL` | remplacement contrôlé de l’URL de recherche |
 | `RADAR_METADATA_URL` | métadonnées du fournisseur radar autorisé |
 | `ARCGIS_API_KEY` | reverse geocoding ArcGIS, si cette option est retenue |

@@ -35,6 +35,7 @@ void main() {
     () async {
       final client = MockClient((request) async {
         expect(request.url.host, contains('open-meteo.com'));
+        expect(request.url.path, '/v1/meteofrance');
         expect(request.url.queryParameters['forecast_minutely_15'], '96');
         expect(request.url.queryParameters['past_minutely_15'], '8');
         return http.Response(
@@ -88,6 +89,7 @@ void main() {
       final cached = await repository.getCachedForecast(coordinates);
 
       expect(forecast.locationName, 'Clichy, France');
+      expect(forecast.providerName, 'Météo-France AROME via Open-Meteo');
       expect(forecast.timeZone, 'Europe/Paris');
       expect(forecast.updatedAt, DateTime.utc(2026, 8, 18, 8));
       expect(forecast.points[1].time, DateTime.utc(2026, 8, 18, 8, 15));
