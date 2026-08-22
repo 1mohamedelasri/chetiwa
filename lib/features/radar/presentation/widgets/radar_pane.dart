@@ -71,9 +71,11 @@ final class _RadarMap extends StatefulWidget {
 
 final class _RadarMapState extends State<_RadarMap> {
   static const _regionalZoom = 6.35;
-  static const _cityZoom = 9.25;
+  static const _cityZoom = 7.0;
   static const _minRadarZoom = 5.0;
-  static const _maxRadarZoom = 10.0;
+  // RainViewer's public tile pyramid stops at z7. Going beyond this value
+  // only enlarges pixels and makes the radar look broken on a phone.
+  static const _maxRadarZoom = 7.0;
   static const _timelineHeight = 150.0;
 
   final MapController _mapController = MapController();
@@ -91,38 +93,33 @@ final class _RadarMapState extends State<_RadarMap> {
     _tileCache.beginSession();
   }
 
-  static const _neutralRadarFilter = ColorFilter.mode(
-    Color(0xFF5E6663),
-    BlendMode.srcIn,
-  );
   static const _contextRadarFilter = ColorFilter.mode(
     Color(0xFFD6DBD7),
     BlendMode.srcIn,
   );
 
-  // RainViewer Universal Blue already reserves yellow/orange/red for stronger
-  // reflectivity. Boost those genuine cells while suppressing blue/cyan noise.
-  static const _warmRadarFilter = ColorFilter.matrix(<double>[
-    1.25,
+  // A modest contrast lift keeps RainViewer's existing color scale intact.
+  static const _radarContrastFilter = ColorFilter.matrix(<double>[
+    1.12,
     0,
     0,
     0,
-    10,
+    -8,
     0,
-    1.15,
-    0,
-    0,
+    1.12,
     0,
     0,
+    -8,
     0,
-    0.85,
+    0,
+    1.12,
+    0,
+    -8,
     0,
     0,
-    2.3,
-    -0.75,
-    -0.5,
-    0.5,
-    -330,
+    0,
+    1,
+    0,
   ]);
 
   @override
@@ -206,6 +203,7 @@ final class _RadarMapState extends State<_RadarMap> {
                       // frozen on physical devices with normal network lag.
                       urlTemplate: tileUrl,
                       userAgentPackageName: 'com.chetiwa.chetiwa',
+                      tileDimension: 256,
                       maxNativeZoom: 7,
                       maxZoom: _maxRadarZoom,
                       panBuffer: 1,
@@ -347,45 +345,38 @@ final class _RadarMapState extends State<_RadarMap> {
     },
   );
 
-  Widget _buildRadarTile(Widget tileWidget) => _readableRadarPalette
-      ? Stack(
-          key: const Key('readable-radar-tile'),
-          fit: StackFit.expand,
-          children: [
-            // Keep the original tile alpha for the radar footprint. This gives
-            // every cell a soft, light-grey perimeter instead of painting all
-            // weak echoes as blue rain.
-            Opacity(
-              opacity: _radarOpacity * (_showWeakRadarEchoes ? 0.52 : 0.36),
-              child: ImageFiltered(
-                imageFilter: ui.ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
-                child: ColorFiltered(
-                  colorFilter: _contextRadarFilter,
-                  child: tileWidget,
-                ),
-              ),
+  Widget _buildRadarTile(Widget tileWidget) {
+    if (!_readableRadarPalette) {
+      return Opacity(opacity: _radarOpacity, child: tileWidget);
+    }
+    // Keep one crisp, high-resolution source layer. The previous three-layer
+    // treatment blurred and re-painted the same 256px tile, which made weak
+    // echoes look like large grey blocks. A restrained contrast lift plus a
+    // very small halo improves legibility without inventing precipitation.
+    return Stack(
+      key: const Key('readable-radar-tile'),
+      fit: StackFit.expand,
+      children: [
+        Opacity(
+          opacity: _radarOpacity * (_showWeakRadarEchoes ? 0.16 : 0.10),
+          child: ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(sigmaX: 0.9, sigmaY: 0.9),
+            child: ColorFiltered(
+              colorFilter: _contextRadarFilter,
+              child: tileWidget,
             ),
-            // A darker inner footprint preserves the shape and movement of a
-            // cell. The source alpha naturally keeps uncertain echoes faint.
-            Opacity(
-              opacity: _radarOpacity * (_showWeakRadarEchoes ? 0.62 : 0.48),
-              child: ColorFiltered(
-                colorFilter: _neutralRadarFilter,
-                child: tileWidget,
-              ),
-            ),
-            // Only stronger reflectivity reaches this warm core. It sits above
-            // the two grey context layers: orange, red, then dark red.
-            Opacity(
-              opacity: _radarOpacity,
-              child: ColorFiltered(
-                colorFilter: _warmRadarFilter,
-                child: tileWidget,
-              ),
-            ),
-          ],
-        )
-      : Opacity(opacity: _radarOpacity, child: tileWidget);
+          ),
+        ),
+        Opacity(
+          opacity: _radarOpacity,
+          child: ColorFiltered(
+            colorFilter: _radarContrastFilter,
+            child: tileWidget,
+          ),
+        ),
+      ],
+    );
+  }
 
   Future<void> _showLayers() async {
     await showModalBottomSheet<void>(
