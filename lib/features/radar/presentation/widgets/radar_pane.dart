@@ -91,38 +91,30 @@ final class _RadarMapState extends State<_RadarMap> {
     _tileCache.beginSession();
   }
 
-  static const _neutralRadarFilter = ColorFilter.mode(
-    Color(0xFF5E6663),
-    BlendMode.srcIn,
-  );
-  static const _contextRadarFilter = ColorFilter.mode(
-    Color(0xFFD6DBD7),
-    BlendMode.srcIn,
-  );
-
-  // RainViewer Universal Blue already reserves yellow/orange/red for stronger
-  // reflectivity. Boost those genuine cells while suppressing blue/cyan noise.
-  static const _warmRadarFilter = ColorFilter.matrix(<double>[
-    1.25,
+  // Preserve the provider palette. A small contrast adjustment makes actual
+  // echoes easier to read over satellite imagery without adding blurred or
+  // synthetic layers that can make a low-resolution source look phantom-like.
+  static const _radarContrastFilter = ColorFilter.matrix(<double>[
+    1.08,
     0,
     0,
     0,
-    10,
+    -5,
     0,
-    1.15,
-    0,
-    0,
+    1.08,
     0,
     0,
+    -5,
     0,
-    0.85,
+    0,
+    1.08,
+    0,
+    -5,
     0,
     0,
-    2.3,
-    -0.75,
-    -0.5,
-    0.5,
-    -330,
+    0,
+    1,
+    0,
   ]);
 
   @override
@@ -347,45 +339,20 @@ final class _RadarMapState extends State<_RadarMap> {
     },
   );
 
-  Widget _buildRadarTile(Widget tileWidget) => _readableRadarPalette
-      ? Stack(
-          key: const Key('readable-radar-tile'),
-          fit: StackFit.expand,
-          children: [
-            // Keep the original tile alpha for the radar footprint. This gives
-            // every cell a soft, light-grey perimeter instead of painting all
-            // weak echoes as blue rain.
-            Opacity(
-              opacity: _radarOpacity * (_showWeakRadarEchoes ? 0.52 : 0.36),
-              child: ImageFiltered(
-                imageFilter: ui.ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
-                child: ColorFiltered(
-                  colorFilter: _contextRadarFilter,
-                  child: tileWidget,
-                ),
-              ),
-            ),
-            // A darker inner footprint preserves the shape and movement of a
-            // cell. The source alpha naturally keeps uncertain echoes faint.
-            Opacity(
-              opacity: _radarOpacity * (_showWeakRadarEchoes ? 0.62 : 0.48),
-              child: ColorFiltered(
-                colorFilter: _neutralRadarFilter,
-                child: tileWidget,
-              ),
-            ),
-            // Only stronger reflectivity reaches this warm core. It sits above
-            // the two grey context layers: orange, red, then dark red.
-            Opacity(
-              opacity: _radarOpacity,
-              child: ColorFiltered(
-                colorFilter: _warmRadarFilter,
-                child: tileWidget,
-              ),
-            ),
-          ],
-        )
-      : Opacity(opacity: _radarOpacity, child: tileWidget);
+  Widget _buildRadarTile(Widget tileWidget) {
+    final opacity = _radarOpacity * (_showWeakRadarEchoes ? 1 : 0.88);
+    if (!_readableRadarPalette) {
+      return Opacity(opacity: opacity, child: tileWidget);
+    }
+    return Opacity(
+      key: const Key('readable-radar-tile'),
+      opacity: opacity,
+      child: ColorFiltered(
+        colorFilter: _radarContrastFilter,
+        child: tileWidget,
+      ),
+    );
+  }
 
   Future<void> _showLayers() async {
     await showModalBottomSheet<void>(
@@ -455,8 +422,8 @@ final class _RadarMapState extends State<_RadarMap> {
                   title: Text(context.l10n.noiseReduction),
                   subtitle: Text(
                     context.l10n.isFrench
-                        ? 'Halo gris clair, cœur gris foncé, puis orange et rouge pour les signaux forts'
-                        : 'Light-grey halo, dark-grey core, then orange and red for strong signals',
+                        ? 'Couleurs radar natives, contraste léger et contours nets'
+                        : 'Native radar colors, light contrast and sharp edges',
                   ),
                   value: _readableRadarPalette,
                   onChanged: _radarVisible
