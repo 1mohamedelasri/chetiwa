@@ -12,7 +12,6 @@ import '../../../../app/theme/chetiwa_tokens.dart';
 import '../../../../core/config/api_config.dart';
 import '../../../../core/l10n/chetiwa_localizations.dart';
 import '../../../../core/time/weather_clock.dart';
-import '../../../../core/weather/temperature_formatter.dart';
 import '../../../../core/widgets/weather_data_status.dart';
 import '../../../forecast/domain/entities/forecast.dart';
 import '../../../forecast/domain/services/forecast_snapshot_builder.dart';
@@ -148,9 +147,7 @@ final class _RadarMapState extends State<_RadarMap> {
       }
       _lastCenter = center;
       return ClipRRect(
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(ChetiwaRadius.large),
-        ),
+        borderRadius: BorderRadius.circular(ChetiwaRadius.large),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -248,6 +245,7 @@ final class _RadarMapState extends State<_RadarMap> {
                       snapshot: widget.snapshot,
                       selectedInstant: frame.time,
                       isLatestObservation: state.isAtLatestObservation,
+                      isNowcast: frame.isNowcast,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -361,7 +359,7 @@ final class _RadarMapState extends State<_RadarMap> {
     await showModalBottomSheet<void>(
       context: context,
       useSafeArea: true,
-      backgroundColor: ChetiwaColors.backgroundSecondary,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) => SingleChildScrollView(
           child: Padding(
@@ -375,7 +373,7 @@ final class _RadarMapState extends State<_RadarMap> {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: ChetiwaColors.borderDefault,
+                      color: Theme.of(context).colorScheme.outline,
                       borderRadius: BorderRadius.circular(ChetiwaRadius.full),
                     ),
                   ),
@@ -482,7 +480,7 @@ final class _RadarMapState extends State<_RadarMap> {
                       ? 'Gris : écho faible ou incertain, pas une pluie confirmée. Orange/rouge : signal radar plus intense. Le radar ne représente pas les nuages.'
                       : 'Grey: weak or uncertain echo, not confirmed rain. Orange/red: stronger radar signal. Radar does not show clouds.',
                   style: TextStyle(
-                    color: ChetiwaColors.textSecondary,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontSize: 12,
                   ),
                 ),
@@ -573,12 +571,14 @@ final class _CompactRadarStatus extends StatelessWidget {
     required this.forecast,
     required this.selectedInstant,
     required this.isLatestObservation,
+    required this.isNowcast,
     required this.snapshot,
   });
 
   final Forecast forecast;
   final DateTime selectedInstant;
   final bool isLatestObservation;
+  final bool isNowcast;
   final ForecastSnapshot snapshot;
 
   @override
@@ -586,6 +586,9 @@ final class _CompactRadarStatus extends StatelessWidget {
     final rain = isLatestObservation
         ? snapshot.currentRain.rateMmPerHour
         : forecast.rainPointAt(selectedInstant)?.rateMmPerHour ?? 0;
+    final frameState = isNowcast
+        ? (context.l10n.isFrench ? 'prévision' : 'forecast')
+        : (context.l10n.isFrench ? 'observation' : 'observation');
     return Container(
       height: 42,
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -609,45 +612,21 @@ final class _CompactRadarStatus extends StatelessWidget {
               ),
               const SizedBox(width: 5),
               Text(
-                '${rain.toStringAsFixed(rain < 0.05 ? 0 : 1)} mm/h · ${context.l10n.isFrench ? 'modèle' : 'model'}',
+                '${rain.toStringAsFixed(rain < 0.05 ? 0 : 1)} mm/h',
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),
               ),
               const _StatusDivider(),
-              if (isLatestObservation) ...[
-                Text(
-                  formatTemperature(context, forecast.temperatureCelsius),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const _StatusDivider(),
-                Text(
-                  '${forecast.windKph.round()} km/h',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ] else ...[
-                const Icon(
-                  Icons.history_rounded,
-                  size: 14,
+              Text(
+                '${WeatherTimeZone.hourMinute(selectedInstant, forecast.timeZone)} · $frameState',
+                style: const TextStyle(
                   color: ChetiwaColors.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  '${WeatherTimeZone.hourMinute(selectedInstant, forecast.timeZone)} ${context.l10n.isFrench ? 'historique' : 'history'}',
-                  style: const TextStyle(
-                    color: ChetiwaColors.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
+              ),
             ],
           ),
         ),
@@ -680,48 +659,45 @@ final class _MapStyleOption extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => Material(
-    color: selected
-        ? ChetiwaColors.accentPrimary.withValues(alpha: 0.16)
-        : ChetiwaColors.surfacePrimary,
-    borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
-    child: InkWell(
-      onTap: onTap,
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      color: selected
+          ? colors.primary.withValues(alpha: 0.14)
+          : colors.surfaceContainer,
       borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
-      child: Container(
-        height: 88,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
-          border: Border.all(
-            color: selected
-                ? ChetiwaColors.accentPrimary
-                : ChetiwaColors.borderDefault,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
+        child: Container(
+          height: 88,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
+            border: Border.all(
+              color: selected ? colors.primary : colors.outline,
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                map.icon,
+                color: selected ? colors.primary : colors.onSurfaceVariant,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                context.l10n.mapStyle(map.name),
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: selected ? colors.primary : colors.onSurfaceVariant,
+                ),
+              ),
+            ],
           ),
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              map.icon,
-              color: selected
-                  ? ChetiwaColors.accentPrimary
-                  : ChetiwaColors.textSecondary,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              context.l10n.mapStyle(map.name),
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                color: selected
-                    ? ChetiwaColors.textPrimary
-                    : ChetiwaColors.textSecondary,
-              ),
-            ),
-          ],
-        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 final class _RadarLegend extends StatelessWidget {
@@ -912,21 +888,18 @@ final class RadarTimeline extends StatelessWidget {
   Widget build(BuildContext context) {
     final timelineColors = _RadarTimelineColors.of(context);
     final nowInstant = snapshot.nowUtc;
-    final latestObservation = state.frames[state.currentObservationIndex].time;
-    final rawLag = nowInstant.difference(latestObservation);
-    final latestLag = rawLag.isNegative ? Duration.zero : rawLag;
     final status = state.selectedFrame.isNowcast
-        ? 'RADAR NOWCAST · ${state.selectedFrame.providerName.toUpperCase()}'
+        ? (context.l10n.isFrench ? 'prévision' : 'forecast')
         : state.isAtLatestObservation
-        ? '${context.l10n.isFrench ? 'DERNIÈRE OBSERVATION' : 'LATEST OBSERVATION'} · ${math.max(0, latestLag.inMinutes)} MIN'
-        : (context.l10n.isFrench
-              ? 'OBSERVATION RADAR PASSÉE'
-              : 'PAST RADAR OBSERVATION');
+        ? (context.l10n.isFrench
+              ? 'dernière observation'
+              : 'latest observation')
+        : (context.l10n.isFrench ? 'observation' : 'observation');
     final statusColor = state.selectedFrame.isNowcast
         ? ChetiwaColors.warning
         : state.isAtLatestObservation
         ? ChetiwaColors.accentPrimary
-        : ChetiwaColors.error;
+        : timelineColors.muted;
     return Semantics(
       key: const Key('radar-local-time'),
       label:
@@ -1034,32 +1007,16 @@ final class RadarTimeline extends StatelessWidget {
                 ),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        WeatherTimeZone.hourMinute(
-                          state.selectedFrame.time,
-                          forecast.timeZone,
-                        ),
-                        style: TextStyle(
-                          color: statusColor,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      Text(
-                        status,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          color: statusColor,
-                          fontSize: 8,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    '${WeatherTimeZone.hourMinute(state.selectedFrame.time, forecast.timeZone)} · $status',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
               ],
@@ -1189,9 +1146,7 @@ final class _RadarTimeRulerPainter extends CustomPainter {
 
     final profileLabel = TextPainter(
       text: TextSpan(
-        text: hasNowcast
-            ? 'PRÉVISION RADAR · RAINVIEWER'
-            : 'ANIMATION RADAR · OBSERVATIONS PASSÉES',
+        text: 'ESTIMATION AU POINT',
         style: TextStyle(
           color: colors.muted,
           fontSize: 7,

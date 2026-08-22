@@ -32,6 +32,8 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+/android/build/
+/test/failures/
 
 # Backend local configuration and generated artifacts
 backend/.env

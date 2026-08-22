@@ -17,37 +17,52 @@ import '../../domain/entities/forecast.dart';
 import '../../domain/services/forecast_snapshot_builder.dart';
 
 final class ChetiwaHeader extends StatelessWidget {
-  const ChetiwaHeader({super.key});
+  const ChetiwaHeader({
+    required this.locationName,
+    required this.onLocationSelected,
+    super.key,
+  });
+
+  final String locationName;
+  final ValueChanged<ChetiwaLocation> onLocationSelected;
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: 44,
-    child: Row(
+    height: 88,
+    child: Column(
       children: [
-        IconButton(
-          tooltip: context.l10n.share,
-          onPressed: () {},
-          icon: const Icon(Icons.ios_share_outlined, size: 22),
-        ),
-        const Expanded(
-          child: Text(
-            'Chetiwa',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-          ),
-        ),
-        Container(
-          width: 44,
+        SizedBox(
           height: 44,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainer,
-            shape: BoxShape.circle,
+          child: Row(
+            children: [
+              const SizedBox.square(dimension: 44),
+              const Expanded(
+                child: Text(
+                  'Chetiwa',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+                ),
+              ),
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainer,
+                  shape: BoxShape.circle,
+                ),
+                child: IconButton(
+                  tooltip: context.l10n.settings,
+                  onPressed: () => context.push('/settings'),
+                  icon: const Icon(Icons.tune_rounded, size: 21),
+                ),
+              ),
+            ],
           ),
-          child: IconButton(
-            tooltip: context.l10n.settings,
-            onPressed: () => context.push('/settings'),
-            icon: const Icon(Icons.tune_rounded, size: 21),
-          ),
+        ),
+        const SizedBox(height: 2),
+        LocationSelector(
+          locationName: locationName,
+          onLocationSelected: onLocationSelected,
         ),
       ],
     ),
@@ -69,7 +84,7 @@ final class LocationSelector extends StatelessWidget {
     button: true,
     label: context.l10n.selectedLocationLabel(locationName),
     child: Material(
-      color: Theme.of(context).colorScheme.surfaceContainer,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
       child: InkWell(
         onTap: () async {
@@ -85,21 +100,26 @@ final class LocationSelector extends StatelessWidget {
         },
         borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
         child: SizedBox(
-          height: 44,
+          height: 42,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: ChetiwaSpacing.x4),
+            padding: const EdgeInsets.symmetric(horizontal: ChetiwaSpacing.x2),
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Icon(Icons.location_on_outlined, size: 18),
                 const SizedBox(width: ChetiwaSpacing.x2),
-                Expanded(
+                Flexible(
                   child: Text(
                     locationName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
+                const SizedBox(width: ChetiwaSpacing.x1),
                 const Icon(Icons.expand_more_rounded, size: 22),
               ],
             ),
@@ -216,8 +236,8 @@ final class WeatherBottomNavigation extends StatelessWidget {
     BuildContext context,
   ) => BlocBuilder<WeatherSectionCubit, WeatherSection>(
     builder: (context, section) => Container(
-      height: 60,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(ChetiwaRadius.large),
@@ -797,7 +817,7 @@ final class _NavigationItem extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 5),
+                const SizedBox(height: 3),
                 AnimatedContainer(
                   key: selected
                       ? const Key('selected-navigation-indicator')

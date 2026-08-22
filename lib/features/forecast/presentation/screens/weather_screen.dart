@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../app/theme/chetiwa_tokens.dart';
+import '../../../../core/location/coordinates.dart';
 import '../../../../core/time/weather_clock.dart';
 import '../../../../core/location/location_repository.dart';
 import '../../../../core/location/active_location_controller.dart';
@@ -101,50 +102,42 @@ final class _WeatherViewState extends State<_WeatherView>
           }
 
           final forecast = state.forecast;
+          void selectLocation(ChetiwaLocation location) {
+            unawaited(
+              context.read<AnalyticsTracker>().locationSelected(
+                location.acquisition.name,
+              ),
+            );
+            context.read<ActiveLocationController>().setActive(location);
+            if (location.usesLastKnownPosition || location.hasReducedAccuracy) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    location.usesLastKnownPosition
+                        ? context.l10n.lastKnownLocationNotice
+                        : context.l10n.approximateLocationNotice,
+                  ),
+                ),
+              );
+            }
+            context.read<ForecastBloc>().add(ForecastLocationChanged(location));
+            context.read<RadarBloc>().add(
+              RadarLocationChanged(location.coordinates),
+            );
+          }
+
           return Column(
             children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: ChetiwaSpacing.x6),
-                child: ChetiwaHeader(),
-              ),
-              const SizedBox(height: ChetiwaSpacing.x2),
               Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: ChetiwaSpacing.x6,
+                  horizontal: ChetiwaSpacing.x4,
                 ),
-                child: LocationSelector(
+                child: ChetiwaHeader(
                   locationName: forecast.locationName,
-                  onLocationSelected: (location) {
-                    unawaited(
-                      context.read<AnalyticsTracker>().locationSelected(
-                        location.acquisition.name,
-                      ),
-                    );
-                    context.read<ActiveLocationController>().setActive(
-                      location,
-                    );
-                    if (location.usesLastKnownPosition ||
-                        location.hasReducedAccuracy) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            location.usesLastKnownPosition
-                                ? context.l10n.lastKnownLocationNotice
-                                : context.l10n.approximateLocationNotice,
-                          ),
-                        ),
-                      );
-                    }
-                    context.read<ForecastBloc>().add(
-                      ForecastLocationChanged(location),
-                    );
-                    context.read<RadarBloc>().add(
-                      RadarLocationChanged(location.coordinates),
-                    );
-                  },
+                  onLocationSelected: selectLocation,
                 ),
               ),
-              const SizedBox(height: ChetiwaSpacing.x3),
+              const SizedBox(height: ChetiwaSpacing.x2),
               if (state.health.issue != null ||
                   state.health.usesCache ||
                   state.health.isRefreshing) ...[
@@ -193,7 +186,7 @@ final class _WeatherViewState extends State<_WeatherView>
               const SizedBox(height: 4),
               const AdaptiveAdBannerSlot(),
               const Padding(
-                padding: EdgeInsets.fromLTRB(16, 6, 16, 12),
+                padding: EdgeInsets.fromLTRB(16, 5, 16, 8),
                 child: WeatherBottomNavigation(),
               ),
               SizedBox(height: MediaQuery.paddingOf(context).bottom),

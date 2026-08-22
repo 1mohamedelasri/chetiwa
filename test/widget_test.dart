@@ -47,7 +47,7 @@ void main() {
     expect(find.byKey(const Key('radar-time-ruler')), findsOneWidget);
     expect(find.byKey(const Key('radar-reset-button')), findsOneWidget);
     expect(find.text('Paris, France'), findsOneWidget);
-    expect(find.textContaining('DERNIÈRE OBSERVATION'), findsOneWidget);
+    expect(find.textContaining('dernière observation'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('radar-layers-button')));
     await tester.pumpAndSettle();
@@ -79,12 +79,12 @@ void main() {
       const Offset(-90, 0),
     );
     await tester.pump();
-    expect(find.textContaining('RADAR NOWCAST'), findsOneWidget);
+    expect(find.textContaining('prévision'), findsWidgets);
     expect(find.byKey(const Key('radar-now-button')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('radar-now-button')));
     await tester.pump();
-    expect(find.textContaining('DERNIÈRE OBSERVATION'), findsOneWidget);
+    expect(find.textContaining('dernière observation'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('radar-playback-button')));
     await tester.pump();
