@@ -28,40 +28,28 @@ final class ChetiwaHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: 88,
-    child: Column(
+    height: 44,
+    child: Row(
       children: [
-        SizedBox(
-          height: 44,
-          child: Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Chetiwa',
-                  textAlign: TextAlign.left,
-                  style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
-                ),
-              ),
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainer,
-                  shape: BoxShape.circle,
-                ),
-                child: IconButton(
-                  tooltip: context.l10n.settings,
-                  onPressed: () => context.push('/settings'),
-                  icon: const Icon(Icons.tune_rounded, size: 21),
-                ),
-              ),
-            ],
+        const Flexible(
+          flex: 2,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Chetiwa',
+              maxLines: 1,
+              style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+            ),
           ),
         ),
-        const SizedBox(height: 2),
-        LocationSelector(
-          locationName: locationName,
-          onLocationSelected: onLocationSelected,
+        const SizedBox(width: ChetiwaSpacing.x2),
+        Expanded(
+          flex: 3,
+          child: LocationSelector(
+            locationName: locationName,
+            onLocationSelected: onLocationSelected,
+          ),
         ),
       ],
     ),
@@ -275,6 +263,13 @@ final class WeatherBottomNavigation extends StatelessWidget {
                 context.read<AnalyticsTracker>().tabSelected('forecast'),
               );
             },
+          ),
+          _NavigationItem(
+            key: const Key('open-settings-navigation'),
+            label: context.l10n.settings,
+            icon: Icons.tune_rounded,
+            selected: false,
+            onTap: () => context.push('/settings'),
           ),
         ],
       ),
@@ -760,6 +755,7 @@ final class _NavigationItem extends StatelessWidget {
     required this.icon,
     required this.selected,
     required this.onTap,
+    super.key,
   });
 
   final String label;

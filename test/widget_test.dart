@@ -17,6 +17,13 @@ void main() {
     );
     await _loadFixture(tester);
 
+    expect(
+      (tester.getCenter(find.text('Chetiwa')).dy -
+              tester.getCenter(find.text('Paris, France')).dy)
+          .abs(),
+      lessThan(4),
+    );
+    expect(find.byKey(const Key('open-settings-navigation')), findsOneWidget);
     expect(find.byKey(const Key('rain-chart')), findsOneWidget);
     expect(find.byKey(const ValueKey('rain-chart-cursor-now')), findsOneWidget);
     expect(find.byKey(const Key('graph-provenance-label')), findsOneWidget);
