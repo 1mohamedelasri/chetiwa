@@ -6,6 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/location/coordinates.dart';
 import '../../../core/time/weather_clock.dart';
 import '../../../core/weather/weather_data_health.dart';
+import '../../monetization/application/usage_quota_controller.dart';
 import '../domain/entities/radar_frame.dart';
 import '../domain/repositories/radar_repository.dart';
 
@@ -128,9 +129,17 @@ final class RadarFailure extends RadarState {
 }
 
 final class RadarBloc extends Bloc<RadarEvent, RadarState> {
-  RadarBloc(this._repository, {WeatherClock clock = const SystemWeatherClock()})
-    : _clock = clock,
-      super(const RadarInitial()) {
+  RadarBloc(
+    this._repository, {
+    WeatherClock clock = const SystemWeatherClock(),
+    int maxFrames = 24,
+    int? historyHours,
+    UsageQuotaController? usageQuota,
+  }) : _clock = clock,
+       _maxFrames = maxFrames,
+       _historyHours = historyHours,
+       _usageQuota = usageQuota,
+       super(const RadarInitial()) {
     on<RadarRequested>(_load);
     on<RadarLocationChanged>(_changeLocation);
     on<RadarFrameSelected>(_selectFrame);
@@ -143,6 +152,9 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
 
   final RadarRepository _repository;
   final WeatherClock _clock;
+  final int _maxFrames;
+  final int? _historyHours;
+  final UsageQuotaController? _usageQuota;
   Coordinates _coordinates = Coordinates.paris;
   Timer? _playbackTimer;
   var _loadGeneration = 0;
@@ -156,8 +168,8 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
     if (generation != _loadGeneration || emit.isDone) return;
     if (cached != null) {
       visible = RadarReady(
-        frames: cached.frames,
-        selectedIndex: _defaultIndex(cached.frames),
+        frames: _limitFrames(cached.frames),
+        selectedIndex: _defaultIndex(_limitFrames(cached.frames)),
         coordinates: requestedCoordinates,
         health: WeatherDataHealth(
           freshness: cached.isStaleAt(_clock.nowUtc)
@@ -172,7 +184,10 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
       emit(const RadarLoading());
     }
     try {
-      final frames = await _repository.getFrames(requestedCoordinates);
+      await _usageQuota?.consumeRadarSession();
+      final frames = _limitFrames(
+        await _repository.getFrames(requestedCoordinates),
+      );
       // A location can change while cache/network work is in flight. Never
       // allow an older response (for example Paris) to overwrite the newer
       // selected place (for example Lyon).
@@ -204,6 +219,24 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
         emit(RadarFailure(issue));
       }
     }
+  }
+
+  List<RadarFrame> _limitFrames(List<RadarFrame> frames) {
+    var visible = frames;
+    final hours = _historyHours;
+    if (hours != null && hours > 0 && frames.isNotEmpty) {
+      final cutoff = _clock.nowUtc.subtract(Duration(hours: hours));
+      final withinHistory = frames
+          .where((frame) => !frame.time.isBefore(cutoff))
+          .toList(growable: false);
+      // Keep at least one frame when provider and device clocks differ.
+      if (withinHistory.isNotEmpty) visible = withinHistory;
+    }
+    if (visible.length <= _maxFrames) return visible;
+    // Keep the newest observation and the nearest nowcast frames. Providers
+    // return frames chronologically, so a tail slice is the least surprising
+    // history reduction for both playback and cache memory.
+    return visible.sublist(visible.length - _maxFrames);
   }
 
   void _selectFrame(RadarFrameSelected event, Emitter<RadarState> emit) {

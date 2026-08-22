@@ -15,6 +15,9 @@ import '../../../radar/domain/repositories/radar_repository.dart';
 import '../../../radar/presentation/widgets/radar_pane.dart';
 import '../../../analytics/application/analytics_tracker.dart';
 import '../../../alerts/application/local_rain_alert_coordinator.dart';
+import '../../../monetization/application/usage_quota_controller.dart';
+import '../../../monetization/domain/premium_entitlement.dart';
+import '../../../monetization/domain/premium_limits.dart';
 import '../../application/forecast_bloc.dart';
 import '../../application/graph_horizon_cubit.dart';
 import '../../application/weather_section_cubit.dart';
@@ -43,6 +46,13 @@ final class WeatherScreen extends StatelessWidget {
         create: (context) => RadarBloc(
           context.read<RadarRepository>(),
           clock: context.read<WeatherClock>(),
+          maxFrames: PremiumLimits.forEntitlement(
+            context.read<EntitlementController>(),
+          ).maxRadarFrames,
+          historyHours: PremiumLimits.forEntitlement(
+            context.read<EntitlementController>(),
+          ).radarHistoryHours,
+          usageQuota: context.read<UsageQuotaController>(),
         )..add(const RadarRequested()),
       ),
     ],

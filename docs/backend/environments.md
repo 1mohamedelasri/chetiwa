@@ -14,14 +14,15 @@ local et destiné à trois projets strictement séparés.
 1. Aucun secret dans Git, l’image Docker ou l’application mobile.
 2. `GOOGLE_CLOUD_PROJECT` est obligatoire hors local pour empêcher un déploiement
    accidentel dans le mauvais projet.
-3. Staging et production utilisent des comptes de service, bases Firestore,
-   budgets et clés distincts.
-4. Cloud Run conserve `min-instances=0` et une limite initiale de trois instances.
+3. Staging et production utilisent des comptes de service, budgets et clés
+   distincts. Firestore, Redis et Cloud CDN restent désactivés par défaut.
+4. Cloud Run conserve `min-instances=0` et `max-instances=1` tant qu'aucun
+   compteur partagé n'est configuré.
 5. Les coordonnées précises ne sont pas journalisées.
 
 ## Provisionnement restant
 
-La création effective des deux projets GCP, du compte de facturation, des
-budgets, de Secret Manager et de Firestore nécessite l’accès propriétaire au
-compte Google Cloud. Elle doit être réalisée avant de considérer le premier item
-de Phase 2 comme complètement terminé.
+La création effective d'un projet GCP, du compte de facturation, des budgets et
+de Secret Manager nécessite l’accès propriétaire au compte Google Cloud. Une
+base Firestore, Redis ou un CDN ne sont créés que si un gate de coût ultérieur
+est franchi.

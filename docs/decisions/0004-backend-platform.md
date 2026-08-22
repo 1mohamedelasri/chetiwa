@@ -14,9 +14,11 @@ le coût et la charge opérationnelle.
 
 - Construire une seule API modulaire conteneurisée sur Cloud Run, région UE.
 - Utiliser le billing par requête avec `min-instances=0` au lancement.
-- Commencer avec `max-instances=3`, puis augmenter seulement après mesure.
+- Commencer avec `max-instances=1` et un cache mémoire local, puis augmenter
+  seulement après mesure et activation d'un compteur partagé.
 - Utiliser Firebase Cloud Messaging pour les notifications.
-- Utiliser Firestore pour installations, règles d’alerte et entitlements MVP.
+- Ne pas activer Firestore pour le MVP ; l'ajouter uniquement si une persistance
+  multi-appareils ou des droits Premium réels le justifient.
 - Utiliser Secret Manager pour toutes les clés.
 - Utiliser Firebase Remote Config pour les feature flags publics et une
   configuration backend sécurisée pour les kill switches critiques.
@@ -53,4 +55,3 @@ Cloud Run.
 - [Cloud Run pricing](https://cloud.google.com/run/pricing)
 - [Cloud Run maximum instances](https://cloud.google.com/run/docs/configuring/max-instances)
 - [Firebase pricing](https://firebase.google.com/pricing)
-

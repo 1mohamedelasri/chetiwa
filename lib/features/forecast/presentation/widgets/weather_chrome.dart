@@ -1,10 +1,16 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/theme/chetiwa_tokens.dart';
+import '../../../monetization/domain/premium_entitlement.dart';
+import '../../../monetization/domain/ads_repository.dart';
+import '../../../monetization/data/admob_config.dart';
+import '../../../monetization/data/google_ads_repository.dart';
 import '../../../../core/location/coordinates.dart';
 import '../../../../core/location/location_repository.dart';
 import '../../../../core/l10n/chetiwa_localizations.dart';
@@ -360,8 +366,85 @@ final class AdaptiveAdBannerSlot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final media = MediaQuery.of(context);
-    final height = media.size.height < 600 ? 36.0 : 50.0;
+    if (context.watch<EntitlementController>().isPremium) {
+      return const SizedBox.shrink();
+    }
+    final ads = context.read<AdsRepository>();
+    if (ads is GoogleAdsRepository) {
+      return _ConfiguredAdBanner(repository: ads);
+    }
+    return _AdPlaceholder(
+      height: MediaQuery.sizeOf(context).height < 600 ? 36 : 50,
+    );
+  }
+}
+
+final class _ConfiguredAdBanner extends StatefulWidget {
+  const _ConfiguredAdBanner({required this.repository});
+
+  final GoogleAdsRepository repository;
+
+  @override
+  State<_ConfiguredAdBanner> createState() => _ConfiguredAdBannerState();
+}
+
+final class _ConfiguredAdBannerState extends State<_ConfiguredAdBanner> {
+  BannerAd? _ad;
+  var _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    await widget.repository.initialize();
+    if (!mounted || !widget.repository.canRequestAds) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    final adUnitId = defaultTargetPlatform == TargetPlatform.iOS
+        ? AdMobConfig.iosBannerId
+        : AdMobConfig.androidBannerId;
+    if (adUnitId.isEmpty) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    final ad = widget.repository.createBanner(adUnitId: adUnitId);
+    ad.load();
+    if (!mounted) {
+      ad.dispose();
+      return;
+    }
+    setState(() {
+      _ad = ad;
+      _loading = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    _ad?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading || _ad == null) {
+      return const SizedBox(height: 50);
+    }
+    return SizedBox(height: 50, child: AdWidget(ad: _ad!));
+  }
+}
+
+final class _AdPlaceholder extends StatelessWidget {
+  const _AdPlaceholder({required this.height});
+
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
     return Semantics(
       label: context.l10n.advertisement,
       container: true,

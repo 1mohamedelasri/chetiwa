@@ -14,6 +14,7 @@ import '../../alerts/application/alert_preferences_controller.dart';
 import '../../alerts/application/local_rain_alert_coordinator.dart';
 import '../../analytics/application/analytics_consent_controller.dart';
 import '../../forecast/presentation/widgets/weather_chrome.dart';
+import '../../monetization/domain/consent_repository.dart';
 
 final class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -166,32 +167,36 @@ final class _SettingsScreenState extends State<SettingsScreen> {
                 borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
                 border: Border.all(color: colors.outline),
               ),
-              child: Row(
-                children: [
-                  const CircleAvatar(
-                    radius: 28,
-                    backgroundColor: ChetiwaColors.surfaceSecondary,
-                    child: Icon(Icons.workspace_premium_outlined),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Chetiwa+',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          strings.premiumSubtitle,
-                          style: TextStyle(color: colors.onSurfaceVariant),
-                        ),
-                      ],
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: () => context.push('/subscription'),
+                child: Row(
+                  children: [
+                    const CircleAvatar(
+                      radius: 28,
+                      backgroundColor: ChetiwaColors.surfaceSecondary,
+                      child: Icon(Icons.workspace_premium_outlined),
                     ),
-                  ),
-                  const Icon(Icons.chevron_right),
-                ],
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Chetiwa+',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            strings.premiumSubtitle,
+                            style: TextStyle(color: colors.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: ChetiwaSpacing.x8),
@@ -222,6 +227,14 @@ final class _SettingsScreenState extends State<SettingsScreen> {
                       onTap: _chooseMainLocation,
                     );
                   },
+                ),
+                ListTile(
+                  key: const Key('saved-places-settings'),
+                  leading: const Icon(Icons.bookmark_outline),
+                  title: const Text('Mes lieux'),
+                  subtitle: const Text('Maison, travail et destinations'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/saved-places'),
                 ),
                 ListTile(
                   key: const Key('open-smart-alerts-settings'),
@@ -311,6 +324,15 @@ final class _SettingsScreenState extends State<SettingsScreen> {
                   title: Text(strings.privacy),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => context.push('/privacy'),
+                ),
+                ListTile(
+                  key: const Key('ad-privacy-options'),
+                  leading: const Icon(Icons.tune_outlined),
+                  title: const Text('Préférences publicitaires'),
+                  subtitle: const Text('Modifier le consentement publicitaire'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      context.read<ConsentRepository>().showPrivacyOptions(),
                 ),
                 ListTile(
                   title: Text(strings.terms),

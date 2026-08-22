@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -170,10 +171,14 @@ final class ProviderGateway {
         final path = item['path'];
         final timestamp = item['time'];
         if (path is! String || timestamp is! num) continue;
+        final frameId = base64Url.encode(utf8.encode(path)).replaceAll('=', '');
+        final tileUrlTemplate = _config.publicBaseUrl == null
+            ? '$host$path/256/{z}/{x}/{y}/2/1_0.png'
+            : '${_config.publicBaseUrl}/v1/radar/tiles/$frameId/{z}/{x}/{y}';
         frames.add(<String, Object?>{
           'time': _isoFromEpoch(timestamp),
           'kind': kind,
-          'tileUrlTemplate': '$host$path/256/{z}/{x}/{y}/2/1_0.png',
+          'tileUrlTemplate': tileUrlTemplate,
         });
       }
     }
@@ -198,6 +203,60 @@ final class ProviderGateway {
         'kind': 'radar',
       },
     };
+  }
+
+  Future<Uint8List> radarTile({
+    required String frame,
+    required int z,
+    required int x,
+    required int y,
+  }) async {
+    final template = _config.radarTileUrlTemplate;
+    if (template == null) {
+      throw const ApiException(
+        statusCode: 503,
+        code: 'radar_tile_provider_not_configured',
+        message: 'A licensed radar tile provider is not configured',
+      );
+    }
+    final uri = Uri.parse(
+      template
+          .replaceAll('{frame}', frame)
+          .replaceAll('{z}', '$z')
+          .replaceAll('{x}', '$x')
+          .replaceAll('{y}', '$y'),
+    );
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final response = await _client
+            .get(uri, headers: const <String, String>{'accept': 'image/png'})
+            .timeout(const Duration(seconds: 10));
+        if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+          return Uint8List.fromList(response.bodyBytes);
+        }
+        if (response.statusCode < 500 && response.statusCode != 429) {
+          throw ApiException(
+            statusCode: 502,
+            code: 'radar_tile_provider_rejected',
+            message: 'Radar tile provider returned HTTP ${response.statusCode}',
+          );
+        }
+        lastError = 'HTTP ${response.statusCode}';
+      } on ApiException {
+        rethrow;
+      } on Object catch (error) {
+        lastError = error;
+      }
+      if (attempt < 2) {
+        await _delay(Duration(milliseconds: 200 * (attempt + 1)));
+      }
+    }
+    throw ApiException(
+      statusCode: 503,
+      code: 'radar_tile_provider_unavailable',
+      message: 'Radar tile provider unavailable after retries: $lastError',
+    );
   }
 
   Future<Map<String, dynamic>> _getJson(Uri uri) async {

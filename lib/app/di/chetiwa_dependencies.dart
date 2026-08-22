@@ -28,6 +28,12 @@ import '../../features/alerts/application/alert_preferences_controller.dart';
 import '../../features/alerts/application/local_rain_alert_coordinator.dart';
 import '../../features/monetization/domain/ads_repository.dart';
 import '../../features/monetization/domain/consent_repository.dart';
+import '../../features/monetization/application/saved_places_controller.dart';
+import '../../features/monetization/application/usage_quota_controller.dart';
+import '../../features/monetization/data/store_purchase_gateway.dart';
+import '../../features/monetization/data/google_ads_repository.dart';
+import '../../features/monetization/data/google_consent_repository.dart';
+import '../../features/monetization/domain/premium_entitlement.dart';
 import '../preferences/app_preferences_controller.dart';
 import 'development_fallback_repositories.dart';
 
@@ -44,11 +50,25 @@ final class ChetiwaDependencies {
     required this.rainNotificationScheduler,
     required this.adsRepository,
     required this.consentRepository,
+    required this.entitlementController,
+    required this.savedPlacesController,
+    required this.usageQuotaController,
     http.Client? client,
   }) : _client = client;
 
   factory ChetiwaDependencies.live() {
     final client = http.Client();
+    final consentRepository = GoogleConsentRepository();
+    final adsRepository = GoogleAdsRepository(consent: consentRepository);
+    final entitlementController = EntitlementController(
+      gateway: StorePurchaseGateway(),
+    );
+    final savedPlacesController = SavedPlacesController(
+      entitlement: entitlementController,
+    );
+    final usageQuotaController = UsageQuotaController(
+      entitlement: entitlementController,
+    );
     const weatherClock = SystemWeatherClock();
     const forecastCache = ForecastCacheDataSource(clock: weatherClock);
     const radarCache = RadarCacheDataSource(clock: weatherClock);
@@ -87,8 +107,11 @@ final class ChetiwaDependencies {
         notificationPermissionGateway:
             const SystemNotificationPermissionGateway(),
         rainNotificationScheduler: SystemRainNotificationScheduler(),
-        adsRepository: const DisabledAdsRepository(),
-        consentRepository: const DisabledConsentRepository(),
+        adsRepository: adsRepository,
+        consentRepository: consentRepository,
+        entitlementController: entitlementController,
+        savedPlacesController: savedPlacesController,
+        usageQuotaController: usageQuotaController,
         forecastRepository: ApiConfig.usesNotificationTestForecast
             ? notificationTestForecast
             : directForecast,
@@ -123,8 +146,11 @@ final class ChetiwaDependencies {
       notificationPermissionGateway:
           const SystemNotificationPermissionGateway(),
       rainNotificationScheduler: SystemRainNotificationScheduler(),
-      adsRepository: const DisabledAdsRepository(),
-      consentRepository: const DisabledConsentRepository(),
+      adsRepository: adsRepository,
+      consentRepository: consentRepository,
+      entitlementController: entitlementController,
+      savedPlacesController: savedPlacesController,
+      usageQuotaController: usageQuotaController,
       forecastRepository: ApiConfig.usesNotificationTestForecast
           ? notificationTestForecast
           : fallback
@@ -141,23 +167,39 @@ final class ChetiwaDependencies {
     );
   }
 
-  factory ChetiwaDependencies.fixture() => ChetiwaDependencies._(
-    weatherClock: const SystemWeatherClock(),
-    preferencesController: AppPreferencesController(persist: false),
-    alertPreferencesController: AlertPreferencesController(persist: false),
-    notificationPermissionGateway: FixtureNotificationPermissionGateway(),
-    rainNotificationScheduler: FixtureRainNotificationScheduler(),
-    adsRepository: const DisabledAdsRepository(),
-    consentRepository: const DisabledConsentRepository(),
-    forecastRepository: const FixtureForecastRepository(
-      FixtureForecastDataSource(),
-    ),
-    radarRepository: const FixtureRadarRepository(),
-    locationRepository: const FixtureLocationRepository(),
-    activeLocationController: ActiveLocationController(
-      const FixtureLocationRepository(),
-    ),
-  );
+  factory ChetiwaDependencies.fixture() {
+    final entitlementController = EntitlementController(
+      gateway: FixturePremiumPurchaseGateway(),
+      persist: false,
+      autoSync: false,
+    );
+    return ChetiwaDependencies._(
+      weatherClock: const SystemWeatherClock(),
+      preferencesController: AppPreferencesController(persist: false),
+      alertPreferencesController: AlertPreferencesController(persist: false),
+      notificationPermissionGateway: FixtureNotificationPermissionGateway(),
+      rainNotificationScheduler: FixtureRainNotificationScheduler(),
+      adsRepository: const DisabledAdsRepository(),
+      consentRepository: const DisabledConsentRepository(),
+      entitlementController: entitlementController,
+      savedPlacesController: SavedPlacesController(
+        entitlement: entitlementController,
+        persist: false,
+      ),
+      usageQuotaController: UsageQuotaController(
+        entitlement: entitlementController,
+        persist: false,
+      ),
+      forecastRepository: const FixtureForecastRepository(
+        FixtureForecastDataSource(),
+      ),
+      radarRepository: const FixtureRadarRepository(),
+      locationRepository: const FixtureLocationRepository(),
+      activeLocationController: ActiveLocationController(
+        const FixtureLocationRepository(),
+      ),
+    );
+  }
 
   factory ChetiwaDependencies.testing({
     required ForecastRepository forecastRepository,
@@ -171,26 +213,46 @@ final class ChetiwaDependencies {
     RainNotificationScheduler? rainNotificationScheduler,
     AdsRepository? adsRepository,
     ConsentRepository? consentRepository,
-  }) => ChetiwaDependencies._(
-    forecastRepository: forecastRepository,
-    radarRepository: radarRepository,
-    locationRepository: locationRepository,
-    activeLocationController:
-        activeLocationController ??
-        ActiveLocationController(locationRepository),
-    weatherClock: weatherClock,
-    preferencesController:
-        preferencesController ?? AppPreferencesController(persist: false),
-    alertPreferencesController:
-        alertPreferencesController ??
-        AlertPreferencesController(persist: false),
-    notificationPermissionGateway:
-        notificationPermissionGateway ?? FixtureNotificationPermissionGateway(),
-    rainNotificationScheduler:
-        rainNotificationScheduler ?? FixtureRainNotificationScheduler(),
-    adsRepository: adsRepository ?? const DisabledAdsRepository(),
-    consentRepository: consentRepository ?? const DisabledConsentRepository(),
-  );
+    EntitlementController? entitlementController,
+    SavedPlacesController? savedPlacesController,
+    UsageQuotaController? usageQuotaController,
+  }) {
+    final entitlement =
+        entitlementController ??
+        EntitlementController(
+          gateway: FixturePremiumPurchaseGateway(),
+          persist: false,
+          autoSync: false,
+        );
+    return ChetiwaDependencies._(
+      forecastRepository: forecastRepository,
+      radarRepository: radarRepository,
+      locationRepository: locationRepository,
+      activeLocationController:
+          activeLocationController ??
+          ActiveLocationController(locationRepository),
+      weatherClock: weatherClock,
+      preferencesController:
+          preferencesController ?? AppPreferencesController(persist: false),
+      alertPreferencesController:
+          alertPreferencesController ??
+          AlertPreferencesController(persist: false),
+      notificationPermissionGateway:
+          notificationPermissionGateway ??
+          FixtureNotificationPermissionGateway(),
+      rainNotificationScheduler:
+          rainNotificationScheduler ?? FixtureRainNotificationScheduler(),
+      adsRepository: adsRepository ?? const DisabledAdsRepository(),
+      consentRepository: consentRepository ?? const DisabledConsentRepository(),
+      entitlementController: entitlement,
+      savedPlacesController:
+          savedPlacesController ??
+          SavedPlacesController(entitlement: entitlement, persist: false),
+      usageQuotaController:
+          usageQuotaController ??
+          UsageQuotaController(entitlement: entitlement, persist: false),
+    );
+  }
 
   final ForecastRepository forecastRepository;
   final RadarRepository radarRepository;
@@ -203,6 +265,9 @@ final class ChetiwaDependencies {
   final RainNotificationScheduler rainNotificationScheduler;
   final AdsRepository adsRepository;
   final ConsentRepository consentRepository;
+  final EntitlementController entitlementController;
+  final SavedPlacesController savedPlacesController;
+  final UsageQuotaController usageQuotaController;
   final http.Client? _client;
 
   LocalRainAlertCoordinator get localRainAlertCoordinator =>
@@ -218,6 +283,9 @@ final class ChetiwaDependencies {
     _client?.close();
     preferencesController.dispose();
     alertPreferencesController.dispose();
+    entitlementController.dispose();
+    savedPlacesController.dispose();
+    usageQuotaController.dispose();
     activeLocationController.dispose();
   }
 }

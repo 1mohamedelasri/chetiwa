@@ -21,6 +21,18 @@ final class SourcesLicensesScreen extends StatelessWidget {
               color: ChetiwaColors.textSecondary,
             ),
           ),
+          Card(
+            color: Theme.of(context).colorScheme.errorContainer,
+            child: const Padding(
+              padding: EdgeInsets.all(ChetiwaSpacing.x4),
+              child: Text(
+                'Lancement public bloqué : les droits commerciaux, le cache et '
+                'les attributions doivent être confirmés et archivés pour '
+                'chaque fournisseur actif.',
+              ),
+            ),
+          ),
+          const SizedBox(height: ChetiwaSpacing.x4),
           const SizedBox(height: ChetiwaSpacing.x5),
           _SourceTile(
             name: 'Open-Meteo',
@@ -33,9 +45,11 @@ final class SourcesLicensesScreen extends StatelessWidget {
             url: 'https://www.rainviewer.com/',
           ),
           _SourceTile(
-            name: 'OpenStreetMap · CARTO',
-            purpose: strings.sourceCartoPurpose,
-            url: 'https://www.openstreetmap.org/copyright',
+            name: 'CARTO · fond prototype',
+            purpose:
+                '${strings.sourceCartoPurpose} Conditions commerciales '
+                'à confirmer pour les tuiles effectivement utilisées.',
+            url: 'https://carto.com/legal/terms/',
           ),
           _SourceTile(
             name: 'Esri · Maxar · Earthstar',

@@ -180,14 +180,17 @@ base cloud, un moteur push ou Remote Config pour la bêta frugale.
     moteur restent reportés après validation de l'utilité des alertes ;
   - ⬜ validation/synchronisation des droits Premium.
 - ⬜ Stocker les secrets dans le gestionnaire de secrets de l’hébergeur.
-- 🟡 Ajouter cache serveur, ETag, compression et stale-if-error :
-  - ✅ cache mémoire LRU borné, `ETag`/`304`, gzip et repli stale-if-error ;
-  - ⬜ cache distribué et métriques avant production.
+- ✅ Ajouter cache serveur, ETag, compression et stale-if-error : cache JSON
+  mémoire et cache binaire des tuiles avec `ETag`/`304`, gzip et repli stale-if-error.
+- 🟡 Cache CDN partagé et compteur distribué sont optionnels derrière
+  `SHARED_COUNTER_URL` ; le mode bêta reste sans Redis/Firestore/Cloud CDN,
+  avec une instance et un cache local. Le provisionnement ne se fait qu'après
+  mesure du trafic et validation du budget.
 - 🟡 Ajouter rate limiting par appareil/IP, protection anti-abus et quotas :
   - ✅ limite locale par instance et par identifiant d'installation, avec repli
     IP, réponse `429` et `Retry-After` ;
-  - ⬜ limite distribuée, attestation d'application, quotas par environnement et
-    kill switch pilotable.
+  - 🟡 limite distribuée via compteur partagé, quotas par environnement et kill
+    switch pilotable livrés ; attestation d'application reste à ajouter.
 - 🟡 Ne jamais journaliser des coordonnées précises inutilement : les quatre
   routes publiques actuelles n'en journalisent aucune et leurs clés de cache
   arrondissent les coordonnées à trois décimales ; appliquer la même règle aux
@@ -222,14 +225,17 @@ base cloud, un moteur push ou Remote Config pour la bêta frugale.
   tuiles après validation de la licence du fond de carte.
 - ✅ Écran « Sources et licences » accessible depuis Settings, avec attributions
   et liens vers les conditions des sources actuellement visibles.
+- ✅ Gate de lancement public, registre fournisseur prudent et modèle d’archivage
+  des contrats/licences ajoutés dans `docs/compliance/`.
 
 ## Observabilité et coûts
 
-- ⬜ Monitoring des latences, taux d’erreur, fraîcheur des données et cache hit rate.
-- ⬜ Alertes à 50 %, 75 % et 90 % de chaque quota fournisseur.
-- ⬜ Tableau de bord coût par jour, utilisateur actif, session Radar et abonné.
-- ⬜ Budget mensuel et kill switch automatique avant dépassement critique.
-- ⬜ Runbook de panne et bascule vers cache/fixture de continuité.
+- ✅ Monitoring des latences, erreurs, fraîcheur, cache hit rate, octets et tuiles
+  via `/internal/metrics`.
+- ✅ Alertes budget à 50 %, 75 % et 90 % et kill switch automatique au plafond.
+- 🟡 Tableau de bord externe coût/jour/utilisateur/session à raccorder aux métriques.
+- ✅ Budget mensuel, kill switch global et fallback stale-if-error implémentés.
+- ✅ Runbook de panne et bascule vers cache/fixture documentés.
 
 ## Gate 2
 
@@ -249,18 +255,20 @@ licence du fournisseur de données.
 
 - ⬜ Conserver localement le dernier viewport par lieu : latitude, longitude,
   zoom et date de dernière consultation.
-- ⬜ Ajouter un cache mémoire court (15–30 minutes) pour éviter les doublons
-  pendant une même session.
-- ⬜ Ajouter un cache disque borné par taille et par âge, avec suppression des
-  tuiles les plus anciennes (LRU) et repli vers la dernière image valide.
-- ⬜ Charger uniquement les tuiles visibles et une petite marge autour de la
-  fenêtre, jamais une région entière par défaut.
-- ⬜ Dédupliquer les requêtes concurrentes et annuler les chargements devenus
-  invisibles après un déplacement de carte.
-- ⬜ Précharger uniquement les prochaines frames de l'animation, avec une
-  limite stricte de frames et un bouton de réinitialisation.
-- ⬜ Mesurer `cache_hit_rate`, octets téléchargés, tuiles par session et coût
-  estimé par utilisateur.
+- 🟡 Le cache mémoire court des métadonnées est livré (2 minutes côté API) ; le
+  cache mémoire des tuiles reste à brancher.
+- ✅ Cache mémoire via l'ImageCache de `flutter_map` et cache disque natif borné
+  à 64 Mo, LRU, avec fraîcheur maximale de 6 heures.
+- ✅ Charger uniquement les tuiles visibles avec une marge `panBuffer/keepBuffer`
+  de 1 ; le zoom Radar est borné à 10 dans l'expérience actuelle.
+- ✅ Dédupliquer les requêtes concurrentes via l'ImageProvider et annuler les
+  chargements devenus invisibles avec `abortObsoleteRequests`.
+- 🟡 Politique mobile Free/Chetiwa+ livrée : 12/24 frames, zoom maximum 10/12,
+  et quotas backend configurables 20/200 sessions mensuelles avec kill switch.
+- ✅ Précharger au maximum 2 prochaines frames et 24 tuiles visibles par
+  événement de déplacement, sans précharger une région entière.
+- ✅ Mesurer `cache_hit_rate`, octets téléchargés, tuiles téléchargées et tuiles
+  uniques par session via `RadarTileMetrics`, sans coordonnées.
 
 ### Cache partagé optionnel
 
@@ -269,7 +277,8 @@ licence du fournisseur de données.
 - ⬜ Ajouter `ETag`, `Cache-Control`, compression et `stale-if-error`.
 - ⬜ Commencer avec une instance à zéro et un budget mensuel plafonné ; ne pas
   provisionner Firestore, Cloud Storage ou Functions sans besoin démontré.
-- ⬜ Ajouter des alertes de quota à 50 %, 75 % et 90 %, puis un kill switch.
+- 🟡 Kill switch radar et quotas par environnement livrés ; les alertes 50/75/90 %
+  et le compteur partagé multi-instance restent à réaliser.
 
 ### Règles Free et Chetiwa+
 
@@ -465,17 +474,19 @@ et sélection d'un lieu sans accorder l'accès GPS.
 
 ## Publicité
 
-- 🟡 Frontières `AdsRepository` et `ConsentRepository` créées en mode désactivé :
-  aucune dépendance publicitaire, requête ni collecte n'est embarquée. Intégrer
-  le SDK publicitaire seulement si la voie publicité est retenue après la bêta.
-- ⬜ Utiliser `google_mobile_ads` et un compte AdMob : **Firebase n'est pas
-  requis** pour afficher, mesurer ou rémunérer les publicités.
-- ⬜ Intégrer une CMP/UMP derrière `ConsentRepository`.
-- ⬜ N’initialiser les publicités qu’après consentement lorsque requis.
-- ⬜ Utiliser uniquement le slot réservé entre contenu et navigation.
-- ⬜ Aucun interstitiel au lancement, aucun rafraîchissement pendant un scrub.
-- ⬜ Supprimer totalement le slot pour Chetiwa+.
-- ⬜ Ajouter option de modifier/retirer le consentement dans Settings.
+- ✅ `google_mobile_ads` est intégré derrière `AdsRepository`, avec identifiants
+  vides par défaut et identifiants de test natifs pour éviter toute requête réelle
+  accidentelle.
+- ✅ UMP est intégré derrière `ConsentRepository` : mise à jour à chaque lancement,
+  formulaire si requis, `canRequestAds()` avant chaque bannière et fermeture
+  par défaut en cas d’erreur.
+- ✅ Le slot réservé entre contenu et navigation charge une bannière uniquement
+  après consentement ; aucun interstitiel ni rafraîchissement de scrub.
+- ✅ Le slot est supprimé avant initialisation AdMob pour Chetiwa+.
+- ✅ Settings expose la modification des préférences publicitaires.
+- ⬜ Configurer le compte AdMob, les messages UMP, les vrais App IDs et les
+  unités de production ; procédure : `docs/monetization/admob-setup.md`.
+- ⬜ Valider RGPD/ePrivacy, ATT iOS, App Privacy et Data Safety avant lancement.
 
 ## Mesure produit — Firebase Analytics uniquement (facultatif)
 

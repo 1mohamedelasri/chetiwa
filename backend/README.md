@@ -35,6 +35,8 @@ Le même service peut être lancé par `docker compose up --build`.
 - `GET /v1/locations/search?q=…&language=fr|en&count=1..12`
 - `GET /v1/locations/reverse?latitude=…&longitude=…&language=fr|en`
 - `GET /v1/radar/frames?latitude=…&longitude=…`
+- `GET /v1/radar/tiles/{frame}/{z}/{x}/{y}`
+- `GET /internal/metrics` (à protéger par IAM/réseau privé)
 - `POST /v1/devices` et `DELETE /v1/devices`
 - `GET|POST /v1/alerts`
 - `PATCH|DELETE /v1/alerts/{alertId}`
@@ -46,10 +48,14 @@ les clés de cache et ne sont pas journalisées par l’application. Une premiè
 limite locale de 120 requêtes/minute s'applique par identifiant d'installation
 `X-Chetiwa-Device-Id`, ou par IP en repli.
 
-Le cache et le rate limiting mémoire sont des premiers garde-fous locaux à
-chaque instance. Un contrôle distribué reste nécessaire avant le trafic de
-production. Le contrat complet est décrit dans
+Le proxy de tuiles est optionnel. Lorsqu'il est activé, il fournit un cache LRU binaire, `ETag`, `304`,
+`stale-if-error`, limites de zoom et budget par tuile. `SHARED_COUNTER_URL`
+active le compteur de quotas distribué pour Cloud Run multi-instance ; sans
+cette variable, le compteur reste local et aucun service Redis/Firestore n'est
+nécessaire. Le contrat complet et le runbook sont
+décrits dans
 [`docs/backend/api-v1.md`](../docs/backend/api-v1.md).
+Voir aussi [`cdn-shared-backend-runbook.md`](../docs/backend/cdn-shared-backend-runbook.md).
 
 Les routes device/alertes sont décrites dans
 [`docs/backend/device-alert-api.md`](../docs/backend/device-alert-api.md). Elles
@@ -67,6 +73,11 @@ Firestore n’est pas injecté.
 | `RADAR_METADATA_URL` | métadonnées du fournisseur radar autorisé |
 | `ARCGIS_API_KEY` | reverse geocoding ArcGIS, si cette option est retenue |
 | `REVERSE_GEOCODING_URL` | endpoint de reverse geocoding |
+| `RADAR_TILE_URL_TEMPLATE` | source des tuiles avec `{frame}/{z}/{x}/{y}` |
+| `SHARED_COUNTER_URL` | compteur atomique Redis/Firestore partagé |
+| `MONTHLY_BUDGET_CENTS` | plafond mensuel des coûts origine |
+| `RADAR_TILE_COST_CENTS` | coût estimé par tuile origine |
+| `GLOBAL_KILL_SWITCH` | désactivation immédiate du Radar et des tuiles |
 
 Les URLs externes doivent être HTTPS hors profil local. Le service refuse
 RainViewer et Open-Meteo sans clé commerciale en profil `production` afin

@@ -31,6 +31,8 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["admobAppId"] = providers.gradleProperty("admobAppId")
+            .orNull ?: "ca-app-pub-3940256099942544~3347511713"
     }
 
     buildTypes {

@@ -8,9 +8,13 @@ import 'package:shelf_router/shelf_router.dart';
 import 'api_exception.dart';
 import 'device_alert_store.dart';
 import 'json_response_cache.dart';
+import 'operational_control.dart';
 import 'provider_gateway.dart';
+import 'radar_quota.dart';
 import 'request_rate_limiter.dart';
 import 'runtime_config.dart';
+import 'shared_counter.dart';
+import 'tile_response_cache.dart';
 
 typedef _Loader = Future<Map<String, Object?>> Function();
 
@@ -21,11 +25,48 @@ Handler createApp({
   RequestRateLimiter? rateLimiter,
   DeviceAlertStore? deviceAlertStore,
   DateTime Function()? now,
+  RadarQuotaTracker? radarQuota,
+  DistributedRadarQuotaGuard? distributedRadarQuota,
+  TileResponseCache? tileCache,
+  OperationalMetrics? operationalMetrics,
 }) {
   final gateway = providers ?? ProviderGateway(config: config);
   final responseCache = cache ?? JsonResponseCache();
   final clock = now ?? DateTime.now;
   final limiter = rateLimiter ?? RequestRateLimiter();
+  final metrics = operationalMetrics ?? OperationalMetrics();
+  final binaryTileCache = tileCache ?? TileResponseCache();
+  final sharedCounter = config.sharedCounterUrl == null
+      ? null
+      : HttpSharedCounter(endpoint: config.sharedCounterUrl!);
+  final budget = MonthlyBudgetController(limitCents: config.monthlyBudgetCents);
+  final distributedBudget = sharedCounter == null
+      ? null
+      : DistributedBudgetController(
+          limitCents: config.monthlyBudgetCents,
+          counter: sharedCounter,
+        );
+  final distributedQuota =
+      distributedRadarQuota ??
+      (sharedCounter == null
+          ? null
+          : DistributedRadarQuotaGuard(
+              policy: RadarQuotaPolicy(
+                enabled: config.radarEnabled,
+                freeSessions: config.radarFreeSessions,
+                premiumSessions: config.radarPremiumSessions,
+              ),
+              counter: sharedCounter,
+            ));
+  final radarGuard =
+      radarQuota ??
+      RadarQuotaTracker(
+        policy: RadarQuotaPolicy(
+          enabled: config.radarEnabled,
+          freeSessions: config.radarFreeSessions,
+          premiumSessions: config.radarPremiumSessions,
+        ),
+      );
   final stateStore =
       deviceAlertStore ??
       (config.environment == AppEnvironment.local
@@ -48,6 +89,15 @@ Handler createApp({
         'apiVersion': 'v1',
         'environment': config.environment.name,
       });
+    })
+    ..get('/internal/metrics', (Request request) {
+      final token = config.internalMetricsToken;
+      if (config.isProduction &&
+          (token == null ||
+              request.headers['x-chetiwa-internal-token'] != token)) {
+        return Response.notFound(null);
+      }
+      return metricsResponse(metrics);
     })
     ..get('/v1/forecast', (Request request) async {
       try {
@@ -134,6 +184,21 @@ Handler createApp({
     })
     ..get('/v1/radar/frames', (Request request) async {
       try {
+        if (config.globalKillSwitch || !radarGuard.policy.enabled) {
+          throw radarDisabled();
+        }
+        final quota = distributedQuota == null
+            ? radarGuard.evaluate(
+                ownerKey: radarQuotaOwner(request),
+                plan: radarPlanFromRequest(request),
+                now: clock(),
+              )
+            : await distributedQuota.evaluate(
+                ownerKey: radarQuotaOwner(request),
+                plan: radarPlanFromRequest(request),
+                now: clock(),
+              );
+        if (!quota.allowed) throw radarQuotaExceeded(quota);
         final latitude = _coordinate(request, 'latitude', -90, 90);
         final longitude = _coordinate(request, 'longitude', -180, 180);
         return await _serveCached(
@@ -149,6 +214,144 @@ Handler createApp({
               gateway.radarFrames(latitude: latitude, longitude: longitude),
         );
       } on ApiException catch (error) {
+        final response = _apiError(error);
+        if (error.code == 'radar_quota_exceeded') {
+          return response.change(
+            headers: {...response.headers, 'retry-after': '2592000'},
+          );
+        }
+        return response;
+      }
+    })
+    ..get('/v1/radar/tiles/<frame>/<z>/<x>/<y>', (
+      Request request,
+      String frame,
+      String zValue,
+      String xValue,
+      String yValue,
+    ) async {
+      final started = clock().toUtc();
+      try {
+        if (config.globalKillSwitch || !config.radarEnabled) {
+          throw radarDisabled();
+        }
+        if (!RegExp(r'^[A-Za-z0-9_-]{1,512}$').hasMatch(frame)) {
+          throw const ApiException(
+            statusCode: 400,
+            code: 'invalid_radar_frame',
+            message: 'frame has an invalid format',
+          );
+        }
+        final paddedFrame = frame.padRight(
+          frame.length + (4 - frame.length % 4) % 4,
+          '=',
+        );
+        final providerFrame = utf8.decode(base64Url.decode(paddedFrame));
+        final z = int.tryParse(zValue);
+        final x = int.tryParse(xValue);
+        final y = int.tryParse(yValue);
+        if (z == null || x == null || y == null || z < 0 || z > 12) {
+          throw const ApiException(
+            statusCode: 400,
+            code: 'invalid_radar_tile',
+            message: 'z, x and y must be valid tile coordinates',
+          );
+        }
+        final world = 1 << z;
+        if (x < 0 || x >= world || y < 0 || y >= world) {
+          throw const ApiException(
+            statusCode: 400,
+            code: 'invalid_radar_tile',
+            message: 'tile coordinates are outside the zoom range',
+          );
+        }
+        final key = 'radar-tile:$frame:$z:$x:$y';
+        final policy = const TileCachePolicy();
+        final instant = clock().toUtc();
+        final cached = binaryTileCache.read(key);
+        if (cached != null && cached.isFresh(instant, policy)) {
+          metrics.record(
+            latency: clock().toUtc().difference(started),
+            freshness: instant.difference(cached.storedAt),
+            error: false,
+            cacheStatus: 'HIT',
+          );
+          return _tileResponse(
+            request,
+            cached,
+            cacheStatus: 'HIT',
+            policy: policy,
+          );
+        }
+        final budgetDecision = distributedBudget == null
+            ? budget.record(config.radarTileCostCents, now: clock())
+            : await distributedBudget.record(
+                config.radarTileCostCents,
+                now: clock(),
+              );
+        if (budgetDecision.threshold case final threshold?) {
+          metrics.recordBudgetAlert(threshold);
+        }
+        if (!budgetDecision.allowed) {
+          throw const ApiException(
+            statusCode: 503,
+            code: 'budget_kill_switch',
+            message:
+                'Radar tile service is temporarily disabled by its budget guard',
+          );
+        }
+        try {
+          final bytes = await gateway.radarTile(
+            frame: providerFrame,
+            z: z,
+            x: x,
+            y: y,
+          );
+          final tile = CachedTileResponse(
+            bytes: bytes,
+            etag: '"${sha256.convert(bytes)}"',
+            storedAt: instant,
+          );
+          binaryTileCache.write(key, tile);
+          metrics.record(
+            latency: clock().toUtc().difference(started),
+            freshness: Duration.zero,
+            error: false,
+            cacheStatus: 'MISS',
+            tileBytes: bytes.length,
+          );
+          return _tileResponse(
+            request,
+            tile,
+            cacheStatus: 'MISS',
+            policy: policy,
+            tileBytes: bytes.length,
+          );
+        } on ApiException {
+          if (cached != null && cached.canServeStale(instant, policy)) {
+            metrics.record(
+              latency: clock().toUtc().difference(started),
+              freshness: instant.difference(cached.storedAt),
+              error: false,
+              cacheStatus: 'STALE',
+            );
+            return _tileResponse(
+              request,
+              cached,
+              cacheStatus: 'STALE',
+              policy: policy,
+              warning: '110 - "Response is stale"',
+            );
+          }
+          rethrow;
+        }
+      } on ApiException catch (error) {
+        metrics.record(
+          latency: clock().toUtc().difference(started),
+          freshness: Duration.zero,
+          error: true,
+          cacheStatus: 'ERROR',
+        );
         return _apiError(error);
       }
     })
@@ -258,10 +461,35 @@ Handler createApp({
     });
 
   return const Pipeline()
+      .addMiddleware(operationalMetricsMiddleware(metrics))
       .addMiddleware(_responseHeaders())
       .addMiddleware(_gzipResponses())
       .addMiddleware(_rateLimit(limiter, clock))
       .addHandler(router.call);
+}
+
+Response _tileResponse(
+  Request request,
+  CachedTileResponse entry, {
+  required String cacheStatus,
+  required TileCachePolicy policy,
+  String? warning,
+  int tileBytes = 0,
+}) {
+  final headers = <String, String>{
+    'content-type': 'image/png',
+    'cache-control':
+        'public, max-age=${policy.freshFor.inSeconds}, '
+        'stale-if-error=${policy.staleIfErrorFor.inSeconds}',
+    'etag': entry.etag,
+    'x-cache': cacheStatus,
+    if (tileBytes > 0) 'x-chetiwa-tile-bytes': '$tileBytes',
+    if (warning != null) 'warning': warning,
+  };
+  if (request.headers['if-none-match'] == entry.etag) {
+    return Response.notModified(headers: headers);
+  }
+  return Response.ok(entry.bytes, headers: headers);
 }
 
 Future<Response> _serveCached({

@@ -9,6 +9,8 @@
 - [ ] Obtenir par écrit le droit de distribuer la bêta avec Open-Meteo,
   RainViewer et le fond de carte effectivement utilisés, ou désactiver/remplacer
   le composant concerné.
+- [ ] Compléter le [gate conformité du lancement public](../compliance/public-launch-gate.md)
+  et archiver une [fiche de preuve par fournisseur](../compliance/provider-evidence-template.md).
 - [ ] Vérifier les attributions visibles dans l'app et les copier dans les
   métadonnées Store si nécessaire.
 - [ ] Remplir App Privacy et Data Safety d'après le comportement réel du MVP,

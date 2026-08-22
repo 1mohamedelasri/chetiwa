@@ -1,13 +1,13 @@
-import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/l10n/chetiwa_localizations.dart';
 import '../../features/forecast/presentation/screens/weather_screen.dart';
 import '../../features/onboarding/presentation/onboarding_screen.dart';
 import '../../features/alerts/presentation/alerts_setup_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
 import '../../features/legal/presentation/legal_screen.dart';
 import '../../features/legal/presentation/sources_licenses_screen.dart';
+import '../../features/monetization/presentation/saved_places_screen.dart';
+import '../../features/monetization/presentation/subscription_screen.dart';
 
 GoRouter createAppRouter() => GoRouter(
   initialLocation: '/weather',
@@ -31,10 +31,11 @@ GoRouter createAppRouter() => GoRouter(
     ),
     GoRoute(
       path: '/subscription',
-      builder: (context, state) => _RoutePlaceholder(
-        title: 'Chetiwa+',
-        message: context.l10n.subscriptionComing,
-      ),
+      builder: (context, state) => const SubscriptionScreen(),
+    ),
+    GoRoute(
+      path: '/saved-places',
+      builder: (context, state) => const SavedPlacesScreen(),
     ),
     GoRoute(
       path: '/privacy',
@@ -50,21 +51,3 @@ GoRouter createAppRouter() => GoRouter(
     ),
   ],
 );
-
-final class _RoutePlaceholder extends StatelessWidget {
-  const _RoutePlaceholder({required this.title, required this.message});
-
-  final String title;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(title)),
-    body: Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Text(message, textAlign: TextAlign.center),
-      ),
-    ),
-  );
-}

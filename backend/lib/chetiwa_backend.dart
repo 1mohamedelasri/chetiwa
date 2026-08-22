@@ -15,7 +15,25 @@ export 'src/device_alert_store.dart'
         UnavailableDeviceAlertStore;
 export 'src/json_response_cache.dart'
     show CachedJsonResponse, JsonResponseCache;
+export 'src/operational_control.dart'
+    show
+        BudgetDecision,
+        DistributedBudgetController,
+        MonthlyBudgetController,
+        OperationalMetrics,
+        OperationalSnapshot;
 export 'src/provider_gateway.dart' show ProviderGateway;
+export 'src/radar_quota.dart'
+    show
+        DistributedRadarQuotaGuard,
+        RadarPlan,
+        RadarQuotaDecision,
+        RadarQuotaPolicy,
+        RadarQuotaTracker;
 export 'src/request_rate_limiter.dart'
     show RateLimitDecision, RequestRateLimiter;
 export 'src/runtime_config.dart' show AppEnvironment, RuntimeConfig;
+export 'src/shared_counter.dart'
+    show HttpSharedCounter, InMemorySharedCounter, SharedCounter;
+export 'src/tile_response_cache.dart'
+    show CachedTileResponse, TileCachePolicy, TileResponseCache;

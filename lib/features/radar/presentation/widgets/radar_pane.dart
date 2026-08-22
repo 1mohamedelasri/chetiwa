@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -16,7 +17,9 @@ import '../../../../core/widgets/weather_data_status.dart';
 import '../../../forecast/domain/entities/forecast.dart';
 import '../../../forecast/domain/services/forecast_snapshot_builder.dart';
 import '../../../forecast/domain/services/rain_rate_scale.dart';
+import '../../../monetization/application/usage_quota_controller.dart';
 import '../../application/radar_bloc.dart';
+import '../../data/cache/radar_tile_cache.dart';
 import '../../domain/entities/radar_frame.dart';
 
 final class RadarPane extends StatelessWidget {
@@ -74,12 +77,19 @@ final class _RadarMapState extends State<_RadarMap> {
   static const _timelineHeight = 150.0;
 
   final MapController _mapController = MapController();
+  final RadarTileCache _tileCache = RadarTileCache.shared;
   _RadarBaseMap _baseMap = _RadarBaseMap.satellite;
   double _radarOpacity = 0.96;
   bool _radarVisible = true;
   bool _readableRadarPalette = true;
   bool _showWeakRadarEchoes = false;
   LatLng? _lastCenter;
+
+  @override
+  void initState() {
+    super.initState();
+    _tileCache.beginSession();
+  }
 
   static const _neutralRadarFilter = ColorFilter.mode(
     Color(0xFF5E6663),
@@ -146,6 +156,7 @@ final class _RadarMapState extends State<_RadarMap> {
         });
       }
       _lastCenter = center;
+      final quota = context.watch<UsageQuotaController?>();
       return ClipRRect(
         borderRadius: BorderRadius.circular(ChetiwaRadius.large),
         child: Stack(
@@ -159,6 +170,17 @@ final class _RadarMapState extends State<_RadarMap> {
                   initialZoom: _regionalZoom,
                   minZoom: _minRadarZoom,
                   maxZoom: _maxRadarZoom,
+                  onPositionChanged: (camera, _) {
+                    unawaited(
+                      _tileCache.prefetchNextFrames(
+                        camera: camera,
+                        frameTemplates: state.frames
+                            .skip(state.selectedIndex + 1)
+                            .map((item) => item.tileUrlTemplate)
+                            .whereType<String>(),
+                      ),
+                    );
+                  },
                   backgroundColor: Colors.transparent,
                   interactionOptions: const InteractionOptions(
                     // Keep the useful navigation gestures explicit and avoid
@@ -185,7 +207,10 @@ final class _RadarMapState extends State<_RadarMap> {
                       urlTemplate: tileUrl,
                       userAgentPackageName: 'com.chetiwa.chetiwa',
                       maxNativeZoom: 7,
-                      maxZoom: 12,
+                      maxZoom: _maxRadarZoom,
+                      panBuffer: 1,
+                      keepBuffer: 1,
+                      tileProvider: _tileCache.tileProvider,
                       tileDisplay: const TileDisplay.fadeIn(
                         duration: Duration(milliseconds: 140),
                         reloadStartOpacity: 0.25,
@@ -253,6 +278,12 @@ final class _RadarMapState extends State<_RadarMap> {
                 ],
               ),
             ),
+            if (quota != null)
+              Positioned(
+                right: 16,
+                top: 68,
+                child: _RadarQuotaBadge(snapshot: quota.radarSessions),
+              ),
             if (state.health.issue != null ||
                 state.health.usesCache ||
                 state.health.isRefreshing)
@@ -508,7 +539,7 @@ final class _MapAttribution extends StatelessWidget {
         Uri.parse(
           baseMap.isSatellite
               ? 'https://www.esri.com/en-us/legal/terms/full-master-agreement'
-              : 'https://www.rainviewer.com/',
+              : 'https://carto.com/legal/terms/',
         ),
       ),
       borderRadius: BorderRadius.circular(ChetiwaRadius.small),
@@ -1420,6 +1451,31 @@ final class _RadarTimelineColors {
   final Color foreground;
   final Color muted;
   final Color outline;
+}
+
+final class _RadarQuotaBadge extends StatelessWidget {
+  const _RadarQuotaBadge({required this.snapshot});
+
+  final UsageQuotaSnapshot snapshot;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surface.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: colors.outline),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        child: Text(
+          'Radar ${snapshot.used}/${snapshot.limit}',
+          style: Theme.of(context).textTheme.labelSmall,
+        ),
+      ),
+    );
+  }
 }
 
 /// Provider-independent fallback used when live radar tiles are unavailable.

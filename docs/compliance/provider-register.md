@@ -9,9 +9,10 @@ avant monétisation.
 | Fournisseur | Usage | Stade autorisé | Coût/limite suivie | Attribution/contrat | Repli |
 | --- | --- | --- | --- | --- | --- |
 | Open-Meteo | Forecast, Graph, geocoding | Gratuit en prototype non commercial ; plan commercial avant pubs/abonnements | Standard 1 M appels/mois, prix checkout à confirmer | Attribution CC BY ; conditions commerciales archivées | Dernier cache + message données anciennes |
-| RainViewer | Radar prototype actuel | Développement temporaire uniquement | API publique sans SLA commercial public | Attribution obligatoire ; ne pas lancer commercialement sans écrit | Fixtures/cache, puis Rainbow |
+| RainViewer | Radar prototype actuel | Développement temporaire uniquement ; lancement commercial bloqué | API publique sans SLA commercial public | Attribution obligatoire ; autorisation commerciale écrite manquante | Fixtures/cache, puis Rainbow |
 | Rainbow | Radar Tiles et nowcast cible | Production après validation contrat | 30 k tiles/mois puis 0,20 $/1 k ; nowcast 5 k puis 0,10 $/1 k selon page officielle actuelle | Conditions, attribution, cache et DPA à archiver | Limiter frames + cache + désactivation |
-| OpenFreeMap | Fond vectoriel standard | Commercial autorisé, sans SLA | Instance publique annoncée gratuite sans limite | Attribution OpenMapTiles/OpenStreetMap | Fond minimal/cache ou PMTiles self-hosted |
+| CARTO | Fond raster actuellement utilisé par le prototype | Production bloquée jusqu’à validation de l’offre et du cache | Tarification et limites du compte à confirmer | Attribution et conditions commerciales à archiver | Fond autorisé de remplacement ou PMTiles self-hosted |
+| OpenFreeMap | Fond vectoriel standard cible | À confirmer pour l’usage exact et sans SLA | Instance publique annoncée gratuite sans limite | Attribution OpenMapTiles/OpenStreetMap à vérifier | Fond minimal/cache ou PMTiles self-hosted |
 | Esri | Satellite Premium optionnel | Désactivé jusqu’à configuration officielle | 2 M tuiles gratuites puis 0,15 $/1 k selon tarification actuelle | Token et attribution Esri/data | OpenFreeMap |
 | Google Cloud/Firebase | API, devices, push, config, observabilité | Staging/prod après DPA et région UE | Free tiers + pay-as-you-go, budgets et max instances | DPA, sous-traitants et rétention à archiver | Cache mobile, runbook panne |
 | RevenueCat | Entitlements abonnements | Sandbox puis production | Gratuit jusqu’au seuil MTR officiel, puis pourcentage actuel | DPA, webhooks et politique de données | Validation store directe future |

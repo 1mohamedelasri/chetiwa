@@ -21,6 +21,9 @@ import '../features/analytics/application/analytics_consent_controller.dart';
 import '../features/analytics/application/analytics_tracker.dart';
 import '../features/monetization/domain/ads_repository.dart';
 import '../features/monetization/domain/consent_repository.dart';
+import '../features/monetization/application/saved_places_controller.dart';
+import '../features/monetization/application/usage_quota_controller.dart';
+import '../features/monetization/domain/premium_entitlement.dart';
 import 'theme/chetiwa_theme.dart';
 
 final class ChetiwaApp extends StatefulWidget {
@@ -96,6 +99,15 @@ final class _ChetiwaAppState extends State<ChetiwaApp> {
             ),
             ChangeNotifierProvider<ActiveLocationController>.value(
               value: _dependencies.activeLocationController,
+            ),
+            ChangeNotifierProvider<EntitlementController>.value(
+              value: _dependencies.entitlementController,
+            ),
+            ChangeNotifierProvider<SavedPlacesController>.value(
+              value: _dependencies.savedPlacesController,
+            ),
+            ChangeNotifierProvider<UsageQuotaController>.value(
+              value: _dependencies.usageQuotaController,
             ),
           ],
           child: Consumer<AppPreferencesController>(

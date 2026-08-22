@@ -67,6 +67,13 @@ repli maximal 30 minutes. RainViewer est accepté uniquement en développement ;
 le profil production le refuse tant qu’un fournisseur licencié n’est pas
 configuré.
 
+### `GET /v1/radar/tiles/{frame}/{z}/{x}/{y}`
+
+Proxy binaire pour une tuile Radar. `frame` est un identifiant opaque validé par
+le backend ; les coordonnées XYZ sont bornées à `z=0..12`. La réponse renvoie
+`ETag`, `304`, `X-Cache`, `Cache-Control: max-age=21600, stale-if-error=172800`
+et peut être placée derrière un CDN HTTP avec la clé `frame/z/x/y`.
+
 ## Cache HTTP
 
 Les routes renvoient `ETag`, `Cache-Control` et `X-Cache` (`MISS`, `HIT` ou
@@ -83,3 +90,36 @@ un identifiant aléatoire d’installation, jamais un identifiant publicitaire.
 Le cache LRU et le rate limiting actuels sont volontairement en mémoire. Avant
 Gate 2, il faut ajouter contrôle partagé multi-instance, métriques de hit rate et
 quotas pilotables par environnement.
+
+## Quota Radar et kill switch
+
+`GET /v1/radar/frames` applique un quota mensuel par installation : 20 sessions
+Free et 200 sessions Chetiwa+ par défaut. Le plan est transmis par
+`X-Chetiwa-Plan: free|premium` et l'installation par `X-Chetiwa-Device-Id`.
+Un dépassement renvoie `429` avec `Retry-After`; `RADAR_ENABLED=false` renvoie
+`503 radar_disabled`. Ces compteurs restent en mémoire tant qu'une seule
+instance est utilisée. Avant plusieurs instances Cloud Run, ils doivent être
+remplacés par un compteur partagé et reliés aux alertes 50/75/90 %.
+
+`SHARED_COUNTER_URL` active un compteur atomique externe pour que les quotas
+restent cohérents entre instances Cloud Run. Sans cette variable, le compteur
+reste local et le déploiement doit rester mono-instance.
+
+## Métriques et budget
+
+`GET /internal/metrics` expose les compteurs internes de latence, erreurs,
+fraîcheur, cache hit rate, octets et tuiles. La route doit rester protégée par
+IAM ou réseau privé. `MONTHLY_BUDGET_CENTS` et `RADAR_TILE_COST_CENTS` contrôlent
+le budget origine ; les seuils 50/75/90 % sont enregistrés et le seuil 100 %
+renvoie `503 budget_kill_switch`. `GLOBAL_KILL_SWITCH=true` désactive
+immédiatement les routes Radar.
+
+## Cache mobile des tuiles Radar
+
+Le client utilise le cache mémoire d'images de `flutter_map` et son cache disque
+natifs, configuré à 64 Mo avec une fraîcheur maximale de 6 heures et réduction
+LRU. Les requêtes concurrentes sont consolidées par `ImageProvider` et les
+requêtes devenues obsolètes sont annulées. La couche Radar ne charge que les
+tuiles visibles avec une marge d'un carreau, limite le zoom à 10 et précharge au
+maximum deux frames et 24 tuiles. Les métriques locales sont anonymes : taux de
+hit, octets, tuiles téléchargées et tuiles uniques par session.
