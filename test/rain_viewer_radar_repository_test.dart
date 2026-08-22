@@ -44,6 +44,10 @@ void main() {
     expect(frames.first.provenance.provider, 'LibreWXR');
     expect(
       frames.first.tileUrlTemplate,
+      startsWith('https://radar.ezplatforms.com/v2/radar/observed'),
+    );
+    expect(
+      frames.first.tileUrlTemplate,
       contains('/256/{z}/{x}/{y}/10/1_1.png'),
     );
     expect(frames.last.kind, WeatherDataKind.radarNowcast);

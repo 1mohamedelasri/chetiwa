@@ -29,6 +29,10 @@ final class RainViewerRadarRepository implements RadarRepository {
     final usesLibreWxr = ApiConfig.radarMetadataUrl.contains(
       'radar.ezplatforms.com',
     );
+    final configuredUri = Uri.parse(ApiConfig.radarMetadataUrl);
+    final tileHost = usesLibreWxr
+        ? '${configuredUri.scheme}://${configuredUri.authority}'
+        : host;
     final radar = response['radar'];
     if (host is! String || radar is! Map<String, dynamic>) {
       throw const WeatherDataException(
@@ -82,7 +86,7 @@ final class RainViewerRadarRepository implements RadarRepository {
           ),
           progress: 0,
           tileUrlTemplate:
-              '$host$path/256/{z}/{x}/{y}/${usesLibreWxr ? '10/1_1' : '2/1_0'}.png',
+              '$tileHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '10/1_1' : '2/1_0'}.png',
           kind: raw.forecast
               ? WeatherDataKind.radarNowcast
               : WeatherDataKind.radarObservation,
