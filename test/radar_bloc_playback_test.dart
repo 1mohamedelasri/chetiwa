@@ -162,6 +162,27 @@ void main() {
       await loopedFuture;
     },
   );
+
+  test('a stale response cannot replace the newly selected location', () async {
+    const lyon = Coordinates(latitude: 45.7640, longitude: 4.8357);
+    final bloc = RadarBloc(const _RacingRadarRepository());
+    addTearDown(bloc.close);
+
+    bloc.add(const RadarRequested());
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+    bloc.add(const RadarLocationChanged(lyon));
+
+    await bloc.stream
+        .where((state) => state is RadarReady)
+        .cast<RadarReady>()
+        .firstWhere((state) => state.coordinates == lyon)
+        .timeout(const Duration(seconds: 2));
+    // The deliberately slower Paris request completes after Lyon. Its result
+    // must be discarded rather than moving the map back to Paris.
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+
+    expect((bloc.state as RadarReady).coordinates, lyon);
+  });
 }
 
 final class _ObservedOnlyRadarRepository implements RadarRepository {
@@ -183,5 +204,29 @@ final class _ObservedOnlyRadarRepository implements RadarRepository {
       ),
       growable: false,
     );
+  }
+}
+
+final class _RacingRadarRepository implements RadarRepository {
+  const _RacingRadarRepository();
+
+  @override
+  Future<CachedRadarFrames?> getCachedFrames(Coordinates coordinates) async =>
+      null;
+
+  @override
+  Future<List<RadarFrame>> getFrames(Coordinates coordinates) async {
+    await Future<void>.delayed(
+      coordinates == Coordinates.paris
+          ? const Duration(milliseconds: 80)
+          : const Duration(milliseconds: 5),
+    );
+    return [
+      RadarFrame(
+        time: DateTime.utc(2026, 8, 22, 12),
+        progress: 1,
+        tileUrlTemplate: 'https://example.test/{z}/{x}/{y}.png',
+      ),
+    ];
   }
 }

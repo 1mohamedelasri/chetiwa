@@ -1,5 +1,12 @@
 import 'package:chetiwa/app/app.dart';
 import 'package:chetiwa/app/di/chetiwa_dependencies.dart';
+import 'package:chetiwa/core/location/coordinates.dart';
+import 'package:chetiwa/core/location/location_repository.dart';
+import 'package:chetiwa/features/forecast/data/datasources/fixture_forecast_data_source.dart';
+import 'package:chetiwa/features/forecast/data/repositories/fixture_forecast_repository.dart';
+import 'package:chetiwa/features/radar/data/repositories/fixture_radar_repository.dart';
+import 'package:chetiwa/features/radar/domain/entities/radar_frame.dart';
+import 'package:chetiwa/features/radar/domain/repositories/radar_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -133,10 +140,94 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Paris, France'), findsOneWidget);
   });
+
+  testWidgets('restored selected place also becomes the radar center', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final locations = _MainLocationRepository(LocationCatalog.locations[2]);
+    final radar = _RecordingRadarRepository();
+    await tester.pumpWidget(
+      ChetiwaApp(
+        dependencies: ChetiwaDependencies.testing(
+          forecastRepository: const FixtureForecastRepository(
+            FixtureForecastDataSource(),
+          ),
+          radarRepository: radar,
+          locationRepository: locations,
+        ),
+      ),
+    );
+    await _loadFixture(tester);
+
+    expect(
+      radar.requestedCoordinates,
+      contains(LocationCatalog.locations[2].coordinates),
+    );
+  });
 }
 
 Future<void> _loadFixture(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(seconds: 1));
   await tester.pump();
+}
+
+final class _RecordingRadarRepository implements RadarRepository {
+  final requestedCoordinates = <Coordinates>[];
+  final _delegate = const FixtureRadarRepository();
+
+  @override
+  Future<CachedRadarFrames?> getCachedFrames(Coordinates coordinates) async =>
+      null;
+
+  @override
+  Future<List<RadarFrame>> getFrames(Coordinates coordinates) {
+    requestedCoordinates.add(coordinates);
+    return _delegate.getFrames(coordinates);
+  }
+}
+
+final class _MainLocationRepository implements LocationRepository {
+  _MainLocationRepository(this.mainLocation);
+
+  ChetiwaLocation? mainLocation;
+
+  @override
+  Future<void> clearMainLocation() async => mainLocation = null;
+
+  @override
+  Future<ChetiwaLocation> getCurrentLocation() async =>
+      LocationCatalog.locations.first;
+
+  @override
+  Future<ChetiwaLocation?> getMainLocation() async => mainLocation;
+
+  @override
+  Future<List<ChetiwaLocation>> getRecentLocations() async => const [];
+
+  @override
+  Future<bool> openLocationRecovery(LocationRecoveryAction action) async =>
+      false;
+
+  @override
+  Future<void> remember(ChetiwaLocation location) async {}
+
+  @override
+  Future<void> removeRecentLocation(ChetiwaLocation location) async {}
+
+  @override
+  Future<ChetiwaLocation> resolveCoordinates(Coordinates coordinates) async =>
+      LocationCatalog.forCoordinates(coordinates);
+
+  @override
+  Future<List<ChetiwaLocation>> search(String query) async => const [];
+
+  @override
+  Future<void> setMainLocation(ChetiwaLocation location) async =>
+      mainLocation = location;
 }

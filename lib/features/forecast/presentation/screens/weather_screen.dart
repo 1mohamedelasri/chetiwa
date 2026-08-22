@@ -59,16 +59,35 @@ final class _WeatherView extends StatefulWidget {
 
 final class _WeatherViewState extends State<_WeatherView>
     with WidgetsBindingObserver {
+  late final ActiveLocationController _activeLocationController;
+  Coordinates? _radarCoordinates;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _activeLocationController = context.read<ActiveLocationController>();
+    _activeLocationController.addListener(_syncRadarLocation);
+    // Both the forecast and the active-location controller restore the saved
+    // main place asynchronously. Radar used to keep its independent Paris
+    // default, so the header could say Lyon while the map pin stayed in Paris.
+    // Defer the first sync until every provider above this view is mounted.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncRadarLocation());
   }
 
   @override
   void dispose() {
+    _activeLocationController.removeListener(_syncRadarLocation);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _syncRadarLocation() {
+    if (!mounted) return;
+    final coordinates = _activeLocationController.location?.coordinates;
+    if (coordinates == null || coordinates == _radarCoordinates) return;
+    _radarCoordinates = coordinates;
+    context.read<RadarBloc>().add(RadarLocationChanged(coordinates));
   }
 
   @override
@@ -123,9 +142,6 @@ final class _WeatherViewState extends State<_WeatherView>
               );
             }
             context.read<ForecastBloc>().add(ForecastLocationChanged(location));
-            context.read<RadarBloc>().add(
-              RadarLocationChanged(location.coordinates),
-            );
           }
 
           return Column(

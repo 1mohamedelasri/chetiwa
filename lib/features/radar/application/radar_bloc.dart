@@ -145,16 +145,20 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   final WeatherClock _clock;
   Coordinates _coordinates = Coordinates.paris;
   Timer? _playbackTimer;
+  var _loadGeneration = 0;
 
   Future<void> _load(RadarRequested event, Emitter<RadarState> emit) async {
+    final generation = ++_loadGeneration;
+    final requestedCoordinates = _coordinates;
     _stopPlayback();
     RadarReady? visible;
-    final cached = await _repository.getCachedFrames(_coordinates);
+    final cached = await _repository.getCachedFrames(requestedCoordinates);
+    if (generation != _loadGeneration || emit.isDone) return;
     if (cached != null) {
       visible = RadarReady(
         frames: cached.frames,
         selectedIndex: _defaultIndex(cached.frames),
-        coordinates: _coordinates,
+        coordinates: requestedCoordinates,
         health: WeatherDataHealth(
           freshness: cached.isStaleAt(_clock.nowUtc)
               ? WeatherDataFreshness.cachedStale
@@ -168,15 +172,20 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
       emit(const RadarLoading());
     }
     try {
-      final frames = await _repository.getFrames(_coordinates);
+      final frames = await _repository.getFrames(requestedCoordinates);
+      // A location can change while cache/network work is in flight. Never
+      // allow an older response (for example Paris) to overwrite the newer
+      // selected place (for example Lyon).
+      if (generation != _loadGeneration || emit.isDone) return;
       emit(
         RadarReady(
           frames: frames,
           selectedIndex: _defaultIndex(frames),
-          coordinates: _coordinates,
+          coordinates: requestedCoordinates,
         ),
       );
     } on Object catch (error) {
+      if (generation != _loadGeneration || emit.isDone) return;
       final issue = weatherDataIssueFrom(error);
       if (visible != null) {
         emit(

@@ -32,6 +32,9 @@ final class ChetiwaLocalizations {
   String selectedLocationLabel(String location) => _fr
       ? 'Lieu sélectionné : $location. Ouvrir le choix du lieu'
       : 'Selected place: $location. Open place picker';
+  String recenterOnSelectedLocation(String location) => _fr
+      ? 'Recentrer la carte sur le lieu sélectionné : $location'
+      : 'Recenter map on selected place: $location';
   String get loadingWeather =>
       _fr ? 'Chargement de la météo…' : 'Loading weather…';
   String get loadingRadar => _fr ? 'Chargement du radar…' : 'Loading radar…';

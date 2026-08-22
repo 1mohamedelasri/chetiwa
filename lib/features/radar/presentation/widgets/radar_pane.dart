@@ -281,6 +281,7 @@ final class _RadarMapState extends State<_RadarMap> {
                 right: 10,
                 bottom: _timelineHeight + 12,
                 child: _RecenterButton(
+                  locationName: widget.forecast.locationName,
                   onPressed: () => _mapController.move(center, _regionalZoom),
                 ),
               ),
@@ -804,28 +805,42 @@ final class _RadarLegend extends StatelessWidget {
 }
 
 final class _RecenterButton extends StatelessWidget {
-  const _RecenterButton({required this.onPressed});
+  const _RecenterButton({required this.locationName, required this.onPressed});
 
+  final String locationName;
   final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) => Material(
-    color: ChetiwaColors.backgroundPrimary.withValues(alpha: 0.88),
-    borderRadius: BorderRadius.circular(ChetiwaRadius.small),
-    child: InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(ChetiwaRadius.small),
-      child: const SizedBox(
-        width: 42,
-        height: 42,
-        child: Icon(
-          Icons.my_location_rounded,
-          size: 19,
-          color: ChetiwaColors.textPrimary,
+  Widget build(BuildContext context) {
+    final label = context.l10n.recenterOnSelectedLocation(locationName);
+    return Semantics(
+      button: true,
+      label: label,
+      child: Tooltip(
+        message: label,
+        child: Material(
+          color: ChetiwaColors.backgroundPrimary.withValues(alpha: 0.88),
+          borderRadius: BorderRadius.circular(ChetiwaRadius.small),
+          child: InkWell(
+            key: const Key('radar-recenter-selected-location'),
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(ChetiwaRadius.small),
+            child: const SizedBox(
+              width: 42,
+              height: 42,
+              child: Icon(
+                // This is intentionally not `my_location`: the action follows
+                // the place selected in Chetiwa, never the phone's live GPS.
+                Icons.center_focus_strong_rounded,
+                size: 19,
+                color: ChetiwaColors.textPrimary,
+              ),
+            ),
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 final class _UserLocationMarker extends StatelessWidget {
