@@ -162,6 +162,7 @@ final class ProviderGateway {
     final usesRainViewer = _config.radarMetadataUri.host.contains(
       'rainviewer.com',
     );
+    final usesLibreWxr = _config.radarMetadataUri.host.endsWith('librewxr.net');
     if (_config.isProduction && usesRainViewer) {
       throw const ApiException(
         statusCode: 503,
@@ -188,7 +189,7 @@ final class ProviderGateway {
         if (path is! String || timestamp is! num) continue;
         final frameId = base64Url.encode(utf8.encode(path)).replaceAll('=', '');
         final tileUrlTemplate = _config.publicBaseUrl == null
-            ? '$host$path/256/{z}/{x}/{y}/2/1_0.png'
+            ? '$host$path/256/{z}/{x}/{y}/${usesLibreWxr ? '10/1_1' : '2/1_0'}.png'
             : '${_config.publicBaseUrl}/v1/radar/tiles/$frameId/{z}/{x}/{y}';
         frames.add(<String, Object?>{
           'time': _isoFromEpoch(timestamp),
@@ -216,7 +217,11 @@ final class ProviderGateway {
       },
       'frames': frames,
       'provider': <String, Object?>{
-        'id': usesRainViewer ? 'rainviewer-development' : 'configured-radar',
+        'id': usesRainViewer
+            ? 'rainviewer-development'
+            : usesLibreWxr
+            ? 'librewxr'
+            : 'configured-radar',
         'kind': 'radar',
       },
     };

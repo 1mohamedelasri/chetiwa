@@ -90,7 +90,7 @@ final class RuntimeConfig {
       openMeteoApiKey: _optional(source['OPEN_METEO_API_KEY']),
       radarMetadataUri: readUri(
         'RADAR_METADATA_URL',
-        'https://api.rainviewer.com/public/weather-maps.json',
+        'https://api.librewxr.net/public/weather-maps.json',
       ),
       reverseGeocodingUri: readUri(
         'REVERSE_GEOCODING_URL',
@@ -106,8 +106,12 @@ final class RuntimeConfig {
         source['RADAR_PREMIUM_SESSIONS'],
         fallback: 200,
       ),
+      // LibreWXR deliberately mirrors the RainViewer metadata format. Keeping
+      // the origin template here (rather than in the mobile client) means the
+      // public API can cache, meter and replace it without an app release.
       radarTileUrlTemplate: _optionalUrlTemplate(
-        source['RADAR_TILE_URL_TEMPLATE'],
+        source['RADAR_TILE_URL_TEMPLATE'] ??
+            'https://api.librewxr.net{frame}/256/{z}/{x}/{y}/10/1_1.png',
       ),
       sharedCounterUrl: _optionalUrl(source['SHARED_COUNTER_URL']),
       monthlyBudgetCents: _positiveInt(
@@ -116,7 +120,10 @@ final class RuntimeConfig {
       ),
       radarTileCostCents: _nonNegativeInt(
         source['RADAR_TILE_COST_CENTS'],
-        fallback: 1,
+        // LibreWXR's public beta endpoint has no per-tile charge. This is an
+        // origin-provider estimate only; Cloud Run/network spending is
+        // monitored separately and must not falsely kill free radar traffic.
+        fallback: 0,
       ),
       globalKillSwitch: _boolean(source['GLOBAL_KILL_SWITCH'], fallback: false),
       publicBaseUrl: _optionalUrl(source['PUBLIC_BASE_URL']),

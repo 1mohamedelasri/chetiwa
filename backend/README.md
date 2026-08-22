@@ -71,18 +71,21 @@ Firestore n’est pas injecté.
 | `OPEN_METEO_FORECAST_URL` | remplacement contrôlé de l’URL de prévisions |
 | `OPEN_METEO_METEOFRANCE_URL` | route AROME 15 min pour la France métropolitaine |
 | `OPEN_METEO_GEOCODING_URL` | remplacement contrôlé de l’URL de recherche |
-| `RADAR_METADATA_URL` | métadonnées du fournisseur radar autorisé |
+| `RADAR_METADATA_URL` | métadonnées radar ; LibreWXR est le défaut bêta |
 | `ARCGIS_API_KEY` | reverse geocoding ArcGIS, si cette option est retenue |
 | `REVERSE_GEOCODING_URL` | endpoint de reverse geocoding |
-| `RADAR_TILE_URL_TEMPLATE` | source des tuiles avec `{frame}/{z}/{x}/{y}` |
+| `RADAR_TILE_URL_TEMPLATE` | source des tuiles avec `{frame}/{z}/{x}/{y}` ; LibreWXR est le défaut bêta |
 | `SHARED_COUNTER_URL` | compteur atomique Redis/Firestore partagé |
 | `MONTHLY_BUDGET_CENTS` | plafond mensuel des coûts origine |
-| `RADAR_TILE_COST_CENTS` | coût estimé par tuile origine |
+| `RADAR_TILE_COST_CENTS` | coût estimé par tuile origine (0 pour LibreWXR bêta) |
 | `GLOBAL_KILL_SWITCH` | désactivation immédiate du Radar et des tuiles |
 
 Les URLs externes doivent être HTTPS hors profil local. Le service refuse
-RainViewer et Open-Meteo sans clé commerciale en profil `production` afin
-d’éviter une publication accidentelle hors licence.
+RainViewer en profil `production`, mais accepte LibreWXR, dont l'API publique
+est attribuée dans l'application. Open-Meteo exige toujours une clé commerciale
+en production. Le proxy Cloud Run est le seul point d'accès mobile : il met en
+cache les métadonnées et tuiles, applique les quotas et permet un remplacement
+du fournisseur sans mise à jour de l'application.
 
 ## Vérification
 

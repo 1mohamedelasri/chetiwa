@@ -169,7 +169,55 @@ void main() {
     expect(text, isNot(contains('test-key')));
   });
 
+  test('LibreWXR radar exposes observations and nowcast frames', () async {
+    final app = appWith(
+      MockClient(
+        (request) async => http.Response(
+          jsonEncode(<String, Object?>{
+            'host': 'https://tile.example.test',
+            'radar': <String, Object?>{
+              'past': <Object?>[
+                <String, Object?>{'time': 1776707400, 'path': '/past'},
+              ],
+              'nowcast': <Object?>[
+                <String, Object?>{'time': 1776708000, 'path': '/future'},
+              ],
+            },
+          }),
+          200,
+        ),
+      ),
+    );
+    final response = await app(
+      Request(
+        'GET',
+        Uri.parse(
+          'http://localhost/v1/radar/frames?latitude=52.52&longitude=13.405',
+        ),
+      ),
+    );
+    final body =
+        jsonDecode(await response.readAsString()) as Map<String, Object?>;
+    final data = body['data'] as Map<String, Object?>;
+    final frames = data['frames'] as List<Object?>;
+
+    expect(response.statusCode, 200);
+    expect(frames, hasLength(2));
+    expect((frames.first as Map<String, Object?>)['kind'], 'observation');
+    expect((frames.last as Map<String, Object?>)['kind'], 'nowcast');
+    expect(
+      (frames.last as Map<String, Object?>)['tileUrlTemplate'],
+      contains('/10/1_1.png'),
+    );
+    expect((data['provider'] as Map<String, Object?>)['id'], 'librewxr');
+  });
+
   test('RainViewer radar frames remain observations only', () async {
+    config = RuntimeConfig.fromEnvironment(const <String, String>{
+      'ARCGIS_API_KEY': 'test-key',
+      'RADAR_METADATA_URL':
+          'https://api.rainviewer.com/public/weather-maps.json',
+    });
     final app = appWith(
       MockClient(
         (request) async => http.Response(
@@ -203,7 +251,7 @@ void main() {
 
     expect(response.statusCode, 200);
     expect(frames, hasLength(1));
-    expect((frames.first as Map<String, Object?>)['kind'], 'observation');
+    expect((frames.single as Map<String, Object?>)['kind'], 'observation');
   });
 
   test('invalid public input returns a stable 400 error', () async {
