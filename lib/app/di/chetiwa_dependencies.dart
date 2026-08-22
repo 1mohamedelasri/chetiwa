@@ -9,6 +9,7 @@ import '../../core/location/location_repository.dart';
 import '../../core/location/open_meteo_location_repository.dart';
 import '../../core/network/chetiwa_api_client.dart';
 import '../../core/notifications/notification_permission_gateway.dart';
+import '../../core/notifications/rain_notification_scheduler.dart';
 import '../../core/time/weather_clock.dart';
 import '../../features/forecast/data/cache/forecast_cache_data_source.dart';
 import '../../features/forecast/data/datasources/fixture_forecast_data_source.dart';
@@ -24,6 +25,7 @@ import '../../features/radar/data/repositories/rain_viewer_radar_repository.dart
 import '../../features/radar/data/providers/rain_viewer_radar_provider.dart';
 import '../../features/radar/domain/repositories/radar_repository.dart';
 import '../../features/alerts/application/alert_preferences_controller.dart';
+import '../../features/alerts/application/local_rain_alert_coordinator.dart';
 import '../../features/monetization/domain/ads_repository.dart';
 import '../../features/monetization/domain/consent_repository.dart';
 import '../preferences/app_preferences_controller.dart';
@@ -39,6 +41,7 @@ final class ChetiwaDependencies {
     required this.preferencesController,
     required this.alertPreferencesController,
     required this.notificationPermissionGateway,
+    required this.rainNotificationScheduler,
     required this.adsRepository,
     required this.consentRepository,
     http.Client? client,
@@ -77,6 +80,7 @@ final class ChetiwaDependencies {
         alertPreferencesController: AlertPreferencesController(),
         notificationPermissionGateway:
             const SystemNotificationPermissionGateway(),
+        rainNotificationScheduler: SystemRainNotificationScheduler(),
         adsRepository: const DisabledAdsRepository(),
         consentRepository: const DisabledConsentRepository(),
         forecastRepository: directForecast,
@@ -110,6 +114,7 @@ final class ChetiwaDependencies {
       alertPreferencesController: AlertPreferencesController(),
       notificationPermissionGateway:
           const SystemNotificationPermissionGateway(),
+      rainNotificationScheduler: SystemRainNotificationScheduler(),
       adsRepository: const DisabledAdsRepository(),
       consentRepository: const DisabledConsentRepository(),
       forecastRepository: fallback
@@ -131,6 +136,7 @@ final class ChetiwaDependencies {
     preferencesController: AppPreferencesController(persist: false),
     alertPreferencesController: AlertPreferencesController(persist: false),
     notificationPermissionGateway: FixtureNotificationPermissionGateway(),
+    rainNotificationScheduler: FixtureRainNotificationScheduler(),
     adsRepository: const DisabledAdsRepository(),
     consentRepository: const DisabledConsentRepository(),
     forecastRepository: const FixtureForecastRepository(
@@ -152,6 +158,7 @@ final class ChetiwaDependencies {
     AppPreferencesController? preferencesController,
     AlertPreferencesController? alertPreferencesController,
     NotificationPermissionGateway? notificationPermissionGateway,
+    RainNotificationScheduler? rainNotificationScheduler,
     AdsRepository? adsRepository,
     ConsentRepository? consentRepository,
   }) => ChetiwaDependencies._(
@@ -169,6 +176,8 @@ final class ChetiwaDependencies {
         AlertPreferencesController(persist: false),
     notificationPermissionGateway:
         notificationPermissionGateway ?? FixtureNotificationPermissionGateway(),
+    rainNotificationScheduler:
+        rainNotificationScheduler ?? FixtureRainNotificationScheduler(),
     adsRepository: adsRepository ?? const DisabledAdsRepository(),
     consentRepository: consentRepository ?? const DisabledConsentRepository(),
   );
@@ -181,9 +190,19 @@ final class ChetiwaDependencies {
   final AppPreferencesController preferencesController;
   final AlertPreferencesController alertPreferencesController;
   final NotificationPermissionGateway notificationPermissionGateway;
+  final RainNotificationScheduler rainNotificationScheduler;
   final AdsRepository adsRepository;
   final ConsentRepository consentRepository;
   final http.Client? _client;
+
+  LocalRainAlertCoordinator get localRainAlertCoordinator =>
+      LocalRainAlertCoordinator(
+        forecastRepository: forecastRepository,
+        locationRepository: locationRepository,
+        preferences: alertPreferencesController,
+        scheduler: rainNotificationScheduler,
+        clock: weatherClock,
+      );
 
   void dispose() {
     _client?.close();

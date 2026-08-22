@@ -16,6 +16,21 @@ import '../../application/weather_section_cubit.dart';
 import '../../domain/entities/forecast.dart';
 import '../../domain/services/forecast_snapshot_builder.dart';
 
+Future<ChetiwaLocation?> showChetiwaLocationPicker(
+  BuildContext context, {
+  required LocationRepository repository,
+  bool persistAsMainLocation = false,
+}) => showModalBottomSheet<ChetiwaLocation>(
+  context: context,
+  useSafeArea: true,
+  isScrollControlled: true,
+  backgroundColor: Theme.of(context).colorScheme.surface,
+  builder: (_) => _LocationPicker(
+    repository: repository,
+    persistAsMainLocation: persistAsMainLocation,
+  ),
+);
+
 final class ChetiwaHeader extends StatelessWidget {
   const ChetiwaHeader({
     required this.locationName,
@@ -76,12 +91,9 @@ final class LocationSelector extends StatelessWidget {
       child: InkWell(
         onTap: () async {
           final repository = context.read<LocationRepository>();
-          final selected = await showModalBottomSheet<ChetiwaLocation>(
-            context: context,
-            useSafeArea: true,
-            isScrollControlled: true,
-            backgroundColor: Theme.of(context).colorScheme.surface,
-            builder: (_) => _LocationPicker(repository: repository),
+          final selected = await showChetiwaLocationPicker(
+            context,
+            repository: repository,
           );
           if (selected != null) onLocationSelected(selected);
         },
@@ -312,9 +324,13 @@ final class AdaptiveAdBannerSlot extends StatelessWidget {
 }
 
 final class _LocationPicker extends StatefulWidget {
-  const _LocationPicker({required this.repository});
+  const _LocationPicker({
+    required this.repository,
+    required this.persistAsMainLocation,
+  });
 
   final LocationRepository repository;
+  final bool persistAsMainLocation;
 
   @override
   State<_LocationPicker> createState() => _LocationPickerState();
@@ -401,6 +417,10 @@ final class _LocationPickerState extends State<_LocationPicker> {
     try {
       final location = await widget.repository.getCurrentLocation();
       if (!mounted) return;
+      if (widget.persistAsMainLocation) {
+        await widget.repository.setMainLocation(location);
+      }
+      if (!mounted) return;
       Navigator.pop(context, location);
     } on LocationException catch (error) {
       if (!mounted) return;
@@ -425,10 +445,10 @@ final class _LocationPickerState extends State<_LocationPicker> {
   }
 
   Future<void> _select(ChetiwaLocation location) async {
-    await Future.wait<void>([
-      widget.repository.setMainLocation(location),
-      widget.repository.remember(location),
-    ]);
+    await widget.repository.remember(location);
+    if (widget.persistAsMainLocation) {
+      await widget.repository.setMainLocation(location);
+    }
     if (mounted) Navigator.pop(context, location);
   }
 

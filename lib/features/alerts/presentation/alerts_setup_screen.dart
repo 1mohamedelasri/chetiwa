@@ -6,7 +6,10 @@ import 'package:provider/provider.dart';
 import '../../../app/theme/chetiwa_tokens.dart';
 import '../../../core/notifications/notification_permission_gateway.dart';
 import '../../../core/location/active_location_controller.dart';
+import '../../../core/location/coordinates.dart';
+import '../../../core/location/location_repository.dart';
 import '../application/alert_preferences_controller.dart';
+import '../application/local_rain_alert_coordinator.dart';
 import '../data/chetiwa_alert_api.dart';
 import '../../analytics/application/analytics_tracker.dart';
 
@@ -77,13 +80,31 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
   }
 
   Future<void> _setAlertsEnabled(bool enabled) async {
-    await context.read<AlertPreferencesController>().setEnabled(enabled);
+    final preferences = context.read<AlertPreferencesController>();
+    final coordinator = context.read<LocalRainAlertCoordinator?>();
+    final analytics = context.read<AnalyticsTracker?>();
+    await preferences.setEnabled(enabled);
+    final result = await coordinator?.sync();
+    if (enabled && result == RainAlertSyncResult.noMainLocation && mounted) {
+      await preferences.setEnabled(false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Choisissez d’abord un lieu principal dans Réglages.'),
+        ),
+      );
+      return;
+    }
     if (mounted) {
-      final analytics = context.read<AnalyticsTracker?>();
       if (analytics != null) {
         unawaited(analytics.alertPreferenceChanged(enabled));
       }
     }
+  }
+
+  void _resync() {
+    final coordinator = context.read<LocalRainAlertCoordinator?>();
+    if (coordinator != null) unawaited(coordinator.sync());
   }
 
   @override
@@ -112,14 +133,22 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
                   ListTile(
                     leading: const Icon(Icons.location_on_outlined),
                     title: const Text('Lieu'),
-                    subtitle: Consumer<ActiveLocationController>(
-                      builder: (context, location, _) => Text(
-                        location.location == null
-                            ? 'Lieu principal · chargement…'
-                            : location.location!.isCurrentDevicePosition
-                            ? '${location.location!.label} · temporaire, non enregistrée'
-                            : '${location.location!.label} · lieu principal',
-                      ),
+                    subtitle: FutureBuilder<ChetiwaLocation?>(
+                      future: context
+                          .read<LocationRepository?>()
+                          ?.getMainLocation(),
+                      builder: (context, snapshot) {
+                        final saved = snapshot.data;
+                        final active = context
+                            .watch<ActiveLocationController>()
+                            .location;
+                        final location = saved ?? active;
+                        return Text(
+                          location == null
+                              ? 'Aucun lieu principal sélectionné'
+                              : '${location.label} · lieu principal',
+                        );
+                      },
                     ),
                     trailing: const Icon(Icons.lock_outline, size: 18),
                   ),
@@ -158,8 +187,10 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
                           max: 60,
                           divisions: 11,
                           label: '${preferences.leadMinutes} min',
-                          onChanged: (value) =>
-                              preferences.setLeadMinutes(value.round()),
+                          onChanged: (value) async {
+                            await preferences.setLeadMinutes(value.round());
+                            _resync();
+                          },
                         ),
                       ),
                       const Divider(height: 1),
@@ -185,8 +216,12 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
                             ],
                             selected: {preferences.minimumIntensity},
                             showSelectedIcon: false,
-                            onSelectionChanged: (value) =>
-                                preferences.setMinimumIntensity(value.first),
+                            onSelectionChanged: (value) async {
+                              await preferences.setMinimumIntensity(
+                                value.first,
+                              );
+                              _resync();
+                            },
                           ),
                         ),
                       ),
@@ -199,7 +234,10 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
                           '${preferences.quietHoursStart} – ${preferences.quietHoursEnd}',
                         ),
                         value: preferences.quietHoursEnabled,
-                        onChanged: preferences.setQuietHoursEnabled,
+                        onChanged: (value) async {
+                          await preferences.setQuietHoursEnabled(value);
+                          _resync();
+                        },
                       ),
                     ],
                   ),

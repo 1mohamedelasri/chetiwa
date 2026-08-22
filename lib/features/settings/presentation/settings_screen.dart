@@ -11,7 +11,9 @@ import '../../../core/location/location_repository.dart';
 import '../../../core/location/active_location_controller.dart';
 import '../../../core/l10n/chetiwa_localizations.dart';
 import '../../alerts/application/alert_preferences_controller.dart';
+import '../../alerts/application/local_rain_alert_coordinator.dart';
 import '../../analytics/application/analytics_consent_controller.dart';
+import '../../forecast/presentation/widgets/weather_chrome.dart';
 
 final class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -33,7 +35,40 @@ final class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _clearMainLocation() async {
     await context.read<LocationRepository>().clearMainLocation();
-    if (mounted) setState(() => _mainLocation = Future.value(null));
+    if (!mounted) return;
+    context.read<ActiveLocationController>().clear();
+    await context.read<LocalRainAlertCoordinator>().sync();
+    if (mounted) {
+      setState(() {
+        _mainLocation = Future.value(null);
+      });
+    }
+  }
+
+  Future<void> _chooseMainLocation() async {
+    final repository = context.read<LocationRepository>();
+    final selected = await showChetiwaLocationPicker(
+      context,
+      repository: repository,
+      persistAsMainLocation: true,
+    );
+    if (selected == null || !mounted) return;
+    context.read<ActiveLocationController>().setActive(selected);
+    setState(() {
+      _mainLocation = Future.value(selected);
+    });
+    final result = await context.read<LocalRainAlertCoordinator>().sync();
+    if (!mounted) return;
+    final message = switch (result) {
+      RainAlertSyncResult.scheduled =>
+        'Lieu principal enregistré et prochaine alerte programmée.',
+      RainAlertSyncResult.failed =>
+        'Lieu enregistré. La météo sera resynchronisée plus tard.',
+      _ => 'Lieu principal enregistré sur cet appareil.',
+    };
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _confirmClearLocalData() async {
@@ -75,7 +110,9 @@ final class _SettingsScreenState extends State<SettingsScreen> {
     await context.read<AppPreferencesController>().clear();
     if (!mounted) return;
     context.read<ActiveLocationController>().clear();
-    setState(() => _mainLocation = Future.value(null));
+    setState(() {
+      _mainLocation = Future.value(null);
+    });
   }
 
   Future<void> _changeAnalyticsConsent(bool enabled) async {
@@ -176,12 +213,13 @@ final class _SettingsScreenState extends State<SettingsScreen> {
                             : strings.savedOnDevice(location.label),
                       ),
                       trailing: location == null
-                          ? const Text('Paris')
+                          ? const Icon(Icons.chevron_right_rounded)
                           : IconButton(
                               tooltip: context.l10n.clear,
                               onPressed: _clearMainLocation,
                               icon: const Icon(Icons.delete_outline_rounded),
                             ),
+                      onTap: _chooseMainLocation,
                     );
                   },
                 ),
@@ -330,11 +368,12 @@ final class _SettingsCard extends StatelessWidget {
   final List<Widget> children;
 
   @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      color: Theme.of(context).colorScheme.surface,
+  Widget build(BuildContext context) => Material(
+    color: Theme.of(context).colorScheme.surface,
+    clipBehavior: Clip.antiAlias,
+    shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
-      border: Border.all(color: Theme.of(context).colorScheme.outline),
+      side: BorderSide(color: Theme.of(context).colorScheme.outline),
     ),
     child: Column(children: children),
   );

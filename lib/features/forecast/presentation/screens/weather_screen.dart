@@ -14,6 +14,7 @@ import '../../../radar/application/radar_bloc.dart';
 import '../../../radar/domain/repositories/radar_repository.dart';
 import '../../../radar/presentation/widgets/radar_pane.dart';
 import '../../../analytics/application/analytics_tracker.dart';
+import '../../../alerts/application/local_rain_alert_coordinator.dart';
 import '../../application/forecast_bloc.dart';
 import '../../application/graph_horizon_cubit.dart';
 import '../../application/weather_section_cubit.dart';
@@ -76,6 +77,7 @@ final class _WeatherViewState extends State<_WeatherView>
     if (state == AppLifecycleState.resumed) {
       context.read<ForecastBloc>().add(const ForecastRefreshed());
       context.read<RadarBloc>().add(const RadarRequested());
+      unawaited(context.read<LocalRainAlertCoordinator>().sync());
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {

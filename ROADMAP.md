@@ -280,7 +280,8 @@ base cloud, un moteur push ou Remote Config pour la bêta frugale.
 ## Lieux enregistrés
 
 - ✅ Free : un lieu principal, enregistré uniquement sur l'appareil et
-  remplaçable lors d'une nouvelle sélection.
+  remplaçable depuis Préférences par recherche mondiale, GPS ou choix sur la
+  carte. Le lieu consulté ponctuellement ne remplace plus ce lieu principal.
 - ⬜ Chetiwa+ : plusieurs lieux nommés (Maison, Travail, etc.).
 - ⬜ Réordonner, renommer, supprimer et choisir le lieu par défaut.
 - ⬜ Configurer les alertes séparément pour chaque lieu.
@@ -305,9 +306,9 @@ et sélection d'un lieu sans accorder l'accès GPS.
 - ✅ Afficher un écran explicatif avant le popup système.
 - ✅ Demander l’autorisation uniquement quand l’utilisateur active une alerte.
 - 🟡 Proposer : délai avant pluie, intensité minimale, lieux, heures silencieuses et
-  activation/désactivation globale : délai, seuil, quiet hours et interrupteur
-  global sont terminés localement ; sélection multi-lieux et persistance serveur
-  restent à relier.
+  activation/désactivation globale : délai, seuil, quiet hours, lieu principal
+  et interrupteur global sont terminés localement ; les alertes multi-lieux
+  restent réservées à Chetiwa+.
 - ⬜ Permettre d’ouvrir directement le bon lieu et la bonne timeline depuis la
   notification.
 - 🟡 Afficher l’état exact : autorisée ou bloquée par le système est affiché ;
@@ -317,8 +318,16 @@ et sélection d'un lieu sans accorder l'accès GPS.
 
 ## Décision MVP
 
-- ✅ L'écran et les préférences locales sont prêts ; aucune alerte « temps réel »
-  fiable n'est promise ni activée en arrière-plan dans la bêta frugale.
+- ✅ Programmer réellement sur iOS et Android la prochaine alerte pluie locale
+  du lieu principal à partir de la prévision Open-Meteo, avec délai, seuil et
+  heures silencieuses. La programmation est resynchronisée à la modification
+  des réglages et quand l'application revient au premier plan ; une alerte déjà
+  programmée peut sonner lorsque l'application est fermée.
+- ✅ Conserver le MVP sans Firebase Messaging ni moteur serveur : si
+  l'application reste fermée et que la prévision change après la dernière
+  synchronisation, aucune nouvelle donnée ne peut être téléchargée en continu.
+  Cette limite doit rester explicite et ne pas être présentée comme une alerte
+  temps réel garantie.
 - ⬜ Débloquer cette phase seulement après quatre semaines de bêta, une mesure de
   précision en mode silencieux et un plafond de coût par alerte validé.
 

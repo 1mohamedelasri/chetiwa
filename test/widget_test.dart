@@ -123,6 +123,15 @@ void main() {
       find.byKey(const Key('selected-navigation-indicator')),
       findsOneWidget,
     );
+
+    await tester.tap(find.byKey(const Key('open-settings-navigation')));
+    await tester.pumpAndSettle();
+    expect(find.text('Réglages'), findsWidgets);
+    await tester.tap(find.byKey(const Key('main-location-settings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Paris').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Paris, France'), findsOneWidget);
   });
 }
 

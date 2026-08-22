@@ -11,6 +11,7 @@ import '../core/location/location_repository.dart';
 import '../core/location/active_location_controller.dart';
 import '../core/time/weather_clock.dart';
 import '../core/notifications/notification_permission_gateway.dart';
+import '../features/alerts/application/local_rain_alert_coordinator.dart';
 import '../core/l10n/chetiwa_localizations.dart';
 import 'di/chetiwa_dependencies.dart';
 import 'router/app_router.dart';
@@ -72,6 +73,9 @@ final class _ChetiwaAppState extends State<ChetiwaApp> {
           ),
           RepositoryProvider<NotificationPermissionGateway>.value(
             value: _dependencies.notificationPermissionGateway,
+          ),
+          RepositoryProvider<LocalRainAlertCoordinator>.value(
+            value: _dependencies.localRainAlertCoordinator,
           ),
           RepositoryProvider<AdsRepository>.value(
             value: _dependencies.adsRepository,
