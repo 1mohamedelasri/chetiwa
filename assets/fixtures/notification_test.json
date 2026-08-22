@@ -1,0 +1,7 @@
+{
+  "location": "Paris, France",
+  "temperature_c": 18,
+  "wind_kph": 12,
+  "brief": {"type": "imminent", "headline": "Pluie bientôt", "detail": "Test de notification", "intensity": "moderate", "rain_start_min": 2, "rain_end_min": 32},
+  "points": [[0,0],[1,0],[2,1.2],[7,1.8],[12,1.4],[17,0.8],[22,0.3],[27,0],[60,0],[120,0]]
+}

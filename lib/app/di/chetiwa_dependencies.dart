@@ -57,6 +57,12 @@ final class ChetiwaDependencies {
       provider: OpenMeteoForecastProvider(client),
       cache: forecastCache,
     );
+    final notificationTestForecast = FixtureForecastRepository(
+      const FixtureForecastDataSource(
+        fixtureName: 'notification_test',
+        locationName: 'Paris, France',
+      ),
+    );
     final directRadar = RainViewerRadarRepository(
       provider: RainViewerRadarProvider(client),
       cache: radarCache,
@@ -83,7 +89,9 @@ final class ChetiwaDependencies {
         rainNotificationScheduler: SystemRainNotificationScheduler(),
         adsRepository: const DisabledAdsRepository(),
         consentRepository: const DisabledConsentRepository(),
-        forecastRepository: directForecast,
+        forecastRepository: ApiConfig.usesNotificationTestForecast
+            ? notificationTestForecast
+            : directForecast,
         radarRepository: directRadar,
         locationRepository: directLocation,
         activeLocationController: ActiveLocationController(directLocation),
@@ -117,7 +125,9 @@ final class ChetiwaDependencies {
       rainNotificationScheduler: SystemRainNotificationScheduler(),
       adsRepository: const DisabledAdsRepository(),
       consentRepository: const DisabledConsentRepository(),
-      forecastRepository: fallback
+      forecastRepository: ApiConfig.usesNotificationTestForecast
+          ? notificationTestForecast
+          : fallback
           ? DevelopmentFallbackForecastRepository(
               backendForecast,
               directForecast,

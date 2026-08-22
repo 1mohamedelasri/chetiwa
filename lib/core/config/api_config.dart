@@ -3,6 +3,13 @@ abstract final class ApiConfig {
     'CHETIWA_ENV',
     defaultValue: 'development',
   );
+
+  /// Development-only switch used to exercise the real OS notification path
+  /// without waiting for weather. It is ignored by production builds.
+  static const notificationTestMode = bool.fromEnvironment(
+    'CHETIWA_NOTIFICATION_TEST_MODE',
+    defaultValue: false,
+  );
   static const chetiwaApiBaseUrl = String.fromEnvironment(
     'CHETIWA_API_BASE_URL',
   );
@@ -25,6 +32,8 @@ abstract final class ApiConfig {
       'https://api.rainviewer.com/public/weather-maps.json';
 
   static bool get isProduction => appEnvironment == 'production';
+  static bool get usesNotificationTestForecast =>
+      notificationTestMode && !isProduction;
   static bool get usesChetiwaBackend => chetiwaApiBaseUrl.trim().isNotEmpty;
   static bool get allowsDirectProviderFallback =>
       !isProduction && _directFallbackRequested;

@@ -90,6 +90,22 @@ The default scenario is `light_rain`. Change `fixtureName` in `ChetiwaDependenci
 
 Widget tests still use the deterministic fixture dependencies. The normal app entry point uses live provider dependencies.
 
+### Real-device notification test
+
+To test the operating-system notification without waiting for rain, run a
+development build with the notification fixture enabled:
+
+```sh
+flutter run --dart-define=CHETIWA_ENV=development \
+  --dart-define=CHETIWA_NOTIFICATION_TEST_MODE=true
+```
+
+On the device, choose **Paris, France** as the main location, allow
+notifications, and enable Smart Rain Alerts. The fixture contains moderate
+rain beginning in about two minutes, so the app schedules a real local
+notification. Close the app and wait for it. This switch is development-only
+and is ignored when `CHETIWA_ENV=production`.
+
 ## Android network troubleshooting
 
 The live app needs Internet access on a first launch. If an Android emulator
