@@ -43,7 +43,7 @@ void main() {
     expect(frames.last.kind, WeatherDataKind.radarNowcast);
     expect(frames.first.providerName, 'RainViewer');
     expect(frames.last.provenance.provider, 'RainViewer');
-    expect(frames.last.tileUrlTemplate, contains('/512/{z}/{x}/{y}/2/1_1.png'));
+    expect(frames.last.tileUrlTemplate, contains('/256/{z}/{x}/{y}/2/1_0.png'));
     expect(cached?.frames, frames);
     client.close();
   });

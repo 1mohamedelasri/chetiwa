@@ -70,10 +70,7 @@ final class RainViewerRadarRepository implements RadarRepository {
           progress: 0,
           // RainViewer's first option enables server-side smoothing. It keeps
           // genuine precipitation cells legible without manufacturing echoes.
-          // RainViewer serves a maximum native zoom of 7. Request the 512px
-          // variant so high-density screens get a cleaner tile at that zoom
-          // instead of upscaling a 256px image.
-          tileUrlTemplate: '$host$path/512/{z}/{x}/{y}/2/1_1.png',
+          tileUrlTemplate: '$host$path/256/{z}/{x}/{y}/2/1_0.png',
           kind: raw.forecast
               ? WeatherDataKind.radarNowcast
               : WeatherDataKind.radarObservation,
