@@ -28,8 +28,13 @@ abstract final class ApiConfig {
       ? 'geocoding-api.open-meteo.com'
       : 'customer-geocoding-api.open-meteo.com';
 
-  static const rainViewerMetadataUrl =
-      'https://api.rainviewer.com/public/weather-maps.json';
+  /// Public beta endpoint used only by the development direct-provider path.
+  /// Production builds must use CHETIWA_API_BASE_URL instead.
+  static const radarMetadataUrl =
+      'https://radar.ezplatforms.com/public/weather-maps.json';
+
+  @Deprecated('Use radarMetadataUrl')
+  static const rainViewerMetadataUrl = radarMetadataUrl;
 
   static bool get isProduction => appEnvironment == 'production';
   static bool get usesNotificationTestForecast =>

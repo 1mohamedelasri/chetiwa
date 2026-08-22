@@ -12,7 +12,7 @@ final class RainViewerRadarProvider {
   final http.Client _client;
 
   Future<Map<String, dynamic>> fetchMetadata() async {
-    final uri = Uri.parse(ApiConfig.rainViewerMetadataUrl);
+    final uri = Uri.parse(ApiConfig.radarMetadataUrl);
     Object? lastError;
     var terminalIssue = WeatherDataIssue.offline;
     for (var attempt = 0; attempt < 3; attempt++) {
@@ -25,14 +25,14 @@ final class RainViewerRadarProvider {
           if (decoded is! Map<String, dynamic>) {
             throw const WeatherDataException(
               WeatherDataIssue.invalidResponse,
-              'Réponse RainViewer invalide',
+              'Réponse radar invalide',
             );
           }
           return decoded;
         }
         final error = WeatherDataException(
           WeatherDataIssue.providerUnavailable,
-          'RainViewer HTTP ${response.statusCode}',
+          'Radar HTTP ${response.statusCode}',
         );
         if (response.statusCode < 500 && response.statusCode != 429) {
           throw error;
@@ -52,7 +52,7 @@ final class RainViewerRadarProvider {
     }
     throw WeatherDataException(
       terminalIssue,
-      'RainViewer inaccessible après 3 tentatives: $lastError',
+      'Radar inaccessible après 3 tentatives: $lastError',
     );
   }
 }

@@ -1,4 +1,5 @@
 import '../../../../core/location/coordinates.dart';
+import '../../../../core/config/api_config.dart';
 import '../../../../core/weather/weather_data_provenance.dart';
 import '../../../../core/weather/weather_data_health.dart';
 import '../../domain/entities/radar_frame.dart';
@@ -25,6 +26,9 @@ final class RainViewerRadarRepository implements RadarRepository {
   Future<List<RadarFrame>> getFrames(Coordinates coordinates) async {
     final response = await _provider.fetchMetadata();
     final host = response['host'];
+    final usesLibreWxr = ApiConfig.radarMetadataUrl.contains(
+      'radar.ezplatforms.com',
+    );
     final radar = response['radar'];
     if (host is! String || radar is! Map<String, dynamic>) {
       throw const WeatherDataException(
@@ -33,16 +37,25 @@ final class RainViewerRadarRepository implements RadarRepository {
       );
     }
     final past = radar['past'] as List<dynamic>? ?? const [];
-    // RainViewer retired future/nowcast frames on 1 January 2026. Never
-    // surface a stale or legacy `nowcast` field as a forecast to the user.
-    // A licensed production provider can still return true nowcast frames via
-    // ChetiwaRadarRepository, which keeps the domain support intact.
+    // RainViewer retired future/nowcast frames. LibreWXR exposes a bounded
+    // nowcast window, so preserve it in the direct beta path.
+    final nowcast = usesLibreWxr
+        ? radar['nowcast'] as List<dynamic>? ?? const []
+        : const <dynamic>[];
     final rawFrames = RadarFramePolicy.select(
       past
           .whereType<Map<String, dynamic>>()
           .map((frame) => (json: frame, forecast: false))
+          .followedBy(
+            nowcast.whereType<Map<String, dynamic>>().map(
+              (frame) => (json: frame, forecast: true),
+            ),
+          )
           .toList(growable: false),
-      const [],
+      nowcast
+          .whereType<Map<String, dynamic>>()
+          .map((frame) => (json: frame, forecast: true))
+          .toList(growable: false),
     );
     if (rawFrames.isEmpty) {
       throw const WeatherDataException(
@@ -68,12 +81,12 @@ final class RainViewerRadarRepository implements RadarRepository {
             isUtc: true,
           ),
           progress: 0,
-          // RainViewer's first option enables server-side smoothing. It keeps
-          // genuine precipitation cells legible without manufacturing echoes.
-          tileUrlTemplate: '$host$path/256/{z}/{x}/{y}/2/1_0.png',
+          tileUrlTemplate:
+              '$host$path/256/{z}/{x}/{y}/${usesLibreWxr ? '10/1_1' : '2/1_0'}.png',
           kind: raw.forecast
               ? WeatherDataKind.radarNowcast
               : WeatherDataKind.radarObservation,
+          providerName: usesLibreWxr ? 'LibreWXR' : 'RainViewer',
         );
       }, growable: false),
     );

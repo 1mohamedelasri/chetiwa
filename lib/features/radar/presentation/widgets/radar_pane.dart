@@ -104,7 +104,7 @@ final class _RadarMapState extends State<_RadarMap> {
       if (state is RadarFailure) {
         return WeatherDataUnavailableView(
           issue: state.issue,
-          domainLabel: 'RainViewer',
+          domainLabel: 'LibreWXR',
           onRetry: () => context.read<RadarBloc>().add(const RadarRequested()),
         );
       }
@@ -261,7 +261,7 @@ final class _RadarMapState extends State<_RadarMap> {
                 child: WeatherDataStatusBanner(
                   key: const Key('radar-data-status'),
                   health: state.health,
-                  domainLabel: 'RainViewer',
+                  domainLabel: 'LibreWXR',
                   nowUtc: widget.snapshot.nowUtc,
                   dataUpdatedAt:
                       state.frames[state.currentObservationIndex].time,
@@ -449,8 +449,8 @@ final class _MapAttribution extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
         child: Text(
           baseMap.isSatellite
-              ? '© Esri, Maxar, Earthstar · Radar RainViewer'
-              : '© OpenStreetMap © CARTO · Radar RainViewer',
+              ? '© Esri, Maxar, Earthstar · Radar LibreWXR'
+              : '© OpenStreetMap © CARTO · Radar LibreWXR',
           style: const TextStyle(
             color: ChetiwaColors.textSecondary,
             fontSize: 8,

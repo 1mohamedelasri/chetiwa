@@ -13,43 +13,41 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test(
-    'keeps only observed RainViewer frames after nowcast retirement',
-    () async {
-      final client = MockClient(
-        (_) async => http.Response(
-          jsonEncode({
-            'host': 'https://tiles.example',
-            'radar': {
-              'past': [
-                {'time': 1787008800, 'path': '/v2/radar/observed'},
-              ],
-              'nowcast': [
-                {'time': 1787009400, 'path': '/v2/radar/forecast'},
-              ],
-            },
-          }),
-          200,
-        ),
-      );
-      final repository = RainViewerRadarRepository(
-        provider: RainViewerRadarProvider(client),
-        cache: const RadarCacheDataSource(),
-      );
+  test('keeps LibreWXR observations and nowcast frames', () async {
+    final client = MockClient(
+      (_) async => http.Response(
+        jsonEncode({
+          'host': 'https://tiles.example',
+          'radar': {
+            'past': [
+              {'time': 1787008800, 'path': '/v2/radar/observed'},
+            ],
+            'nowcast': [
+              {'time': 1787009400, 'path': '/v2/radar/forecast'},
+            ],
+          },
+        }),
+        200,
+      ),
+    );
+    final repository = RainViewerRadarRepository(
+      provider: RainViewerRadarProvider(client),
+      cache: const RadarCacheDataSource(),
+    );
 
-      final frames = await repository.getFrames(Coordinates.paris);
-      final cached = await repository.getCachedFrames(Coordinates.paris);
+    final frames = await repository.getFrames(Coordinates.paris);
+    final cached = await repository.getCachedFrames(Coordinates.paris);
 
-      expect(frames, hasLength(1));
-      expect(frames.first.kind, WeatherDataKind.radarObservation);
-      expect(frames.first.providerName, 'RainViewer');
-      expect(frames.first.provenance.provider, 'RainViewer');
-      expect(
-        frames.first.tileUrlTemplate,
-        contains('/256/{z}/{x}/{y}/2/1_0.png'),
-      );
-      expect(cached?.frames, frames);
-      client.close();
-    },
-  );
+    expect(frames, hasLength(3));
+    expect(frames.first.kind, WeatherDataKind.radarObservation);
+    expect(frames.first.providerName, 'LibreWXR');
+    expect(frames.first.provenance.provider, 'LibreWXR');
+    expect(
+      frames.first.tileUrlTemplate,
+      contains('/256/{z}/{x}/{y}/10/1_1.png'),
+    );
+    expect(frames.last.kind, WeatherDataKind.radarNowcast);
+    expect(cached?.frames, frames);
+    client.close();
+  });
 }

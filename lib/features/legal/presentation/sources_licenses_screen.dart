@@ -40,9 +40,9 @@ final class SourcesLicensesScreen extends StatelessWidget {
             url: 'https://open-meteo.com/',
           ),
           _SourceTile(
-            name: 'RainViewer',
+            name: 'LibreWXR',
             purpose: strings.sourceRainViewerPurpose,
-            url: 'https://www.rainviewer.com/',
+            url: 'https://github.com/JoshuaKimsey/LibreWXR',
           ),
           _SourceTile(
             name: 'CARTO · fond prototype',

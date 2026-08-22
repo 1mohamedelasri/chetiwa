@@ -8,7 +8,7 @@ final class RadarFrame extends Equatable {
     required this.progress,
     this.tileUrlTemplate,
     this.kind = WeatherDataKind.radarObservation,
-    this.providerName = 'RainViewer',
+    this.providerName = 'LibreWXR',
   });
 
   final DateTime time;

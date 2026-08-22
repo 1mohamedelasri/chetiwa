@@ -22,7 +22,7 @@ void main() {
 
     expect(find.text('Sources et licences'), findsOneWidget);
     expect(find.text('Open-Meteo'), findsOneWidget);
-    expect(find.text('RainViewer'), findsOneWidget);
+    expect(find.text('LibreWXR'), findsOneWidget);
   });
 
   testWidgets('localizes source purposes in English', (tester) async {
@@ -42,7 +42,10 @@ void main() {
 
     expect(find.text('Sources and licences'), findsOneWidget);
     expect(find.text('Forecasts and place search'), findsOneWidget);
-    expect(find.text('Precipitation radar imagery'), findsOneWidget);
+    expect(
+      find.text('Precipitation radar imagery via LibreWXR'),
+      findsOneWidget,
+    );
     expect(find.text('Satellite map base, when selected'), findsOneWidget);
   });
 }

@@ -151,8 +151,9 @@ final class ChetiwaLocalizations {
       : 'Before commercial distribution, Chetiwa will verify and archive the rights for every provider actually enabled.';
   String get sourceOpenMeteoPurpose =>
       _fr ? 'Prévisions et recherche de lieux' : 'Forecasts and place search';
-  String get sourceRainViewerPurpose =>
-      _fr ? 'Images radar de précipitations' : 'Precipitation radar imagery';
+  String get sourceRainViewerPurpose => _fr
+      ? 'Images radar de précipitations via LibreWXR'
+      : 'Precipitation radar imagery via LibreWXR';
   String get sourceCartoPurpose => _fr
       ? 'Fond de carte Routes, Clair et Sombre'
       : 'Streets, light and dark map base';
@@ -166,8 +167,8 @@ final class ChetiwaLocalizations {
       ? '$location · enregistré sur cet appareil'
       : '$location · saved on this device';
   String get weatherDataSources => _fr
-      ? 'Prévisions Open-Meteo · Radar RainViewer'
-      : 'Open-Meteo forecast · RainViewer radar';
+      ? 'Prévisions Open-Meteo · Radar LibreWXR'
+      : 'Open-Meteo forecast · LibreWXR radar';
   String get version => 'Version';
   String get skip => _fr ? 'Passer' : 'Skip';
   String get continueLabel => _fr ? 'Continuer' : 'Continue';

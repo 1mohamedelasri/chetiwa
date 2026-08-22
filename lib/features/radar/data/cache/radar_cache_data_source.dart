@@ -28,7 +28,7 @@ final class RadarCacheDataSource {
               progress: (frame['progress'] as num).toDouble(),
               tileUrlTemplate: frame['tile_url'] as String?,
               kind: _kindFromJson(frame),
-              providerName: frame['provider_name'] as String? ?? 'RainViewer',
+              providerName: frame['provider_name'] as String? ?? 'LibreWXR',
             );
           })
           .toList(growable: false);
