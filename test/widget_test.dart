@@ -18,12 +18,23 @@ void main() {
     await _loadFixture(tester);
 
     expect(find.byKey(const Key('rain-chart')), findsOneWidget);
+    expect(find.byKey(const ValueKey('rain-chart-cursor-now')), findsOneWidget);
     expect(find.byKey(const Key('graph-provenance-label')), findsOneWidget);
     expect(find.text('2H'), findsOneWidget);
     expect(find.text('Graph'), findsOneWidget);
     expect(find.byKey(const Key('adaptive-ad-banner-slot')), findsOneWidget);
     expect(
       find.byKey(const Key('selected-navigation-indicator')),
+      findsOneWidget,
+    );
+
+    await tester.drag(
+      find.byKey(const Key('rain-chart')),
+      const Offset(100, 0),
+    );
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('rain-chart-cursor-selected')),
       findsOneWidget,
     );
 
@@ -68,8 +79,7 @@ void main() {
       const Offset(-90, 0),
     );
     await tester.pump();
-    expect(find.text('OBSERVATION RADAR PASSÉE'), findsOneWidget);
-    expect(find.textContaining('historique'), findsOneWidget);
+    expect(find.textContaining('RADAR NOWCAST'), findsOneWidget);
     expect(find.byKey(const Key('radar-now-button')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('radar-now-button')));

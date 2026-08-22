@@ -98,6 +98,14 @@ final class RadarReady extends RadarState {
     return index < 0 ? frames.length - 1 : index;
   }
 
+  bool get hasNowcast => frames.any((frame) => frame.isNowcast);
+
+  int get playbackStartIndex {
+    if (hasNowcast) return currentObservationIndex;
+    final index = frames.indexWhere((frame) => frame.isObservation);
+    return index < 0 ? 0 : index;
+  }
+
   bool get isAtLatestObservation => selectedIndex == currentObservationIndex;
 
   @override
@@ -214,13 +222,10 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
       return;
     }
 
-    final firstObservation = current.frames.indexWhere(
-      (frame) => frame.isObservation,
-    );
     emit(
       _copyReady(
         current,
-        selectedIndex: firstObservation < 0 ? 0 : firstObservation,
+        selectedIndex: current.playbackStartIndex,
         isPlaying: true,
       ),
     );
@@ -241,7 +246,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
       emit(
         _copyReady(
           current,
-          selectedIndex: _firstObservationIndex(current.frames),
+          selectedIndex: current.playbackStartIndex,
           isPlaying: true,
         ),
       );
@@ -279,7 +284,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
     emit(
       _copyReady(
         current,
-        selectedIndex: _firstObservationIndex(current.frames),
+        selectedIndex: current.playbackStartIndex,
         isPlaying: true,
       ),
     );
@@ -305,14 +310,12 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
 
   void _startPlaybackTimer() {
     _playbackTimer = Timer.periodic(
-      const Duration(milliseconds: 650),
+      // Leave enough time for a physical device to fetch and decode the next
+      // radar tiles before advancing again. The tile layer still transitions
+      // quickly, but a slow mobile connection no longer skips every image.
+      const Duration(milliseconds: 900),
       (_) => add(const RadarPlaybackAdvanced()),
     );
-  }
-
-  int _firstObservationIndex(List<RadarFrame> frames) {
-    final first = frames.indexWhere((frame) => frame.isObservation);
-    return first < 0 ? 0 : first;
   }
 
   Future<void> _changeLocation(

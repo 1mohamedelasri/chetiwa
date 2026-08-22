@@ -180,10 +180,19 @@ final class _RadarMapState extends State<_RadarMap> {
                   ),
                   if (_radarVisible)
                     TileLayer(
+                      // Keep one TileLayer alive across frames. flutter_map
+                      // detects the URL change and reloads its images while
+                      // retaining the previous tiles until the next ones are
+                      // ready; recreating the layer here made playback look
+                      // frozen on physical devices with normal network lag.
                       urlTemplate: tileUrl,
                       userAgentPackageName: 'com.chetiwa.chetiwa',
                       maxNativeZoom: 7,
                       maxZoom: 12,
+                      tileDisplay: const TileDisplay.fadeIn(
+                        duration: Duration(milliseconds: 140),
+                        reloadStartOpacity: 0.25,
+                      ),
                       tileBuilder: (context, tileWidget, tile) =>
                           _buildRadarTile(tileWidget),
                     ),
@@ -547,7 +556,11 @@ final class _LayersButton extends StatelessWidget {
           child: Badge(
             backgroundColor: ChetiwaColors.accentPrimary,
             smallSize: 7,
-            child: Icon(selectedMap.icon, size: 19),
+            child: Icon(
+              selectedMap.icon,
+              size: 19,
+              color: ChetiwaColors.textPrimary,
+            ),
           ),
         ),
       ),
@@ -581,56 +594,62 @@ final class _CompactRadarStatus extends StatelessWidget {
         borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
         border: Border.all(color: ChetiwaColors.borderDefault),
       ),
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        alignment: Alignment.centerLeft,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.water_drop_outlined,
-              size: 15,
-              color: ChetiwaColors.accentPrimary,
-            ),
-            const SizedBox(width: 5),
-            Text(
-              '${rain.toStringAsFixed(rain < 0.05 ? 0 : 1)} mm/h · ${context.l10n.isFrench ? 'modèle' : 'model'}',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-            ),
-            const _StatusDivider(),
-            if (isLatestObservation) ...[
+      child: DefaultTextStyle.merge(
+        style: const TextStyle(color: ChetiwaColors.textPrimary),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.water_drop_outlined,
+                size: 15,
+                color: ChetiwaColors.accentPrimary,
+              ),
+              const SizedBox(width: 5),
               Text(
-                formatTemperature(context, forecast.temperatureCelsius),
+                '${rain.toStringAsFixed(rain < 0.05 ? 0 : 1)} mm/h · ${context.l10n.isFrench ? 'modèle' : 'model'}',
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),
               ),
               const _StatusDivider(),
-              Text(
-                '${forecast.windKph.round()} km/h',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
+              if (isLatestObservation) ...[
+                Text(
+                  formatTemperature(context, forecast.temperatureCelsius),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-            ] else ...[
-              const Icon(
-                Icons.history_rounded,
-                size: 14,
-                color: ChetiwaColors.textSecondary,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                '${WeatherTimeZone.hourMinute(selectedInstant, forecast.timeZone)} ${context.l10n.isFrench ? 'historique' : 'history'}',
-                style: const TextStyle(
+                const _StatusDivider(),
+                Text(
+                  '${forecast.windKph.round()} km/h',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ] else ...[
+                const Icon(
+                  Icons.history_rounded,
+                  size: 14,
                   color: ChetiwaColors.textSecondary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
                 ),
-              ),
+                const SizedBox(width: 4),
+                Text(
+                  '${WeatherTimeZone.hourMinute(selectedInstant, forecast.timeZone)} ${context.l10n.isFrench ? 'historique' : 'history'}',
+                  style: const TextStyle(
+                    color: ChetiwaColors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -730,73 +749,79 @@ final class _RadarLegend extends StatelessWidget {
         borderRadius: BorderRadius.circular(ChetiwaRadius.small),
         border: Border.all(color: ChetiwaColors.borderDefault),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: DefaultTextStyle.merge(
+        style: const TextStyle(color: ChetiwaColors.textPrimary),
+        child: IconTheme(
+          data: const IconThemeData(color: ChetiwaColors.textPrimary),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  radarVisible
-                      ? '${context.l10n.isFrench ? 'ÉCHOS RADAR' : 'RADAR ECHOES'} · ${providerName.toUpperCase()}'
-                      : (context.l10n.isFrench
-                            ? 'RADAR MASQUÉ'
-                            : 'RADAR HIDDEN'),
-                  style: const TextStyle(
-                    fontSize: 8,
-                    fontWeight: FontWeight.w800,
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      radarVisible
+                          ? '${context.l10n.isFrench ? 'ÉCHOS RADAR' : 'RADAR ECHOES'} · ${providerName.toUpperCase()}'
+                          : (context.l10n.isFrench
+                                ? 'RADAR MASQUÉ'
+                                : 'RADAR HIDDEN'),
+                      style: const TextStyle(
+                        fontSize: 8,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Tooltip(
+                    message: context.l10n.isFrench
+                        ? 'Le radar ne montre pas les nuages. Gris clair et gris foncé indiquent des échos faibles ou incertains; orange et rouge indiquent un signal plus intense.'
+                        : 'Radar does not show clouds. Light and dark grey indicate weak or uncertain echoes; orange and red indicate a stronger signal.',
+                    child: const Icon(Icons.info_outline_rounded, size: 11),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Container(
+                height: 7,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(ChetiwaRadius.full),
+                  gradient: LinearGradient(
+                    colors: readablePalette
+                        ? const [
+                            Color(0xFFD6DBD7),
+                            Color(0xFF5E6663),
+                            Color(0xFFFF7300),
+                            Color(0xFFFF3B30),
+                            Color(0xFF8E1010),
+                          ]
+                        : const [
+                            Color(0xFF9DEBFF),
+                            Color(0xFF009FE3),
+                            Color(0xFFFFE000),
+                            Color(0xFFFF8A00),
+                            Color(0xFFFF3B30),
+                          ],
                   ),
                 ),
               ),
-              Tooltip(
-                message: context.l10n.isFrench
-                    ? 'Le radar ne montre pas les nuages. Gris clair et gris foncé indiquent des échos faibles ou incertains; orange et rouge indiquent un signal plus intense.'
-                    : 'Radar does not show clouds. Light and dark grey indicate weak or uncertain echoes; orange and red indicate a stronger signal.',
-                child: const Icon(Icons.info_outline_rounded, size: 11),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    readablePalette
+                        ? (context.l10n.isFrench ? 'Écho faible' : 'Weak echo')
+                        : (context.l10n.isFrench ? 'Faible' : 'Light'),
+                    style: const TextStyle(fontSize: 7),
+                  ),
+                  Text(
+                    context.l10n.isFrench ? 'Forte' : 'Heavy',
+                    style: const TextStyle(fontSize: 7),
+                  ),
+                ],
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Container(
-            height: 7,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(ChetiwaRadius.full),
-              gradient: LinearGradient(
-                colors: readablePalette
-                    ? const [
-                        Color(0xFFD6DBD7),
-                        Color(0xFF5E6663),
-                        Color(0xFFFF7300),
-                        Color(0xFFFF3B30),
-                        Color(0xFF8E1010),
-                      ]
-                    : const [
-                        Color(0xFF9DEBFF),
-                        Color(0xFF009FE3),
-                        Color(0xFFFFE000),
-                        Color(0xFFFF8A00),
-                        Color(0xFFFF3B30),
-                      ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                readablePalette
-                    ? (context.l10n.isFrench ? 'Écho faible' : 'Weak echo')
-                    : (context.l10n.isFrench ? 'Faible' : 'Light'),
-                style: const TextStyle(fontSize: 7),
-              ),
-              Text(
-                context.l10n.isFrench ? 'Forte' : 'Heavy',
-                style: const TextStyle(fontSize: 7),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     ),
   );
@@ -817,7 +842,11 @@ final class _RecenterButton extends StatelessWidget {
       child: const SizedBox(
         width: 42,
         height: 42,
-        child: Icon(Icons.my_location_rounded, size: 19),
+        child: Icon(
+          Icons.my_location_rounded,
+          size: 19,
+          color: ChetiwaColors.textPrimary,
+        ),
       ),
     ),
   );
@@ -881,6 +910,7 @@ final class RadarTimeline extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final timelineColors = _RadarTimelineColors.of(context);
     final nowInstant = snapshot.nowUtc;
     final latestObservation = state.frames[state.currentObservationIndex].time;
     final rawLag = nowInstant.difference(latestObservation);
@@ -910,13 +940,11 @@ final class RadarTimeline extends StatelessWidget {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              ChetiwaColors.backgroundPrimary.withValues(alpha: 0.72),
-              ChetiwaColors.backgroundPrimary,
+              timelineColors.surface.withValues(alpha: 0.94),
+              timelineColors.surface,
             ],
           ),
-          border: const Border(
-            top: BorderSide(color: ChetiwaColors.borderDefault),
-          ),
+          border: Border(top: BorderSide(color: timelineColors.outline)),
         ),
         child: Column(
           children: [
@@ -954,7 +982,7 @@ final class RadarTimeline extends StatelessWidget {
                               size: 20,
                               color: state.isPlaying
                                   ? ChetiwaColors.accentPrimary
-                                  : ChetiwaColors.textPrimary,
+                                  : timelineColors.foreground,
                             ),
                           ),
                           const SizedBox(width: 6),
@@ -962,7 +990,8 @@ final class RadarTimeline extends StatelessWidget {
                             state.isPlaying
                                 ? context.l10n.pause
                                 : context.l10n.play,
-                            style: const TextStyle(
+                            style: TextStyle(
+                              color: timelineColors.foreground,
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
                             ),
@@ -1060,12 +1089,10 @@ final class RadarTimeline extends StatelessWidget {
                     painter: _RadarTimeRulerPainter(
                       frames: state.frames,
                       selectedIndex: state.selectedIndex,
-                      forecastStartIndex: state.frames.indexWhere(
-                        (frame) => frame.isNowcast,
-                      ),
                       rainPoints: forecast.points,
                       timeZone: forecast.timeZone,
                       now: nowInstant,
+                      colors: timelineColors,
                     ),
                     child: const SizedBox.expand(),
                   ),
@@ -1080,19 +1107,29 @@ final class RadarTimeline extends StatelessWidget {
 
   void _selectFrame(BuildContext context, double x, double width) {
     if (state.frames.length < 2 || width <= 0) return;
-    final start = state.frames.first.time.millisecondsSinceEpoch;
-    final now = snapshot.nowUtc.millisecondsSinceEpoch;
-    final latest = state.frames.last.time.millisecondsSinceEpoch;
-    final end = math.max(latest, now);
+    final hasNowcast = state.hasNowcast;
+    final startIndex = hasNowcast ? state.currentObservationIndex : 0;
+    final endIndex = hasNowcast
+        ? state.frames.length - 1
+        : state.currentObservationIndex;
+    final start = hasNowcast
+        ? snapshot.nowUtc.millisecondsSinceEpoch
+        : state.frames[startIndex].time.millisecondsSinceEpoch;
+    final end = hasNowcast
+        ? math.max(
+            start + const Duration(minutes: 30).inMilliseconds,
+            state.frames[endIndex].time.millisecondsSinceEpoch,
+          )
+        : state.frames[endIndex].time.millisecondsSinceEpoch;
     final selectedTime =
         start + ((end - start) * (x / width).clamp(0, 1)).toDouble();
-    var index = 0;
+    var index = startIndex;
     var nearestDistance = double.infinity;
-    for (var candidate = 0; candidate < state.frames.length; candidate++) {
-      final distance =
-          (state.frames[candidate].time.millisecondsSinceEpoch - selectedTime)
-              .abs()
-              .toDouble();
+    for (var candidate = startIndex; candidate <= endIndex; candidate++) {
+      final effectiveTime = hasNowcast
+          ? math.max(start, state.frames[candidate].time.millisecondsSinceEpoch)
+          : state.frames[candidate].time.millisecondsSinceEpoch;
+      final distance = (effectiveTime - selectedTime).abs().toDouble();
       if (distance < nearestDistance) {
         nearestDistance = distance;
         index = candidate;
@@ -1106,27 +1143,38 @@ final class _RadarTimeRulerPainter extends CustomPainter {
   const _RadarTimeRulerPainter({
     required this.frames,
     required this.selectedIndex,
-    required this.forecastStartIndex,
     required this.rainPoints,
     required this.timeZone,
     required this.now,
+    required this.colors,
   });
 
   final List<RadarFrame> frames;
   final int selectedIndex;
-  final int forecastStartIndex;
   final List<RainPoint> rainPoints;
   final String timeZone;
   final DateTime now;
+  final _RadarTimelineColors colors;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (frames.isEmpty) return;
     const chartTop = 5.0;
     final trackY = size.height - 18;
-    final chartHeight = math.max(12.0, trackY - chartTop - 4);
-    final start = frames.first.time;
-    final end = frames.last.time.isAfter(now) ? frames.last.time : now;
+    final currentObservationIndex = frames.lastIndexWhere(
+      (frame) => frame.isObservation,
+    );
+    final observationIndex = currentObservationIndex < 0
+        ? frames.length - 1
+        : currentObservationIndex;
+    final hasNowcast = frames.any((frame) => frame.isNowcast);
+    final playbackStartIndex = hasNowcast ? observationIndex : 0;
+    final playbackEndIndex = hasNowcast ? frames.length - 1 : observationIndex;
+    final start = hasNowcast ? now : frames[playbackStartIndex].time;
+    final lastFrameTime = frames[playbackEndIndex].time;
+    final end = hasNowcast && !lastFrameTime.isAfter(start)
+        ? start.add(const Duration(minutes: 30))
+        : lastFrameTime;
     final durationMs = math
         .max(1, end.millisecondsSinceEpoch - start.millisecondsSinceEpoch)
         .toDouble();
@@ -1137,54 +1185,25 @@ final class _RadarTimeRulerPainter extends CustomPainter {
                 durationMs)
             .toDouble();
 
-    // This compact profile explains the observation history. The main Graph
-    // screen starts at the real current minute and represents the future.
-    final profileEnd = frames.last.time;
-    final profile = rainPoints
-        .map((point) => (time: point.time, rate: point.rateMmPerHour))
-        .where(
-          (point) =>
-              !point.time.isBefore(start) && !point.time.isAfter(profileEnd),
-        )
-        .toList(growable: false);
-    if (profile.any((point) => RainRateScale.isRain(point.rate))) {
-      final area = ui.Path()..moveTo(xForTime(profile.first.time), trackY);
-      for (final point in profile) {
-        final normalized = RainRateScale.normalized(point.rate);
-        area.lineTo(
-          xForTime(point.time).clamp(0, size.width).toDouble(),
-          trackY - normalized * chartHeight,
-        );
-      }
-      area
-        ..lineTo(xForTime(profile.last.time), trackY)
-        ..close();
-      final fill = Paint()
-        ..shader = ui.Gradient.linear(Offset(0, chartTop), Offset(0, trackY), [
-          ChetiwaColors.rainModerate.withValues(alpha: 0.95),
-          ChetiwaColors.rainLight.withValues(alpha: 0.38),
-        ]);
-      canvas.drawPath(area, fill);
-    }
+    _paintRainProfile(canvas, size, start, end, xForTime, chartTop, trackY);
 
     final profileLabel = TextPainter(
-      text: const TextSpan(
-        text: 'ESTIMATION OPEN-METEO AU POINT',
+      text: TextSpan(
+        text: hasNowcast
+            ? 'PRÉVISION RADAR · RAINVIEWER'
+            : 'ANIMATION RADAR · OBSERVATIONS PASSÉES',
         style: TextStyle(
-          color: ChetiwaColors.textSecondary,
+          color: colors.muted,
           fontSize: 7,
           fontWeight: FontWeight.w700,
         ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-    profileLabel.paint(
-      canvas,
-      Offset((size.width - profileLabel.width) / 2, chartTop),
-    );
+    profileLabel.paint(canvas, Offset(0, chartTop));
 
     final track = Paint()
-      ..color = ChetiwaColors.borderDefault
+      ..color = colors.outline
       ..strokeWidth = 1.5
       ..strokeCap = StrokeCap.round;
     canvas.drawLine(
@@ -1193,84 +1212,63 @@ final class _RadarTimeRulerPainter extends CustomPainter {
       track,
     );
 
-    if (forecastStartIndex > 0 && forecastStartIndex < frames.length) {
-      final forecastX = xForTime(frames[forecastStartIndex].time);
-      final forecast = Paint()
-        ..color = ChetiwaColors.accentPrimary.withValues(alpha: 0.7)
-        ..strokeWidth = 2;
-      canvas.drawLine(
-        Offset(forecastX, trackY),
-        Offset(size.width, trackY),
-        forecast,
-      );
-    }
-
     final minorTick = Paint()
-      ..color = ChetiwaColors.textSecondary.withValues(alpha: 0.65)
+      ..color = colors.muted.withValues(alpha: 0.65)
       ..strokeWidth = 1;
-    for (final frame in frames) {
-      final x = xForTime(frame.time).clamp(0, size.width).toDouble();
+    for (var index = playbackStartIndex; index <= playbackEndIndex; index++) {
+      final frame = frames[index];
+      final effectiveTime = frame.time.isBefore(start) ? start : frame.time;
+      final x = xForTime(effectiveTime).clamp(0, size.width).toDouble();
       canvas.drawLine(Offset(x, trackY - 3), Offset(x, trackY + 3), minorTick);
     }
 
-    _paintHourLabels(canvas, size, start, end, xForTime, trackY);
+    _paintTimeLabels(
+      canvas,
+      size,
+      start,
+      end,
+      xForTime,
+      trackY,
+      historical: !hasNowcast,
+    );
 
-    final latestFrame = frames.last.time;
-    if (now.isAfter(latestFrame.add(const Duration(minutes: 2)))) {
-      final nowX = xForTime(now).clamp(0, size.width).toDouble();
-      final nowPaint = Paint()
-        ..color = ChetiwaColors.accentPrimary.withValues(alpha: 0.85)
-        ..strokeWidth = 1;
-      for (var y = chartTop; y < trackY + 5; y += 5) {
-        canvas.drawLine(
-          Offset(nowX, y),
-          Offset(nowX, math.min(y + 2.5, trackY + 5)),
-          nowPaint,
-        );
-      }
-      final label = TextPainter(
-        text: const TextSpan(
-          text: 'MAINT. · MODÈLE',
-          style: TextStyle(
-            color: ChetiwaColors.accentPrimary,
-            fontSize: 7,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      label.paint(
-        canvas,
-        Offset(
-          (nowX - label.width).clamp(0, size.width - label.width).toDouble(),
-          chartTop,
-        ),
-      );
-      final nowTime = TextPainter(
-        text: TextSpan(
-          text: WeatherTimeZone.hourMinute(now, timeZone),
-          style: const TextStyle(
-            color: ChetiwaColors.accentPrimary,
-            fontSize: 8,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      nowTime.paint(
-        canvas,
-        Offset(
-          (nowX - nowTime.width)
-              .clamp(0, size.width - nowTime.width)
-              .toDouble(),
-          trackY + 6,
-        ),
+    final nowX = hasNowcast ? 0.0 : size.width;
+    final nowPaint = Paint()
+      ..color = ChetiwaColors.accentPrimary.withValues(alpha: 0.85)
+      ..strokeWidth = 1;
+    for (var y = chartTop; y < trackY + 5; y += 5) {
+      canvas.drawLine(
+        Offset(nowX, y),
+        Offset(nowX, math.min(y + 2.5, trackY + 5)),
+        nowPaint,
       );
     }
+    final nowLabel = TextPainter(
+      text: TextSpan(
+        text: 'MAINT.',
+        style: TextStyle(
+          color: ChetiwaColors.accentPrimary,
+          fontSize: 7,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    nowLabel.paint(
+      canvas,
+      Offset(
+        (nowX - (hasNowcast ? 0 : nowLabel.width))
+            .clamp(0, size.width - nowLabel.width)
+            .toDouble(),
+        chartTop,
+      ),
+    );
 
-    final cursorX = xForTime(
-      frames[selectedIndex].time,
-    ).clamp(0, size.width).toDouble();
+    final selectedTime =
+        hasNowcast && frames[selectedIndex].time.isBefore(start)
+        ? start
+        : frames[selectedIndex].time;
+    final cursorX = xForTime(selectedTime).clamp(0, size.width).toDouble();
     final cursor = Paint()
       ..color = ChetiwaColors.error
       ..strokeWidth = 3
@@ -1286,14 +1284,89 @@ final class _RadarTimeRulerPainter extends CustomPainter {
   DateTime _wallTime(DateTime instant) =>
       WeatherTimeZone.wallTime(instant, timeZone);
 
-  void _paintHourLabels(
+  void _paintRainProfile(
     Canvas canvas,
     Size size,
     DateTime start,
     DateTime end,
     double Function(DateTime) xForTime,
+    double chartTop,
     double trackY,
   ) {
+    final points = rainPoints
+        .where(
+          (point) => !point.time.isBefore(start) && !point.time.isAfter(end),
+        )
+        .toList(growable: false);
+    if (points.length < 2 ||
+        !points.any((point) => RainRateScale.isRain(point.rateMmPerHour))) {
+      return;
+    }
+
+    final chartHeight = math.max(12.0, trackY - chartTop - 12);
+    final area = ui.Path()..moveTo(xForTime(points.first.time), trackY);
+    for (final point in points) {
+      area.lineTo(
+        xForTime(point.time).clamp(0, size.width).toDouble(),
+        trackY - RainRateScale.normalized(point.rateMmPerHour) * chartHeight,
+      );
+    }
+    area
+      ..lineTo(xForTime(points.last.time), trackY)
+      ..close();
+    canvas.drawPath(
+      area,
+      Paint()
+        ..shader = ui.Gradient.linear(Offset(0, chartTop), Offset(0, trackY), [
+          ChetiwaColors.rainModerate.withValues(alpha: 0.9),
+          ChetiwaColors.rainLight.withValues(alpha: 0.3),
+        ]),
+    );
+  }
+
+  void _paintTimeLabels(
+    Canvas canvas,
+    Size size,
+    DateTime start,
+    DateTime end,
+    double Function(DateTime) xForTime,
+    double trackY, {
+    required bool historical,
+  }) {
+    if (historical) {
+      final durationMinutes = math.max(1, end.difference(start).inMinutes);
+      final durationLabel = durationMinutes >= 60
+          ? '−${(durationMinutes / 60).ceil()} H'
+          : '−$durationMinutes MIN';
+      final startLabel = TextPainter(
+        text: TextSpan(
+          text: durationLabel,
+          style: TextStyle(color: colors.muted, fontSize: 9),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      startLabel.paint(canvas, Offset(0, trackY + 6));
+
+      final endLabel = TextPainter(
+        text: TextSpan(
+          text: 'DERNIÈRE',
+          style: TextStyle(color: colors.muted, fontSize: 9),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      endLabel.paint(canvas, Offset(size.width - endLabel.width, trackY + 6));
+      return;
+    }
+
+    final startLabel = TextPainter(
+      text: TextSpan(
+        text: WeatherTimeZone.hourMinute(start, timeZone),
+        style: TextStyle(color: colors.muted, fontSize: 9),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    startLabel.paint(canvas, Offset(0, trackY + 6));
+
     final wallStart = _wallTime(start);
     var wallTick = DateTime.utc(
       wallStart.year,
@@ -1301,20 +1374,20 @@ final class _RadarTimeRulerPainter extends CustomPainter {
       wallStart.day,
       wallStart.hour + (wallStart.minute == 0 ? 0 : 1),
     );
-    final labelStyle = TextStyle(
-      color: ChetiwaColors.textSecondary,
-      fontSize: 9,
-    );
+    final labelStyle = TextStyle(color: colors.muted, fontSize: 9);
     while (true) {
       final tickInstant = WeatherTimeZone.instantFromLocal(wallTick, timeZone);
       if (tickInstant.isAfter(end)) break;
-      if (!tickInstant.isBefore(start)) {
+      final tooCloseToStart =
+          tickInstant.difference(start).inMinutes.abs() < 12;
+      final tooCloseToEnd = end.difference(tickInstant).inMinutes.abs() < 12;
+      if (!tickInstant.isBefore(start) && !tooCloseToStart && !tooCloseToEnd) {
         final x = xForTime(tickInstant).clamp(0, size.width).toDouble();
         canvas.drawLine(
           Offset(x, trackY - 5),
           Offset(x, trackY + 5),
           Paint()
-            ..color = ChetiwaColors.textSecondary
+            ..color = colors.muted
             ..strokeWidth = 1.2,
         );
         final label = TextPainter(
@@ -1334,16 +1407,49 @@ final class _RadarTimeRulerPainter extends CustomPainter {
       }
       wallTick = wallTick.add(const Duration(hours: 1));
     }
+
+    final endLabel = TextPainter(
+      text: TextSpan(
+        text: WeatherTimeZone.hourMinute(end, timeZone),
+        style: TextStyle(color: colors.muted, fontSize: 9),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    endLabel.paint(canvas, Offset(size.width - endLabel.width, trackY + 6));
   }
 
   @override
   bool shouldRepaint(covariant _RadarTimeRulerPainter oldDelegate) =>
       frames != oldDelegate.frames ||
       selectedIndex != oldDelegate.selectedIndex ||
-      forecastStartIndex != oldDelegate.forecastStartIndex ||
       rainPoints != oldDelegate.rainPoints ||
       timeZone != oldDelegate.timeZone ||
-      now != oldDelegate.now;
+      now != oldDelegate.now ||
+      colors != oldDelegate.colors;
+}
+
+final class _RadarTimelineColors {
+  const _RadarTimelineColors({
+    required this.surface,
+    required this.foreground,
+    required this.muted,
+    required this.outline,
+  });
+
+  factory _RadarTimelineColors.of(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return _RadarTimelineColors(
+      surface: colors.surface,
+      foreground: colors.onSurface,
+      muted: colors.onSurfaceVariant,
+      outline: colors.outline,
+    );
+  }
+
+  final Color surface;
+  final Color foreground;
+  final Color muted;
+  final Color outline;
 }
 
 /// Provider-independent fallback used when live radar tiles are unavailable.

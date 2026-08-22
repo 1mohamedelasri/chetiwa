@@ -277,12 +277,13 @@ final class _Card extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      color: Theme.of(context).colorScheme.surface,
+  Widget build(BuildContext context) => Material(
+    color: Theme.of(context).colorScheme.surface,
+    shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
-      border: Border.all(color: Theme.of(context).colorScheme.outline),
+      side: BorderSide(color: Theme.of(context).colorScheme.outline),
     ),
+    clipBehavior: Clip.antiAlias,
     child: child,
   );
 }

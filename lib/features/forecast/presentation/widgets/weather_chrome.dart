@@ -78,7 +78,7 @@ final class LocationSelector extends StatelessWidget {
             context: context,
             useSafeArea: true,
             isScrollControlled: true,
-            backgroundColor: ChetiwaColors.backgroundSecondary,
+            backgroundColor: Theme.of(context).colorScheme.surface,
             builder: (_) => _LocationPicker(repository: repository),
           );
           if (selected != null) onLocationSelected(selected);
@@ -183,8 +183,8 @@ final class _Metric extends StatelessWidget {
         Text(
           label,
           maxLines: 1,
-          style: const TextStyle(
-            color: ChetiwaColors.textSecondary,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
             fontSize: 8,
             fontWeight: FontWeight.w700,
           ),
@@ -196,8 +196,8 @@ final class _Metric extends StatelessWidget {
           child: Text(
             value,
             maxLines: 1,
-            style: const TextStyle(
-              color: ChetiwaColors.textPrimary,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface,
               fontSize: 14,
               fontWeight: FontWeight.w700,
             ),
@@ -285,8 +285,8 @@ final class AdaptiveAdBannerSlot extends StatelessWidget {
         alignment: Alignment.center,
         child: Text(
           context.l10n.advertisement,
-          style: const TextStyle(
-            color: ChetiwaColors.textSecondary,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
             fontSize: 8,
             fontWeight: FontWeight.w700,
             letterSpacing: 1.1,
@@ -419,174 +419,172 @@ final class _LocationPickerState extends State<_LocationPicker> {
   }
 
   @override
-  Widget build(BuildContext context) => DraggableScrollableSheet(
-    expand: false,
-    initialChildSize: 0.74,
-    minChildSize: 0.4,
-    maxChildSize: 0.9,
-    builder: (context, controller) => Column(
-      children: [
-        const SizedBox(height: 10),
-        Container(
-          width: 40,
-          height: 4,
-          decoration: BoxDecoration(
-            color: ChetiwaColors.borderDefault,
-            borderRadius: BorderRadius.circular(ChetiwaRadius.full),
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.74,
+      minChildSize: 0.4,
+      maxChildSize: 0.9,
+      builder: (context, controller) => Column(
+        children: [
+          const SizedBox(height: 10),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: colors.outline,
+              borderRadius: BorderRadius.circular(ChetiwaRadius.full),
+            ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
-          child: Row(
-            children: [
-              const Icon(Icons.location_city_rounded),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  context.l10n.chooseCity,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+            child: Row(
+              children: [
+                const Icon(Icons.location_city_rounded),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    context.l10n.chooseCity,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-              ),
-              IconButton(
-                tooltip: context.l10n.close,
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.close_rounded),
-              ),
-            ],
+                IconButton(
+                  tooltip: context.l10n.close,
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-          child: TextField(
-            key: const Key('location-search-field'),
-            controller: _searchController,
-            onChanged: _onSearchChanged,
-            onSubmitted: (value) {
-              _debounce?.cancel();
-              if (value.trim().length >= 2) _search(value.trim());
-            },
-            textInputAction: TextInputAction.search,
-            autocorrect: false,
-            decoration: InputDecoration(
-              hintText: context.l10n.searchHint,
-              prefixIcon: const Icon(Icons.search_rounded),
-              suffixIcon: _searchController.text.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: context.l10n.clear,
-                      onPressed: () {
-                        _searchController.clear();
-                        _onSearchChanged('');
-                      },
-                      icon: const Icon(Icons.clear_rounded),
-                    ),
-              filled: true,
-              fillColor: ChetiwaColors.surfacePrimary,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
-                borderSide: const BorderSide(
-                  color: ChetiwaColors.borderDefault,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            child: TextField(
+              key: const Key('location-search-field'),
+              controller: _searchController,
+              onChanged: _onSearchChanged,
+              onSubmitted: (value) {
+                _debounce?.cancel();
+                if (value.trim().length >= 2) _search(value.trim());
+              },
+              textInputAction: TextInputAction.search,
+              autocorrect: false,
+              decoration: InputDecoration(
+                hintText: context.l10n.searchHint,
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: _searchController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: context.l10n.clear,
+                        onPressed: () {
+                          _searchController.clear();
+                          _onSearchChanged('');
+                        },
+                        icon: const Icon(Icons.clear_rounded),
+                      ),
+                filled: true,
+                fillColor: colors.surfaceContainerHighest,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
+                  borderSide: BorderSide(color: colors.outline),
                 ),
               ),
             ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Column(
-            children: [
-              ListTile(
-                key: const Key('current-location-tile'),
-                enabled: !_isLocating,
-                minVerticalPadding: 12,
-                leading: const CircleAvatar(
-                  backgroundColor: ChetiwaColors.accentPrimary,
-                  child: Icon(
-                    Icons.my_location_rounded,
-                    color: ChetiwaColors.backgroundPrimary,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Column(
+              children: [
+                ListTile(
+                  key: const Key('current-location-tile'),
+                  enabled: !_isLocating,
+                  minVerticalPadding: 12,
+                  leading: CircleAvatar(
+                    backgroundColor: colors.primary,
+                    child: Icon(
+                      Icons.my_location_rounded,
+                      color: colors.onPrimary,
+                    ),
                   ),
-                ),
-                title: Text(
-                  context.l10n.useCurrentLocation,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                subtitle: Text(
-                  _locationError ?? context.l10n.onDemandLocation,
-                  style: TextStyle(
-                    color: _locationError == null
-                        ? ChetiwaColors.textSecondary
-                        : ChetiwaColors.error,
+                  title: Text(
+                    context.l10n.useCurrentLocation,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
+                  subtitle: Text(
+                    _locationError ?? context.l10n.onDemandLocation,
+                    style: TextStyle(
+                      color: _locationError == null
+                          ? colors.onSurfaceVariant
+                          : ChetiwaColors.error,
+                    ),
+                  ),
+                  trailing: _isLocating
+                      ? const SizedBox.square(
+                          dimension: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : _locationRecoveryAction == null
+                      ? const Icon(Icons.chevron_right_rounded)
+                      : TextButton(
+                          key: const Key('open-location-settings-button'),
+                          onPressed: _openLocationRecovery,
+                          child: Text(context.l10n.settings),
+                        ),
+                  onTap: _isLocating ? null : _useCurrentLocation,
                 ),
-                trailing: _isLocating
-                    ? const SizedBox.square(
-                        dimension: 22,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : _locationRecoveryAction == null
-                    ? const Icon(Icons.chevron_right_rounded)
-                    : TextButton(
-                        key: const Key('open-location-settings-button'),
-                        onPressed: _openLocationRecovery,
-                        child: Text(context.l10n.settings),
-                      ),
-                onTap: _isLocating ? null : _useCurrentLocation,
-              ),
-              if (_locationRecoveryAction != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(72, 0, 12, 8),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      context.l10n.retryCurrentLocationHelp,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: ChetiwaColors.textSecondary,
+                if (_locationRecoveryAction != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(72, 0, 12, 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        context.l10n.retryCurrentLocationHelp,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              const Divider(height: 1),
-              ListTile(
-                key: const Key('choose-on-map-tile'),
-                minVerticalPadding: 12,
-                leading: const CircleAvatar(
-                  backgroundColor: ChetiwaColors.surfaceSecondary,
-                  child: Icon(
-                    Icons.map_outlined,
-                    color: ChetiwaColors.accentPrimary,
+                const Divider(height: 1),
+                ListTile(
+                  key: const Key('choose-on-map-tile'),
+                  minVerticalPadding: 12,
+                  leading: CircleAvatar(
+                    backgroundColor: colors.surfaceContainer,
+                    child: Icon(Icons.map_outlined, color: colors.primary),
                   ),
-                ),
-                title: Text(
-                  context.l10n.chooseOnMap,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                subtitle: Text(context.l10n.moveMapToChoose),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () async {
-                  final selected = await Navigator.of(context)
-                      .push<ChetiwaLocation>(
-                        MaterialPageRoute<ChetiwaLocation>(
-                          builder: (_) => MapLocationPickerScreen(
-                            repository: widget.repository,
+                  title: Text(
+                    context.l10n.chooseOnMap,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: Text(context.l10n.moveMapToChoose),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () async {
+                    final selected = await Navigator.of(context)
+                        .push<ChetiwaLocation>(
+                          MaterialPageRoute<ChetiwaLocation>(
+                            builder: (_) => MapLocationPickerScreen(
+                              repository: widget.repository,
+                            ),
                           ),
-                        ),
-                      );
-                  if (selected != null && mounted) await _select(selected);
-                },
-              ),
-            ],
+                        );
+                    if (selected != null && mounted) await _select(selected);
+                  },
+                ),
+              ],
+            ),
           ),
-        ),
-        const Divider(height: 1),
-        Expanded(child: _buildLocationList(controller)),
-      ],
-    ),
-  );
+          const Divider(height: 1),
+          Expanded(child: _buildLocationList(context, controller)),
+        ],
+      ),
+    );
+  }
 
-  Widget _buildLocationList(ScrollController controller) {
+  Widget _buildLocationList(BuildContext context, ScrollController controller) {
     if (_isSearching) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -638,21 +636,21 @@ final class _LocationPickerState extends State<_LocationPicker> {
                   );
                 }
               },
-              child: _locationTile(location),
+              child: _locationTile(context, location),
             ),
           const Divider(height: 20),
         ],
         _PickerSectionTitle(
           _isQuerying ? context.l10n.results : context.l10n.popularCities,
         ),
-        for (final location in locations) _locationTile(location),
+        for (final location in locations) _locationTile(context, location),
         if (!_isQuerying)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 18, 12, 8),
             child: Text(
               context.l10n.searchWorldwideHelp,
-              style: const TextStyle(
-                color: ChetiwaColors.textSecondary,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 12,
               ),
             ),
@@ -661,23 +659,23 @@ final class _LocationPickerState extends State<_LocationPicker> {
     );
   }
 
-  Widget _locationTile(ChetiwaLocation location) => ListTile(
-    minVerticalPadding: 12,
-    leading: const CircleAvatar(
-      backgroundColor: ChetiwaColors.surfaceSecondary,
-      child: Icon(
-        Icons.location_on_outlined,
-        color: ChetiwaColors.accentPrimary,
+  Widget _locationTile(BuildContext context, ChetiwaLocation location) {
+    final colors = Theme.of(context).colorScheme;
+    return ListTile(
+      minVerticalPadding: 12,
+      leading: CircleAvatar(
+        backgroundColor: colors.surfaceContainer,
+        child: Icon(Icons.location_on_outlined, color: colors.primary),
       ),
-    ),
-    title: Text(
-      location.city,
-      style: const TextStyle(fontWeight: FontWeight.w700),
-    ),
-    subtitle: location.details.isEmpty ? null : Text(location.details),
-    trailing: const Icon(Icons.chevron_right_rounded),
-    onTap: () => _select(location),
-  );
+      title: Text(
+        location.city,
+        style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+      subtitle: location.details.isEmpty ? null : Text(location.details),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: () => _select(location),
+    );
+  }
 }
 
 final class _PickerSectionTitle extends StatelessWidget {
@@ -690,8 +688,8 @@ final class _PickerSectionTitle extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
     child: Text(
       label,
-      style: const TextStyle(
-        color: ChetiwaColors.textSecondary,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
         fontSize: 11,
         fontWeight: FontWeight.w800,
         letterSpacing: 1.1,
@@ -720,7 +718,11 @@ final class _PickerMessage extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 36, color: ChetiwaColors.textSecondary),
+          Icon(
+            icon,
+            size: 36,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
           const SizedBox(height: 12),
           Text(message, textAlign: TextAlign.center),
           if (actionLabel case final label?) ...[
@@ -747,69 +749,75 @@ final class _NavigationItem extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => Expanded(
-    child: Semantics(
-      button: true,
-      selected: selected,
-      label: selected
-          ? context.l10n.selectedNavigation(label)
-          : context.l10n.selectNavigation(label),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
-        child: InkWell(
-          onTap: onTap,
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Expanded(
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: selected
+            ? context.l10n.selectedNavigation(label)
+            : context.l10n.selectNavigation(label),
+        child: Material(
+          color: Colors.transparent,
           borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    icon,
-                    size: 17,
-                    color: selected
-                        ? ChetiwaColors.accentPrimary
-                        : ChetiwaColors.textSecondary,
-                  ),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        label,
-                        style: TextStyle(
-                          color: selected
-                              ? ChetiwaColors.textPrimary
-                              : ChetiwaColors.textSecondary,
-                          fontSize: 13,
-                          fontWeight: selected
-                              ? FontWeight.w800
-                              : FontWeight.w600,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      icon,
+                      size: 17,
+                      color: selected
+                          ? ChetiwaColors.accentPrimary
+                          : colors.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          label,
+                          style: TextStyle(
+                            color: selected
+                                ? colors.onSurface
+                                : colors.onSurfaceVariant,
+                            fontSize: 13,
+                            fontWeight: selected
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 5),
-              AnimatedContainer(
-                key: selected
-                    ? const Key('selected-navigation-indicator')
-                    : null,
-                duration: ChetiwaMotion.accessible(context, ChetiwaMotion.fast),
-                width: selected ? 28 : 0,
-                height: 3,
-                decoration: BoxDecoration(
-                  color: ChetiwaColors.accentPrimary,
-                  borderRadius: BorderRadius.circular(ChetiwaRadius.full),
+                  ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 5),
+                AnimatedContainer(
+                  key: selected
+                      ? const Key('selected-navigation-indicator')
+                      : null,
+                  duration: ChetiwaMotion.accessible(
+                    context,
+                    ChetiwaMotion.fast,
+                  ),
+                  width: selected ? 28 : 0,
+                  height: 3,
+                  decoration: BoxDecoration(
+                    color: ChetiwaColors.accentPrimary,
+                    borderRadius: BorderRadius.circular(ChetiwaRadius.full),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }

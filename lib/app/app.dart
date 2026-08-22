@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:go_router/go_router.dart';
@@ -100,6 +101,29 @@ final class _ChetiwaAppState extends State<ChetiwaApp> {
               theme: ChetiwaTheme.light,
               darkTheme: ChetiwaTheme.dark,
               themeMode: preferences.themeMode,
+              builder: (context, child) {
+                final brightness = Theme.of(context).brightness;
+                final lightSurface = brightness == Brightness.light;
+                return AnnotatedRegion<SystemUiOverlayStyle>(
+                  value: SystemUiOverlayStyle(
+                    statusBarColor: Colors.transparent,
+                    statusBarIconBrightness: lightSurface
+                        ? Brightness.dark
+                        : Brightness.light,
+                    // On iOS this controls the status-bar foreground.
+                    statusBarBrightness: lightSurface
+                        ? Brightness.light
+                        : Brightness.dark,
+                    systemNavigationBarColor: Theme.of(
+                      context,
+                    ).colorScheme.surface,
+                    systemNavigationBarIconBrightness: lightSurface
+                        ? Brightness.dark
+                        : Brightness.light,
+                  ),
+                  child: child ?? const SizedBox.shrink(),
+                );
+              },
               locale: preferences.locale,
               supportedLocales: ChetiwaLocalizations.supportedLocales,
               localizationsDelegates: const [

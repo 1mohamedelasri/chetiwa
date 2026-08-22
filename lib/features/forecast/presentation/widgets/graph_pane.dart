@@ -22,6 +22,7 @@ final class GraphPane extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
+      final chartColors = _ChartColors.of(context);
       final now = snapshot.nowUtc;
       final textScale = MediaQuery.textScalerOf(context).scale(1);
       final compact = constraints.maxHeight < 500 || textScale > 1.45;
@@ -56,8 +57,8 @@ final class GraphPane extends StatelessWidget {
                   Text(
                     '${context.l10n.modelForecast} · ${snapshot.forecastProvenance.provider.toUpperCase()}',
                     key: const Key('graph-provenance-label'),
-                    style: const TextStyle(
-                      color: ChetiwaColors.textSecondary,
+                    style: TextStyle(
+                      color: chartColors.muted,
                       fontSize: 9,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.25,
@@ -76,7 +77,7 @@ final class GraphPane extends StatelessWidget {
         child: LiveMetrics(forecast: forecast, snapshot: snapshot),
       );
       final chart = BlocBuilder<GraphHorizonCubit, GraphHorizon>(
-        builder: (context, horizon) => ChetiwaRainChart(
+        builder: (context, horizon) => _ChetiwaRainChart(
           key: ValueKey(horizon),
           points: forecast.points,
           currentRain: snapshot.currentRain,
@@ -86,6 +87,7 @@ final class GraphPane extends StatelessWidget {
           providerName: snapshot.forecastProvenance.provider,
           horizon: horizon,
           languageCode: context.l10n.locale.languageCode,
+          colors: chartColors,
         ),
       );
       if (compact) {
@@ -126,7 +128,7 @@ final class _HorizonSelector extends StatelessWidget {
           height: 34,
           padding: const EdgeInsets.all(3),
           decoration: BoxDecoration(
-            color: ChetiwaColors.surfaceSecondary,
+            color: Theme.of(context).colorScheme.surfaceContainer,
             borderRadius: BorderRadius.circular(ChetiwaRadius.full),
           ),
           child: Row(
@@ -169,7 +171,9 @@ final class _Option extends StatelessWidget {
       selected: selected,
       label: selected ? context.l10n.selectedOption(label) : label,
       child: Material(
-        color: selected ? ChetiwaColors.accentPrimary : Colors.transparent,
+        color: selected
+            ? Theme.of(context).colorScheme.primary
+            : Colors.transparent,
         borderRadius: BorderRadius.circular(ChetiwaRadius.full),
         child: InkWell(
           onTap: onTap,
@@ -179,8 +183,8 @@ final class _Option extends StatelessWidget {
               label,
               style: TextStyle(
                 color: selected
-                    ? ChetiwaColors.backgroundPrimary
-                    : ChetiwaColors.textSecondary,
+                    ? Theme.of(context).colorScheme.onPrimary
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
               ),
@@ -192,8 +196,8 @@ final class _Option extends StatelessWidget {
   );
 }
 
-final class ChetiwaRainChart extends StatefulWidget {
-  const ChetiwaRainChart({
+final class _ChetiwaRainChart extends StatefulWidget {
+  const _ChetiwaRainChart({
     required this.points,
     required this.currentRain,
     required this.now,
@@ -202,6 +206,7 @@ final class ChetiwaRainChart extends StatefulWidget {
     required this.timeZone,
     required this.providerName,
     required this.languageCode,
+    required this.colors,
     super.key,
   });
 
@@ -213,12 +218,13 @@ final class ChetiwaRainChart extends StatefulWidget {
   final String timeZone;
   final String providerName;
   final String languageCode;
+  final _ChartColors colors;
 
   @override
-  State<ChetiwaRainChart> createState() => _ChetiwaRainChartState();
+  State<_ChetiwaRainChart> createState() => _ChetiwaRainChartState();
 }
 
-final class _ChetiwaRainChartState extends State<ChetiwaRainChart> {
+final class _ChetiwaRainChartState extends State<_ChetiwaRainChart> {
   double? _cursorX;
 
   Duration get _duration => widget.horizon == GraphHorizon.twoHours
@@ -260,10 +266,17 @@ final class _ChetiwaRainChartState extends State<ChetiwaRainChart> {
       behavior: HitTestBehavior.opaque,
       onTapDown: (details) =>
           setState(() => _cursorX = details.localPosition.dx),
+      onHorizontalDragStart: (details) =>
+          setState(() => _cursorX = details.localPosition.dx),
       onHorizontalDragUpdate: (details) =>
           setState(() => _cursorX = details.localPosition.dx),
-      onHorizontalDragEnd: (_) => setState(() => _cursorX = null),
+      onDoubleTap: () => setState(() => _cursorX = null),
       child: CustomPaint(
+        key: ValueKey(
+          _cursorX == null
+              ? 'rain-chart-cursor-now'
+              : 'rain-chart-cursor-selected',
+        ),
         painter: _RainChartPainter(
           points: _visiblePoints,
           now: widget.now,
@@ -273,6 +286,7 @@ final class _ChetiwaRainChartState extends State<ChetiwaRainChart> {
           providerName: widget.providerName,
           languageCode: widget.languageCode,
           cursorX: _cursorX,
+          colors: widget.colors,
         ),
         child: const SizedBox.expand(),
       ),
@@ -290,6 +304,7 @@ final class _RainChartPainter extends CustomPainter {
     required this.timeZone,
     required this.providerName,
     required this.languageCode,
+    required this.colors,
   });
 
   final List<RainPoint> points;
@@ -300,6 +315,7 @@ final class _RainChartPainter extends CustomPainter {
   final String timeZone;
   final String providerName;
   final String languageCode;
+  final _ChartColors colors;
 
   bool get _isFrench => languageCode == 'fr';
 
@@ -322,7 +338,7 @@ final class _RainChartPainter extends CustomPainter {
       canvas,
       '${_isFrench ? 'PRÉVISION MODÈLE' : 'MODEL FORECAST'} · ${providerName.toUpperCase()}',
       const Offset(_left, 12),
-      color: ChetiwaColors.textPrimary,
+      color: colors.foreground,
       size: 11,
       weight: FontWeight.w700,
     );
@@ -332,7 +348,7 @@ final class _RainChartPainter extends CustomPainter {
           ? '${duration.inHours} PROCHAINES H'
           : 'NEXT ${duration.inHours} HOURS',
       Offset(size.width - _right - 90, 14),
-      color: ChetiwaColors.textSecondary,
+      color: colors.muted,
       size: 11,
       align: TextAlign.right,
       width: 90,
@@ -347,14 +363,14 @@ final class _RainChartPainter extends CustomPainter {
         Offset(chart.left, y),
         Offset(chart.right, y),
         Paint()
-          ..color = ChetiwaColors.borderDefault.withValues(alpha: 0.55)
+          ..color = colors.outline.withValues(alpha: 0.55)
           ..strokeWidth = 1,
       );
       _text(
         canvas,
         level.$1,
         Offset(chart.right - 58, y - 14),
-        color: ChetiwaColors.textSecondary.withValues(alpha: 0.75),
+        color: colors.muted.withValues(alpha: 0.75),
         size: 9,
         align: TextAlign.right,
         width: 58,
@@ -452,7 +468,7 @@ final class _RainChartPainter extends CustomPainter {
         canvas,
         _formatTime(time),
         Offset(x - 24, chart.bottom + 13),
-        color: ChetiwaColors.textSecondary,
+        color: colors.muted,
         size: 9,
         align: TextAlign.center,
         width: 48,
@@ -466,7 +482,7 @@ final class _RainChartPainter extends CustomPainter {
         Offset(x, chart.top),
         Offset(x, chart.bottom),
         Paint()
-          ..color = ChetiwaColors.textPrimary.withValues(alpha: 0.75)
+          ..color = colors.foreground.withValues(alpha: 0.75)
           ..strokeWidth = 1,
       );
       final ratio = (x - chart.left) / chart.width;
@@ -486,12 +502,12 @@ final class _RainChartPainter extends CustomPainter {
       Rect.fromLTWH(left, 20, 60, 26),
       const Radius.circular(13),
     );
-    canvas.drawRRect(rect, Paint()..color = ChetiwaColors.surfaceSecondary);
+    canvas.drawRRect(rect, Paint()..color = colors.bubble);
     _text(
       canvas,
       label,
       Offset(left, 27),
-      color: ChetiwaColors.textPrimary,
+      color: colors.bubbleForeground,
       size: 10,
       align: TextAlign.center,
       width: 60,
@@ -528,5 +544,33 @@ final class _RainChartPainter extends CustomPainter {
       oldDelegate.cursorX != cursorX ||
       oldDelegate.languageCode != languageCode ||
       oldDelegate.providerName != providerName ||
-      oldDelegate.timeZone != timeZone;
+      oldDelegate.timeZone != timeZone ||
+      oldDelegate.colors != colors;
+}
+
+final class _ChartColors {
+  const _ChartColors({
+    required this.foreground,
+    required this.muted,
+    required this.outline,
+    required this.bubble,
+    required this.bubbleForeground,
+  });
+
+  factory _ChartColors.of(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return _ChartColors(
+      foreground: colors.onSurface,
+      muted: colors.onSurfaceVariant,
+      outline: colors.outline,
+      bubble: colors.surfaceContainerHighest,
+      bubbleForeground: colors.onSurface,
+    );
+  }
+
+  final Color foreground;
+  final Color muted;
+  final Color outline;
+  final Color bubble;
+  final Color bubbleForeground;
 }

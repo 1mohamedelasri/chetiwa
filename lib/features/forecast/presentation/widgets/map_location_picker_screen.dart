@@ -254,45 +254,48 @@ final class _MapHelpCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Card(
     color: ChetiwaColors.backgroundPrimary.withValues(alpha: 0.94),
-    child: Padding(
-      padding: const EdgeInsets.all(14),
-      child: Row(
-        children: [
-          if (resolving)
-            const SizedBox.square(
-              dimension: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else
-            const Icon(
-              Icons.place_outlined,
-              color: ChetiwaColors.accentPrimary,
-            ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  resolving ? context.l10n.moveMapToChoose : location.label,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                Text(
-                  error ??
-                      '${location.coordinates.latitude.toStringAsFixed(4)}, '
-                          '${location.coordinates.longitude.toStringAsFixed(4)}',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: ChetiwaColors.textSecondary,
-                    fontSize: 12,
+    child: DefaultTextStyle.merge(
+      style: const TextStyle(color: ChetiwaColors.textPrimary),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            if (resolving)
+              const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              const Icon(
+                Icons.place_outlined,
+                color: ChetiwaColors.accentPrimary,
+              ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    resolving ? context.l10n.moveMapToChoose : location.label,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                ),
-              ],
+                  Text(
+                    error ??
+                        '${location.coordinates.latitude.toStringAsFixed(4)}, '
+                            '${location.coordinates.longitude.toStringAsFixed(4)}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: ChetiwaColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     ),
   );

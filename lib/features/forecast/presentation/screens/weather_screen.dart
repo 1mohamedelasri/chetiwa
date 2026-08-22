@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../app/theme/chetiwa_tokens.dart';
-import '../../../../app/theme/chetiwa_theme.dart';
 import '../../../../core/time/weather_clock.dart';
 import '../../../../core/location/location_repository.dart';
 import '../../../../core/location/active_location_controller.dart';
@@ -172,19 +171,15 @@ final class _WeatherViewState extends State<_WeatherView>
                     ),
                     switchInCurve: Curves.easeOutCubic,
                     child: switch (section) {
-                      WeatherSection.graph => _DarkDataSurface(
+                      WeatherSection.graph => GraphPane(
                         key: const ValueKey('graph'),
-                        child: GraphPane(
-                          forecast: forecast,
-                          snapshot: state.snapshot,
-                        ),
+                        forecast: forecast,
+                        snapshot: state.snapshot,
                       ),
-                      WeatherSection.radar => _DarkDataSurface(
+                      WeatherSection.radar => RadarPane(
                         key: const ValueKey('radar'),
-                        child: RadarPane(
-                          forecast: forecast,
-                          snapshot: state.snapshot,
-                        ),
+                        forecast: forecast,
+                        snapshot: state.snapshot,
                       ),
                       WeatherSection.forecast => ForecastPane(
                         key: const ValueKey('forecast'),
@@ -205,24 +200,6 @@ final class _WeatherViewState extends State<_WeatherView>
             ],
           );
         },
-      ),
-    ),
-  );
-}
-
-final class _DarkDataSurface extends StatelessWidget {
-  const _DarkDataSurface({required this.child, super.key});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => Theme(
-    data: ChetiwaTheme.dark,
-    child: DefaultTextStyle.merge(
-      style: const TextStyle(color: ChetiwaColors.textPrimary),
-      child: IconTheme(
-        data: const IconThemeData(color: ChetiwaColors.textPrimary),
-        child: ColoredBox(color: ChetiwaColors.backgroundPrimary, child: child),
       ),
     ),
   );
