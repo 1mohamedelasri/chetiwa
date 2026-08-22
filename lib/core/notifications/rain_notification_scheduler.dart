@@ -43,6 +43,34 @@ final class SystemRainNotificationScheduler
       ),
     );
     await _plugin.initialize(settings);
+
+    // Keep the plugin's platform permission state in sync with the explicit
+    // permission gateway used by the UI. This is harmless when permission was
+    // already granted and prevents a scheduled notification from disappearing
+    // on Android 13+ or iOS after a fresh install.
+    await _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.requestNotificationsPermission();
+    await _plugin
+        .resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin
+        >()
+        ?.requestPermissions(alert: true, badge: false, sound: true);
+
+    await _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.createNotificationChannel(
+          const AndroidNotificationChannel(
+            'rain_alerts',
+            'Alertes pluie',
+            description: 'Prévisions locales de pluie à venir',
+            importance: Importance.high,
+          ),
+        );
     _initialized = true;
   }
 
