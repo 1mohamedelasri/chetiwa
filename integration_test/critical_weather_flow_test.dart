@@ -2,7 +2,9 @@ import 'package:chetiwa/app/app.dart';
 import 'package:chetiwa/app/di/chetiwa_dependencies.dart';
 import 'package:chetiwa/core/location/coordinates.dart';
 import 'package:chetiwa/core/location/location_repository.dart';
+import 'package:chetiwa/core/notifications/rain_notification_scheduler.dart';
 import 'package:chetiwa/core/time/weather_clock.dart';
+import 'package:chetiwa/features/alerts/application/local_rain_alert_coordinator.dart';
 import 'package:chetiwa/features/forecast/data/datasources/fixture_forecast_data_source.dart';
 import 'package:chetiwa/features/forecast/data/repositories/fixture_forecast_repository.dart';
 import 'package:chetiwa/features/radar/data/repositories/fixture_radar_repository.dart';
@@ -20,6 +22,7 @@ void main() {
     (tester) async {
       final clock = FixedWeatherClock(DateTime.utc(2026, 8, 20, 12));
       final locations = _MemoryLocationRepository();
+      final notifications = FixtureRainNotificationScheduler();
       final dependencies = ChetiwaDependencies.testing(
         weatherClock: clock,
         forecastRepository: FixtureForecastRepository(
@@ -27,6 +30,7 @@ void main() {
         ),
         radarRepository: FixtureRadarRepository(clock: clock),
         locationRepository: locations,
+        rainNotificationScheduler: notifications,
       );
 
       await tester.pumpWidget(ChetiwaApp(dependencies: dependencies));
@@ -47,6 +51,17 @@ void main() {
 
       expect(locations.mainLocation?.label, 'Tokyo, Japon');
       expect(find.byKey(const Key('rain-chart')), findsOneWidget);
+
+      // The selected place must feed the alert scheduler as well as the
+      // visible weather surfaces. This catches regressions where the header
+      // changes only in memory and notifications keep targeting Paris.
+      await dependencies.alertPreferencesController.setEnabled(true);
+      await dependencies.alertPreferencesController.setLeadMinutes(10);
+      expect(
+        await dependencies.localRainAlertCoordinator.sync(),
+        RainAlertSyncResult.scheduled,
+      );
+      expect(notifications.scheduled?.locationLabel, 'Tokyo, Japon');
 
       await tester.tap(find.text('Radar'));
       await _waitFor(tester, find.byKey(const Key('radar-city-pin')));
