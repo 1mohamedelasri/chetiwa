@@ -69,10 +69,14 @@ final class _RadarMap extends StatefulWidget {
 }
 
 final class _RadarMapState extends State<_RadarMap> {
-  static const _regionalZoom = 6.35;
-  static const _cityZoom = 9.25;
+  // Start close enough to answer "is it raining here?" while staying at the
+  // provider's native radar resolution.
+  static const _regionalZoom = 7.0;
+  static const _cityZoom = 8.0;
   static const _minRadarZoom = 5.0;
-  static const _maxRadarZoom = 10.0;
+  // RainViewer serves real imagery to z7. One display zoom avoids blurry
+  // magnification while preserving the normal map gesture.
+  static const _maxRadarZoom = 8.0;
   static const _timelineHeight = 150.0;
 
   final MapController _mapController = MapController();
@@ -231,6 +235,7 @@ final class _RadarMapState extends State<_RadarMap> {
                   Expanded(
                     child: _CompactRadarStatus(
                       forecast: widget.forecast,
+                      snapshot: widget.snapshot,
                       selectedInstant: frame.time,
                       isNowcast: frame.isNowcast,
                     ),
@@ -498,23 +503,34 @@ final class _LayersButton extends StatelessWidget {
 final class _CompactRadarStatus extends StatelessWidget {
   const _CompactRadarStatus({
     required this.forecast,
+    required this.snapshot,
     required this.selectedInstant,
     required this.isNowcast,
   });
 
   final Forecast forecast;
+  final ForecastSnapshot snapshot;
   final DateTime selectedInstant;
   final bool isNowcast;
 
   @override
   Widget build(BuildContext context) {
+    final location = forecast.locationName.split(',').first;
+    final pointRate = snapshot.currentRain.rateMmPerHour;
+    final modelAtPoint = pointRate < 0.05
+        ? (context.l10n.isFrench
+              ? '$location · modèle sec maintenant'
+              : '$location · model dry now')
+        : (context.l10n.isFrench
+              ? '$location · modèle ${pointRate.toStringAsFixed(1)} mm/h'
+              : '$location · model ${pointRate.toStringAsFixed(1)} mm/h');
     final frameState = isNowcast
         ? (context.l10n.isFrench ? 'prévision radar' : 'radar forecast')
         : (context.l10n.isFrench
               ? 'précipitations observées'
               : 'observed precipitation');
     return Container(
-      height: 42,
+      height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: ChetiwaColors.backgroundPrimary.withValues(alpha: 0.84),
@@ -523,52 +539,47 @@ final class _CompactRadarStatus extends StatelessWidget {
       ),
       child: DefaultTextStyle.merge(
         style: const TextStyle(color: ChetiwaColors.textPrimary),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                isNowcast ? Icons.auto_graph_rounded : Icons.radar_rounded,
-                size: 15,
-                color: ChetiwaColors.accentPrimary,
+        child: Row(
+          children: [
+            Icon(
+              isNowcast ? Icons.auto_graph_rounded : Icons.radar_rounded,
+              size: 15,
+              color: ChetiwaColors.accentPrimary,
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${WeatherTimeZone.hourMinute(selectedInstant, forecast.timeZone)} · $frameState',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    isNowcast ? frameState : modelAtPoint,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: ChetiwaColors.textSecondary,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 5),
-              Text(
-                context.l10n.isFrench ? 'Radar' : 'Radar',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const _StatusDivider(),
-              Text(
-                '${WeatherTimeZone.hourMinute(selectedInstant, forecast.timeZone)} · $frameState',
-                style: const TextStyle(
-                  color: ChetiwaColors.textSecondary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
-}
-
-final class _StatusDivider extends StatelessWidget {
-  const _StatusDivider();
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 1,
-    height: 14,
-    margin: const EdgeInsets.symmetric(horizontal: 9),
-    color: ChetiwaColors.borderDefault,
-  );
 }
 
 final class _MapStyleOption extends StatelessWidget {
