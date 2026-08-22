@@ -8,6 +8,7 @@ import '../../../../app/theme/chetiwa_tokens.dart';
 import '../../../../core/l10n/chetiwa_localizations.dart';
 import '../../../../core/location/coordinates.dart';
 import '../../../../core/location/location_repository.dart';
+import '../../../../core/location/location_preferences_store.dart';
 
 /// Full-screen map choice with a fixed centre marker. It stays useful when
 /// reverse geocoding is unavailable: coordinates are still a valid weather
@@ -34,12 +35,15 @@ final class _MapLocationPickerScreenState
   ChetiwaLocation? _location;
   bool _resolving = true;
   bool _locating = false;
+  bool _mapReady = false;
+  SavedMapView? _restoredView;
   String? _error;
   int _generation = 0;
 
   @override
   void initState() {
     super.initState();
+    unawaited(_restoreSavedView());
     _resolve(_coordinates);
   }
 
@@ -62,11 +66,45 @@ final class _MapLocationPickerScreenState
       _resolving = true;
       _error = null;
     });
+    // The viewport is not the selected forecast location. Persisting it
+    // separately means users can resume map exploration without silently
+    // changing the place used by Graph, Radar, or alerts.
+    unawaited(
+      LocationPreferencesStore.setMapView(
+        coordinates: coordinates,
+        zoom: position.zoom,
+      ),
+    );
     _debounce?.cancel();
     _debounce = Timer(
       const Duration(milliseconds: 450),
       () => _resolve(coordinates),
     );
+  }
+
+  Future<void> _restoreSavedView() async {
+    final savedView = await LocationPreferencesStore.getMapView();
+    final mainLocation = savedView == null
+        ? await widget.repository.getMainLocation()
+        : null;
+    if (!mounted || (savedView == null && mainLocation == null)) return;
+    final view =
+        savedView ??
+        SavedMapView(
+          coordinates: mainLocation!.coordinates,
+          zoom: _initialZoom,
+        );
+    _restoredView = view;
+    setState(() {
+      _coordinates = view.coordinates;
+    });
+    if (_mapReady) {
+      _mapController.move(
+        LatLng(view.coordinates.latitude, view.coordinates.longitude),
+        view.zoom.clamp(_minZoom, _maxZoom).toDouble(),
+      );
+      unawaited(_resolve(view.coordinates));
+    }
   }
 
   Future<void> _resolve(Coordinates coordinates) async {
@@ -157,6 +195,20 @@ final class _MapLocationPickerScreenState
               initialZoom: _initialZoom,
               minZoom: _minZoom,
               maxZoom: _maxZoom,
+              onMapReady: () {
+                _mapReady = true;
+                final view = _restoredView;
+                if (view != null) {
+                  _mapController.move(
+                    LatLng(
+                      view.coordinates.latitude,
+                      view.coordinates.longitude,
+                    ),
+                    view.zoom.clamp(_minZoom, _maxZoom).toDouble(),
+                  );
+                  unawaited(_resolve(view.coordinates));
+                }
+              },
               onPositionChanged: _onPositionChanged,
               interactionOptions: const InteractionOptions(
                 flags: InteractiveFlag.all & ~InteractiveFlag.rotate,

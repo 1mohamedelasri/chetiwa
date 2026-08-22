@@ -238,6 +238,78 @@ base cloud, un moteur push ou Remote Config pour la bêta frugale.
 - Les budgets et alertes de consommation sont testés en staging.
 - Les licences et attributions sont approuvées pour l’usage commercial prévu.
 
+## Phase 2A — Cache radar, quotas de tuiles et modèle gratuit/Premium
+
+**Statut : planifiée.** Cette phase décrit la stratégie frugale à mettre en
+place avant d'augmenter le trafic ou d'activer une monétisation publique. Le
+cache réduit les téléchargements et les coûts, mais ne remplace jamais la
+licence du fournisseur de données.
+
+### Cache et chargement des tuiles
+
+- ⬜ Conserver localement le dernier viewport par lieu : latitude, longitude,
+  zoom et date de dernière consultation.
+- ⬜ Ajouter un cache mémoire court (15–30 minutes) pour éviter les doublons
+  pendant une même session.
+- ⬜ Ajouter un cache disque borné par taille et par âge, avec suppression des
+  tuiles les plus anciennes (LRU) et repli vers la dernière image valide.
+- ⬜ Charger uniquement les tuiles visibles et une petite marge autour de la
+  fenêtre, jamais une région entière par défaut.
+- ⬜ Dédupliquer les requêtes concurrentes et annuler les chargements devenus
+  invisibles après un déplacement de carte.
+- ⬜ Précharger uniquement les prochaines frames de l'animation, avec une
+  limite stricte de frames et un bouton de réinitialisation.
+- ⬜ Mesurer `cache_hit_rate`, octets téléchargés, tuiles par session et coût
+  estimé par utilisateur.
+
+### Cache partagé optionnel
+
+- ⬜ Après validation du volume, placer le proxy/CDN devant les tuiles et les
+  métadonnées radar avec des clés normalisées par fournisseur, frame, z/x/y.
+- ⬜ Ajouter `ETag`, `Cache-Control`, compression et `stale-if-error`.
+- ⬜ Commencer avec une instance à zéro et un budget mensuel plafonné ; ne pas
+  provisionner Firestore, Cloud Storage ou Functions sans besoin démontré.
+- ⬜ Ajouter des alertes de quota à 50 %, 75 % et 90 %, puis un kill switch.
+
+### Règles Free et Chetiwa+
+
+- ⬜ Free : une localisation principale, quelques villes favorites, zone locale
+  et zoom raisonnable, avec publicité.
+- ⬜ Chetiwa+ : villes et changements illimités, zoom régional/national,
+  historique radar étendu et suppression des publicités.
+- ⬜ Afficher la limite avant son application, avec compteur et heure de remise
+  à zéro ; ne jamais bloquer silencieusement le radar.
+- ⬜ Ne pas faire payer un zoom normal nécessaire à la compréhension de la
+  météo. Le Premium doit financer une valeur claire : plusieurs destinations,
+  historique ou couverture étendue.
+- ⬜ Ajouter les événements anonymes et opt-in : ouverture du radar, changement
+  de lieu, usage du cache et conversion Premium, sans coordonnées précises.
+
+### Conformité et lancement
+
+- ⬜ Vérifier par écrit que chaque fournisseur autorise tuiles, cache,
+  attribution, publicité et abonnement avant une bêta publique.
+- ⬜ Afficher les crédits et les liens de licence dans l'écran Sources.
+- ⬜ Tester 10 000, 30 000 et 40 000 utilisateurs actifs avec des seuils de
+  charge réalistes avant d'augmenter les quotas.
+- ⬜ Gate : aucun fournisseur payant ne doit être activé sans budget maximal,
+  estimation par utilisateur, métrique de cache et plan de repli.
+
+### Budget de planification (hors licence météo)
+
+Ces montants sont des ordres de grandeur pour cache/CDN/backend léger, pas un
+devis fournisseur :
+
+| Utilisateurs actifs | Requêtes origine après 90 % de cache* | Cache/CDN/backend estimé |
+| ---: | ---: | ---: |
+| 10 000 | 600 000/mois | 10–80 €/mois |
+| 30 000 | 1 800 000/mois | 30–180 €/mois |
+| 40 000 | 2 400 000/mois | 50–250 €/mois |
+
+\* Hypothèse : 20 sessions radar par mois et 30 tuiles visibles par session.
+La licence radar, le fond de carte commercial, les taxes et les commissions
+des stores sont exclus et doivent être ajoutés après vérification contractuelle.
+
 ---
 
 # Phase 3 — Localisation et choix direct sur la carte

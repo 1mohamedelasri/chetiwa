@@ -11,6 +11,7 @@ import 'coordinates.dart';
 abstract final class LocationPreferencesStore {
   static const _mainKey = 'locations:main:v1';
   static const _recentKey = 'locations:recent:v1';
+  static const _mapViewKey = 'locations:map_view:v1';
   static const _maximumRecentLocations = 5;
 
   static Future<ChetiwaLocation?> getMainLocation() async {
@@ -80,6 +81,44 @@ abstract final class LocationPreferencesStore {
     }
   }
 
+  /// Saves the last map viewport independently from the principal place.
+  /// This lets a user return to the area they were exploring without
+  /// changing the place used by forecasts and alerts.
+  static Future<SavedMapView?> getMapView() async {
+    final preferences = await SharedPreferences.getInstance();
+    final encoded = preferences.getString(_mapViewKey);
+    if (encoded == null) return null;
+    try {
+      final json = jsonDecode(encoded) as Map<String, dynamic>;
+      final latitude = (json['latitude'] as num).toDouble();
+      final longitude = (json['longitude'] as num).toDouble();
+      final zoom = (json['zoom'] as num).toDouble();
+      if (zoom.isNaN || zoom.isInfinite) return null;
+      return SavedMapView(
+        coordinates: Coordinates(latitude: latitude, longitude: longitude),
+        zoom: zoom,
+      );
+    } on Object {
+      await preferences.remove(_mapViewKey);
+      return null;
+    }
+  }
+
+  static Future<void> setMapView({
+    required Coordinates coordinates,
+    required double zoom,
+  }) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(
+      _mapViewKey,
+      jsonEncode(<String, dynamic>{
+        'latitude': coordinates.latitude,
+        'longitude': coordinates.longitude,
+        'zoom': zoom,
+      }),
+    );
+  }
+
   static Map<String, dynamic> _toJson(ChetiwaLocation location) =>
       <String, dynamic>{
         'city': location.city,
@@ -99,4 +138,11 @@ abstract final class LocationPreferencesStore {
           longitude: (json['longitude'] as num).toDouble(),
         ),
       );
+}
+
+final class SavedMapView {
+  const SavedMapView({required this.coordinates, required this.zoom});
+
+  final Coordinates coordinates;
+  final double zoom;
 }

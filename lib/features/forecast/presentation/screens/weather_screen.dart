@@ -123,25 +123,33 @@ final class _WeatherViewState extends State<_WeatherView>
           }
 
           final forecast = state.forecast;
-          void selectLocation(ChetiwaLocation location) {
-            unawaited(
-              context.read<AnalyticsTracker>().locationSelected(
-                location.acquisition.name,
-              ),
-            );
-            context.read<ActiveLocationController>().setActive(location);
+          void selectLocation(ChetiwaLocation location) async {
+            final analytics = context.read<AnalyticsTracker>();
+            final activeLocation = context.read<ActiveLocationController>();
+            final forecastBloc = context.read<ForecastBloc>();
+            final alertCoordinator = context.read<LocalRainAlertCoordinator>();
+            final messenger = ScaffoldMessenger.of(context);
+            final lastKnownNotice = context.l10n.lastKnownLocationNotice;
+            final approximateNotice = context.l10n.approximateLocationNotice;
+            unawaited(analytics.locationSelected(location.acquisition.name));
+            await activeLocation.setActive(location);
+            if (!mounted) return;
             if (location.usesLastKnownPosition || location.hasReducedAccuracy) {
-              ScaffoldMessenger.of(context).showSnackBar(
+              messenger.showSnackBar(
                 SnackBar(
                   content: Text(
                     location.usesLastKnownPosition
-                        ? context.l10n.lastKnownLocationNotice
-                        : context.l10n.approximateLocationNotice,
+                        ? lastKnownNotice
+                        : approximateNotice,
                   ),
                 ),
               );
             }
-            context.read<ForecastBloc>().add(ForecastLocationChanged(location));
+            forecastBloc.add(ForecastLocationChanged(location));
+            // Header selections must also replace an already scheduled alert
+            // immediately; otherwise it can still target the previous city
+            // until the next app resume.
+            unawaited(alertCoordinator.sync());
           }
 
           return Column(

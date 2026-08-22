@@ -24,13 +24,13 @@ final class ActiveLocationController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setActive(ChetiwaLocation location) {
+  Future<void> setActive(ChetiwaLocation location) async {
     _location = location;
     notifyListeners();
     // The active place is also the user's principal place. Persist it here so
     // forecast, radar, alerts and the next app launch all use the same target.
     // The UI can update immediately while the small local write completes.
-    unawaited(_persist(location));
+    await _persist(location);
   }
 
   Future<void> _persist(ChetiwaLocation location) async {
