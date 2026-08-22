@@ -35,11 +35,10 @@ final class ChetiwaHeader extends StatelessWidget {
           height: 44,
           child: Row(
             children: [
-              const SizedBox.square(dimension: 44),
               const Expanded(
                 child: Text(
                   'Chetiwa',
-                  textAlign: TextAlign.center,
+                  textAlign: TextAlign.left,
                   style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
                 ),
               ),
