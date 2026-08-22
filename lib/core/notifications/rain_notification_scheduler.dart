@@ -35,7 +35,7 @@ final class SystemRainNotificationScheduler
   Future<void> _initialize() async {
     if (_initialized) return;
     const settings = InitializationSettings(
-      android: AndroidInitializationSettings('ic_launcher'),
+      android: AndroidInitializationSettings('ic_notification'),
       iOS: DarwinInitializationSettings(
         requestAlertPermission: false,
         requestBadgePermission: false,
@@ -43,21 +43,6 @@ final class SystemRainNotificationScheduler
       ),
     );
     await _plugin.initialize(settings);
-
-    // Keep the plugin's platform permission state in sync with the explicit
-    // permission gateway used by the UI. This is harmless when permission was
-    // already granted and prevents a scheduled notification from disappearing
-    // on Android 13+ or iOS after a fresh install.
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >()
-        ?.requestNotificationsPermission();
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-          IOSFlutterLocalNotificationsPlugin
-        >()
-        ?.requestPermissions(alert: true, badge: false, sound: true);
 
     await _plugin
         .resolvePlatformSpecificImplementation<
