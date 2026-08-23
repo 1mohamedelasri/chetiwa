@@ -55,7 +55,11 @@ final class RainViewerRadarRepository implements RadarRepository {
               scheme is Map<String, dynamic> &&
               (scheme['id'] as num?)?.toInt() == 13,
         );
-    final libreWxrColorScheme = supportsChetiwaPalette ? 13 : 255;
+    // During the rollout, scheme 255 is the raw/grey presentation and hides
+    // the intensity contrast users need to compare with other radar apps.
+    // Scheme 12 is already exposed by LibreWXR and keeps yellow/red cores
+    // visible until the Chetiwa grey/red LUT (13) is installed.
+    final libreWxrColorScheme = supportsChetiwaPalette ? 13 : 12;
     // RainViewer retired future/nowcast frames. LibreWXR exposes a bounded
     // nowcast window, so preserve it in the direct beta path.
     final nowcast = usesLibreWxr

@@ -113,4 +113,36 @@ void main() {
     );
     client.close();
   });
+
+  test(
+    'uses the visible intensity palette before the custom LUT rollout',
+    () async {
+      final client = MockClient(
+        (request) async => http.Response(
+          jsonEncode({
+            'generated': 1787009401,
+            'host': 'https://tiles.example',
+            'radar': {
+              'colorSchemes': [
+                {'id': 12, 'name': '33/40 Max Storm'},
+              ],
+              'past': [
+                {'time': 1787008800, 'path': '/v2/radar/observed'},
+              ],
+              'nowcast': const [],
+            },
+          }),
+          200,
+        ),
+      );
+      final repository = RainViewerRadarRepository(
+        provider: RainViewerRadarProvider(client),
+        cache: const RadarCacheDataSource(),
+      );
+
+      final frames = await repository.getFrames(Coordinates.paris);
+      expect(frames.single.tileUrlTemplate, contains('/12/1_0.png'));
+      client.close();
+    },
+  );
 }
