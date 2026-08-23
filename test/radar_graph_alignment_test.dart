@@ -2,6 +2,7 @@ import 'package:chetiwa/core/time/weather_clock.dart';
 import 'package:chetiwa/core/weather/weather_data_provenance.dart';
 import 'package:chetiwa/features/forecast/data/datasources/fixture_forecast_data_source.dart';
 import 'package:chetiwa/features/forecast/domain/entities/forecast.dart';
+import 'package:chetiwa/features/forecast/domain/services/forecast_snapshot_builder.dart';
 import 'package:chetiwa/features/forecast/presentation/widgets/graph_pane.dart';
 import 'package:chetiwa/features/radar/domain/entities/radar_frame.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -29,6 +30,12 @@ void main() {
 
     expect(aligned.rainPointAt(radarTime)?.intensity, RainIntensity.heavy);
     expect(aligned.providerName, contains('LibreWXR nowcast'));
+    final snapshot = ForecastSnapshotBuilder.build(
+      forecast: aligned,
+      nowUtc: now,
+    );
+    expect(snapshot.brief.type, WeatherBriefType.imminent);
+    expect(snapshot.brief.rainStart, radarTime);
   });
 
   test('Graph keeps the model when point sampling is unavailable', () async {

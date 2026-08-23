@@ -394,11 +394,37 @@ final class _RadarMapState extends State<_RadarMap> {
 
   Widget _buildRadarTile(Widget tileWidget) {
     return Opacity(
-      // Keep LibreWXR's Viper HD precipitation palette untouched. It conveys
-      // intensity; this is not a cloud or probability layer.
-      key: const Key('native-radar-precipitation-tile'),
+      key: const Key('chetiwa-radar-precipitation-tile'),
       opacity: _radarOpacity,
-      child: tileWidget,
+      child: ColorFiltered(
+        // LibreWXR scheme 255 supplies the encoded reflectivity as grayscale.
+        // This inexpensive GPU transform makes weak echoes neutral grey and
+        // progressively warms stronger rain to red. It keeps the geography
+        // readable without pretending weak echoes are clouds or probabilities.
+        colorFilter: const ColorFilter.matrix([
+          0.57,
+          0,
+          0,
+          0,
+          132,
+          0,
+          -2,
+          0,
+          0,
+          348,
+          0,
+          0,
+          -2,
+          0,
+          348,
+          0,
+          0,
+          0,
+          1,
+          0,
+        ]),
+        child: tileWidget,
+      ),
     );
   }
 
@@ -491,8 +517,8 @@ final class _RadarMapState extends State<_RadarMap> {
                 Text(
                   key: const Key('radar-precipitation-explanation'),
                   context.l10n.isFrench
-                      ? 'Couleurs = intensité des précipitations, pas probabilité ni nuages. Le Graph utilise le nowcast LibreWXR au point, puis le modèle météo.'
-                      : 'Colours = precipitation intensity, not probability or clouds. Graph uses LibreWXR point nowcast, then the weather model.',
+                      ? 'Gris = écho très faible, rose/rouge = pluie plus intense. Ce ne sont pas des nuages. Le Graph suit la valeur LibreWXR exactement au point.'
+                      : 'Grey = very weak echo, pink/red = stronger rain. These are not clouds. Graph follows the exact LibreWXR value at the point.',
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontSize: 12,
@@ -773,8 +799,8 @@ final class _RadarLegend extends StatelessWidget {
                   ),
                   Tooltip(
                     message: context.l10n.isFrench
-                        ? 'Cyan/vert = faible, jaune/orange = modérée, rouge = forte. Ce sont des précipitations, jamais des nuages ni une probabilité.'
-                        : 'Cyan/green = light, yellow/orange = moderate, red = heavy. This is precipitation, never clouds or probability.',
+                        ? 'Gris = écho faible ou incertain, rose = pluie modérée, rouge = pluie forte. Ce calque ne montre pas les nuages.'
+                        : 'Grey = weak or uncertain echo, pink = moderate rain, red = heavy rain. This layer does not show clouds.',
                     child: const Icon(Icons.info_outline_rounded, size: 11),
                   ),
                 ],
@@ -786,11 +812,10 @@ final class _RadarLegend extends StatelessWidget {
                   borderRadius: BorderRadius.circular(ChetiwaRadius.full),
                   gradient: LinearGradient(
                     colors: const [
-                      Color(0xFF0C89C9),
-                      Color(0xFF24DD79),
-                      Color(0xFFFFF71C),
-                      Color(0xFFFF9D00),
-                      Color(0xFFF90000),
+                      Color(0xFFB8BEC2),
+                      Color(0xFFD8A0A0),
+                      Color(0xFFE56A67),
+                      Color(0xFFD71920),
                     ],
                   ),
                 ),

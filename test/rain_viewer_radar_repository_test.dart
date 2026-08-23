@@ -65,7 +65,7 @@ void main() {
     );
     expect(
       frames.first.tileUrlTemplate,
-      contains('/256/{z}/{x}/{y}/10/1_1.png'),
+      contains('/256/{z}/{x}/{y}/255/1_0.png'),
     );
     expect(frames.last.kind, WeatherDataKind.radarNowcast);
     expect(frames.last.pointRainRateMmPerHour, 1.4);

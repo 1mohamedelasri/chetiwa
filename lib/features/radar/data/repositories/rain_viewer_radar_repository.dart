@@ -99,7 +99,7 @@ final class RainViewerRadarRepository implements RadarRepository {
           ),
           progress: 0,
           tileUrlTemplate:
-              '$tileHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '10/1_1' : '2/1_0'}.png',
+              '$tileHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '255/1_0' : '2/1_0'}.png',
           kind: raw.forecast
               ? WeatherDataKind.radarNowcast
               : WeatherDataKind.radarObservation,
