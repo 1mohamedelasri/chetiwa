@@ -1,0 +1,64 @@
+diff --git a/src/librewxr/colors/schemes.py b/src/librewxr/colors/schemes.py
+index 3c0b271..10c9247 100644
+--- a/src/librewxr/colors/schemes.py
++++ b/src/librewxr/colors/schemes.py
+@@ -21,6 +21,7 @@ SCHEME_NAMES = {
+     10: "Viper HD",
+     11: "MRMS CREF",
+     12: "33/40 Max Storm",
++    13: "Chetiwa Grey Red",
+ }
+ 
+ # Rain LUTs: scheme_id -> (256, 4) uint8 array mapping pixel value -> RGBA
+@@ -43,6 +44,39 @@ def _parse_hex_rgba(hex_str: str) -> tuple[int, int, int, int]:
+     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), int(h[6:8], 16)
+ 
+ 
++def _chetiwa_lut() -> np.ndarray:
++    """Sparse grey echoes with red precipitation cores, in dBZ."""
++    stops = (
++        (-32.0, (0, 0, 0, 0)),
++        (4.0, (0, 0, 0, 0)),
++        (6.0, (216, 220, 222, 52)),
++        (12.0, (194, 199, 201, 88)),
++        (18.0, (151, 157, 160, 132)),
++        (24.0, (88, 96, 100, 176)),
++        (28.0, (229, 177, 177, 196)),
++        (34.0, (224, 119, 116, 222)),
++        (40.0, (207, 63, 58, 240)),
++        (50.0, (174, 0, 0, 255)),
++        (95.0, (116, 0, 0, 255)),
++    )
++    lut = np.zeros((256, 4), dtype=np.uint8)
++    for pixel_value in range(256):
++        dbz = pixel_value / 2.0 - 32.0
++        for index in range(len(stops) - 1):
++            low_dbz, low_rgba = stops[index]
++            high_dbz, high_rgba = stops[index + 1]
++            if dbz <= high_dbz:
++                ratio = max(0.0, (dbz - low_dbz) / (high_dbz - low_dbz))
++                lut[pixel_value] = [
++                    round(low_rgba[channel] + ratio * (high_rgba[channel] - low_rgba[channel]))
++                    for channel in range(4)
++                ]
++                break
++        else:
++            lut[pixel_value] = stops[-1][1]
++    return lut
++
++
+ def _load_color_table() -> None:
+     """Parse color_table.csv into LUTs.
+ 
+@@ -104,6 +138,11 @@ def _load_color_table() -> None:
+     new_rain[255] = raw_lut
+     new_snow[255] = raw_lut
+ 
++    # Product-specific presentation palette. Keeping this as an explicit LUT
++    # avoids the broad pink haze produced by a client-side linear matrix.
++    new_rain[13] = _chetiwa_lut()
++    new_snow[13] = new_rain[13]
++
+     # Atomic publish: every concurrent reader sees either the empty
+     # dict (load hasn't run) or the fully-populated dict (load done).
+     _rain_luts = new_rain

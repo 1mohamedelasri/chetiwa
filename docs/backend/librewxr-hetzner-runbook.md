@@ -55,12 +55,18 @@ radar terrestre là où LibreWXR ne dispose pas de composite radar natif.
 
    ```text
    RADAR_METADATA_URL=https://radar.ezplatforms.com/public/weather-maps.json
-   RADAR_TILE_URL_TEMPLATE=https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/10/1_1.png
+   RADAR_TILE_URL_TEMPLATE=https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/13/1_0.png
    PUBLIC_BASE_URL=https://api.<domaine>
    ```
 
 L'APK continue d'appeler le backend Chetiwa : elle ne connaît jamais
 l'URL privée de l'origine, ni aucun jeton d'infrastructure.
+
+La palette `13` est la LUT Chetiwa gris-vers-rouge appliquée par
+`chetiwa-drops-palette.patch`. Elle laisse les faibles échos en gris avec une
+opacité progressive et réserve le rouge aux noyaux de précipitation. Le patch
+est conservé avec le code de déploiement pour que la modification AGPL reste
+reproductible et publiable avec le reste des sources du service.
 
 ## Monter en charge
 

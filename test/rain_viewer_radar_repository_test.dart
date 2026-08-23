@@ -36,6 +36,9 @@ void main() {
               jsonEncode({
                 'host': 'https://tiles.example',
                 'radar': {
+                  'colorSchemes': [
+                    {'id': 13, 'name': 'Chetiwa Grey Red'},
+                  ],
                   'past': [
                     {'time': 1787008800, 'path': '/v2/radar/observed'},
                   ],
@@ -65,7 +68,7 @@ void main() {
     );
     expect(
       frames.first.tileUrlTemplate,
-      contains('/256/{z}/{x}/{y}/255/1_0.png'),
+      contains('/256/{z}/{x}/{y}/13/1_0.png'),
     );
     expect(frames.last.kind, WeatherDataKind.radarNowcast);
     expect(frames.last.pointRainRateMmPerHour, 1.4);

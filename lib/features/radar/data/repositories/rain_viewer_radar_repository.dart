@@ -49,6 +49,13 @@ final class RainViewerRadarRepository implements RadarRepository {
       );
     }
     final past = radar['past'] as List<dynamic>? ?? const [];
+    final supportsChetiwaPalette =
+        (radar['colorSchemes'] as List<dynamic>? ?? const []).any(
+          (scheme) =>
+              scheme is Map<String, dynamic> &&
+              (scheme['id'] as num?)?.toInt() == 13,
+        );
+    final libreWxrColorScheme = supportsChetiwaPalette ? 13 : 255;
     // RainViewer retired future/nowcast frames. LibreWXR exposes a bounded
     // nowcast window, so preserve it in the direct beta path.
     final nowcast = usesLibreWxr
@@ -99,7 +106,7 @@ final class RainViewerRadarRepository implements RadarRepository {
           ),
           progress: 0,
           tileUrlTemplate:
-              '$tileHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '255/1_0' : '2/1_0'}.png',
+              '$tileHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '$libreWxrColorScheme/1_0' : '2/1_0'}.png',
           kind: raw.forecast
               ? WeatherDataKind.radarNowcast
               : WeatherDataKind.radarObservation,

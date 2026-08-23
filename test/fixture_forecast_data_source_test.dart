@@ -77,4 +77,12 @@ void main() {
     expect(RainRateScale.normalized(4), closeTo(0.56, 0.001));
     expect(RainRateScale.normalized(12), 1);
   });
+
+  test('rain episodes never connect across dry samples', () {
+    expect(RainRateScale.episodeRanges([0, 0.1, 0.2, 0, 0.04, 0.5, 0]), [
+      (first: 1, last: 2),
+      (first: 5, last: 5),
+    ]);
+    expect(RainRateScale.episodeRanges([0, 0.01, 0.04]), isEmpty);
+  });
 }

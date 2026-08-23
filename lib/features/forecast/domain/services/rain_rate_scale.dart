@@ -38,4 +38,27 @@ abstract final class RainRateScale {
             (visualHeavyCap - moderateUpperBound) *
             0.44;
   }
+
+  /// Consecutive rainy samples as independent closed episodes.
+  ///
+  /// Renderers use these ranges instead of joining every sample, so dry
+  /// periods never become a misleading continuous precipitation line.
+  static List<({int first, int last})> episodeRanges(Iterable<double> rates) {
+    final values = rates.toList(growable: false);
+    final episodes = <({int first, int last})>[];
+    var index = 0;
+    while (index < values.length) {
+      if (!isRain(values[index])) {
+        index++;
+        continue;
+      }
+      final first = index;
+      while (index + 1 < values.length && isRain(values[index + 1])) {
+        index++;
+      }
+      episodes.add((first: first, last: index));
+      index++;
+    }
+    return episodes;
+  }
 }

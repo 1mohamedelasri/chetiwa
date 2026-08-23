@@ -16,6 +16,7 @@ fi
 mkdir -p "$(dirname -- "$target_dir")"
 git clone --depth 1 "$source_repo" "$target_dir"
 git -C "$target_dir" checkout --detach "$source_ref"
+git -C "$target_dir" apply "$script_dir/chetiwa-drops-palette.patch"
 cp "$script_dir/hetzner-small.env" "$target_dir/.env"
 mkdir -p "$target_dir/logs"
 

@@ -109,7 +109,6 @@ final class GraphPane extends StatelessWidget {
             now: now,
             rainStart: alignedSnapshot.brief.rainStart,
             timeZone: alignedForecast.timeZone,
-            providerName: alignedSnapshot.forecastProvenance.provider,
             horizon: horizon,
             languageCode: context.l10n.locale.languageCode,
             colors: chartColors,
@@ -279,7 +278,6 @@ final class _ChetiwaRainChart extends StatefulWidget {
     required this.rainStart,
     required this.horizon,
     required this.timeZone,
-    required this.providerName,
     required this.languageCode,
     required this.colors,
     super.key,
@@ -291,7 +289,6 @@ final class _ChetiwaRainChart extends StatefulWidget {
   final DateTime? rainStart;
   final GraphHorizon horizon;
   final String timeZone;
-  final String providerName;
   final String languageCode;
   final _ChartColors colors;
 
@@ -358,7 +355,6 @@ final class _ChetiwaRainChartState extends State<_ChetiwaRainChart> {
           duration: _duration,
           rainStart: widget.rainStart,
           timeZone: widget.timeZone,
-          providerName: widget.providerName,
           languageCode: widget.languageCode,
           cursorX: _cursorX,
           colors: widget.colors,
@@ -377,7 +373,6 @@ final class _RainChartPainter extends CustomPainter {
     required this.rainStart,
     required this.cursorX,
     required this.timeZone,
-    required this.providerName,
     required this.languageCode,
     required this.colors,
   });
@@ -388,7 +383,6 @@ final class _RainChartPainter extends CustomPainter {
   final DateTime? rainStart;
   final double? cursorX;
   final String timeZone;
-  final String providerName;
   final String languageCode;
   final _ChartColors colors;
 
@@ -411,22 +405,21 @@ final class _RainChartPainter extends CustomPainter {
 
     _text(
       canvas,
-      '${providerName.contains('LibreWXR nowcast') ? (_isFrench ? 'NOWCAST AU POINT + MODÈLE' : 'POINT NOWCAST + MODEL') : (_isFrench ? 'PRÉVISION MODÈLE' : 'MODEL FORECAST')} · ${providerName.toUpperCase()}',
+      _isFrench ? 'PLUIE AU POINT' : 'RAIN AT POINT',
       const Offset(_left, 12),
       color: colors.foreground,
       size: 11,
       weight: FontWeight.w700,
+      width: size.width - _left - _right - 70,
     );
     _text(
       canvas,
-      _isFrench
-          ? '${duration.inHours} PROCHAINES H'
-          : 'NEXT ${duration.inHours} HOURS',
-      Offset(size.width - _right - 90, 14),
+      '${duration.inHours} H',
+      Offset(size.width - _right - 60, 14),
       color: colors.muted,
       size: 11,
       align: TextAlign.right,
-      width: 90,
+      width: 60,
     );
 
     final levels = _isFrench
@@ -453,46 +446,8 @@ final class _RainChartPainter extends CustomPainter {
     }
 
     if (points.isNotEmpty) {
-      final line = Path();
-      final area = Path()..moveTo(chart.left, chart.bottom);
-      for (var index = 0; index < points.length; index++) {
-        final point = points[index];
-        final elapsed = point.time
-            .difference(now)
-            .inMinutes
-            .clamp(0, duration.inMinutes);
-        final x = chart.left + chart.width * elapsed / duration.inMinutes;
-        final y =
-            chart.bottom -
-            chart.height * RainRateScale.normalized(point.rateMmPerHour);
-        if (index == 0) {
-          line.moveTo(x, y);
-          area.lineTo(x, y);
-        } else {
-          line.lineTo(x, y);
-          area.lineTo(x, y);
-        }
-      }
-      area.lineTo(chart.right, chart.bottom);
-      area.close();
-      canvas.drawPath(
-        area,
-        Paint()
-          ..shader = const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xCC2F6EDB), Color(0x1A2F6EDB)],
-          ).createShader(chart),
-      );
-      canvas.drawPath(
-        line,
-        Paint()
-          ..color = ChetiwaColors.rainLight
-          ..strokeWidth = 2.5
-          ..style = PaintingStyle.stroke
-          ..strokeJoin = StrokeJoin.round,
-      );
-      if (points.every((point) => !RainRateScale.isRain(point.rateMmPerHour))) {
+      final hasRain = _paintRainEpisodes(canvas, chart);
+      if (!hasRain) {
         final labelWidth = math.min(180.0, chart.width);
         _text(
           canvas,
@@ -568,6 +523,75 @@ final class _RainChartPainter extends CustomPainter {
     }
   }
 
+  bool _paintRainEpisodes(Canvas canvas, Rect chart) {
+    double xFor(RainPoint point) {
+      final elapsed = point.time
+          .difference(now)
+          .inMinutes
+          .clamp(0, duration.inMinutes);
+      return chart.left + chart.width * elapsed / duration.inMinutes;
+    }
+
+    double yFor(RainPoint point) =>
+        chart.bottom -
+        chart.height * RainRateScale.normalized(point.rateMmPerHour);
+
+    final episodes = RainRateScale.episodeRanges(
+      points.map((point) => point.rateMmPerHour),
+    );
+    for (final episode in episodes) {
+      final firstRain = episode.first;
+      final lastRain = episode.last;
+      final line = Path();
+      final area = Path();
+      if (firstRain == 0) {
+        final first = Offset(xFor(points[firstRain]), yFor(points[firstRain]));
+        line.moveTo(first.dx, first.dy);
+        area
+          ..moveTo(first.dx, chart.bottom)
+          ..lineTo(first.dx, first.dy);
+      } else {
+        final startX =
+            (xFor(points[firstRain - 1]) + xFor(points[firstRain])) / 2;
+        line.moveTo(startX, chart.bottom);
+        area.moveTo(startX, chart.bottom);
+      }
+      for (var rainIndex = firstRain; rainIndex <= lastRain; rainIndex++) {
+        final point = Offset(xFor(points[rainIndex]), yFor(points[rainIndex]));
+        line.lineTo(point.dx, point.dy);
+        area.lineTo(point.dx, point.dy);
+      }
+      final endX = lastRain == points.length - 1
+          ? xFor(points[lastRain])
+          : (xFor(points[lastRain]) + xFor(points[lastRain + 1])) / 2;
+      if (lastRain < points.length - 1) {
+        line.lineTo(endX, chart.bottom);
+      }
+      area
+        ..lineTo(endX, chart.bottom)
+        ..close();
+      canvas.drawPath(
+        area,
+        Paint()
+          ..shader = const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xCC2F6EDB), Color(0x1A2F6EDB)],
+          ).createShader(chart),
+      );
+      canvas.drawPath(
+        line,
+        Paint()
+          ..color = ChetiwaColors.rainLight
+          ..strokeWidth = 2.5
+          ..style = PaintingStyle.stroke
+          ..strokeJoin = StrokeJoin.round
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+    return episodes.isNotEmpty;
+  }
+
   String _formatTime(DateTime instant) =>
       WeatherTimeZone.hourMinute(instant, timeZone);
 
@@ -618,7 +642,6 @@ final class _RainChartPainter extends CustomPainter {
       oldDelegate.duration != duration ||
       oldDelegate.cursorX != cursorX ||
       oldDelegate.languageCode != languageCode ||
-      oldDelegate.providerName != providerName ||
       oldDelegate.timeZone != timeZone ||
       oldDelegate.colors != colors;
 }

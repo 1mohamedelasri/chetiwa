@@ -223,7 +223,10 @@ final class _RadarMapState extends State<_RadarMap> {
                         evictErrorTileStrategy:
                             EvictErrorTileStrategy.notVisible,
                         tileBuilder: (context, tileWidget, tile) =>
-                            _buildRadarTile(tileWidget),
+                            _buildRadarTile(
+                              tileWidget,
+                              hasServerPalette: tileUrl.contains('/13/1_0'),
+                            ),
                       ),
                     if (_baseMap.isSatellite)
                       TileLayer(
@@ -393,40 +396,44 @@ final class _RadarMapState extends State<_RadarMap> {
     }
   }
 
-  Widget _buildRadarTile(Widget tileWidget) {
+  Widget _buildRadarTile(Widget tileWidget, {required bool hasServerPalette}) {
     return Opacity(
       key: const Key('chetiwa-radar-precipitation-tile'),
       opacity: _radarOpacity,
-      child: ColorFiltered(
-        // LibreWXR scheme 255 supplies the encoded reflectivity as grayscale.
-        // This inexpensive GPU transform hides sub-18 dBZ clutter, fades weak
-        // echoes in as neutral grey and progressively warms meaningful rain to
-        // red. The alpha threshold is essential: raw radar contains broad weak
-        // echoes that must not look like certain rain to the user.
-        colorFilter: const ColorFilter.matrix([
-          0.57,
-          0,
-          0,
-          0,
-          132,
-          0,
-          -2,
-          0,
-          0,
-          420,
-          0,
-          0,
-          -2,
-          0,
-          420,
-          4,
-          0,
-          0,
-          0,
-          -400,
-        ]),
-        child: tileWidget,
-      ),
+      // LibreWXR scheme 13 applies Chetiwa's nonlinear dBZ palette at the
+      // source. Unlike a client-side matrix, it can keep weak echoes grey,
+      // suppress clutter and reserve red for genuine precipitation cores.
+      child: hasServerPalette
+          ? tileWidget
+          : ColorFiltered(
+              // Safe fallback while an older LibreWXR origin still advertises
+              // raw scheme 255. It is deliberately temporary and noisier than
+              // the server LUT, but prevents unknown scheme IDs from silently
+              // falling back to a rainbow palette during a rolling deploy.
+              colorFilter: const ColorFilter.matrix([
+                0.57,
+                0,
+                0,
+                0,
+                132,
+                0,
+                -2,
+                0,
+                0,
+                420,
+                0,
+                0,
+                -2,
+                0,
+                420,
+                4,
+                0,
+                0,
+                0,
+                -400,
+              ]),
+              child: tileWidget,
+            ),
     );
   }
 
@@ -1328,44 +1335,81 @@ final class _RadarTimeRulerPainter extends CustomPainter {
         .toList(growable: false);
     if (sampledFrames.isEmpty) return;
 
-    final points = <Offset>[
-      Offset(0, _rainProfileY(currentRainRateMmPerHour, chartTop, trackY)),
+    final samples = <(DateTime, double)>[
+      (start, currentRainRateMmPerHour),
       for (final frame in sampledFrames)
-        Offset(
-          xForTime(frame.time).clamp(0, size.width).toDouble(),
-          _rainProfileY(frame.pointRainRateMmPerHour!, chartTop, trackY),
-        ),
+        (frame.time, frame.pointRainRateMmPerHour!),
     ];
     final graphBottom = trackY - 7;
-    final linePath = ui.Path()..moveTo(points.first.dx, points.first.dy);
-    for (final point in points.skip(1)) {
-      linePath.lineTo(point.dx, point.dy);
+    final chart = Rect.fromLTRB(0, chartTop, size.width, graphBottom);
+    final episodes = RainRateScale.episodeRanges(
+      samples.map((sample) => sample.$2),
+    );
+    for (final episode in episodes) {
+      final firstRain = episode.first;
+      final lastRain = episode.last;
+      final linePath = ui.Path();
+      final areaPath = ui.Path();
+      if (firstRain == 0) {
+        final firstX = xForTime(
+          samples[firstRain].$1,
+        ).clamp(0, size.width).toDouble();
+        final firstY = _rainProfileY(samples[firstRain].$2, chartTop, trackY);
+        linePath.moveTo(firstX, firstY);
+        areaPath
+          ..moveTo(firstX, graphBottom)
+          ..lineTo(firstX, firstY);
+      } else {
+        final startX =
+            (xForTime(samples[firstRain - 1].$1) +
+                xForTime(samples[firstRain].$1)) /
+            2;
+        linePath.moveTo(startX, graphBottom);
+        areaPath.moveTo(startX, graphBottom);
+      }
+      for (var rainIndex = firstRain; rainIndex <= lastRain; rainIndex++) {
+        final x = xForTime(
+          samples[rainIndex].$1,
+        ).clamp(0, size.width).toDouble();
+        final y = _rainProfileY(samples[rainIndex].$2, chartTop, trackY);
+        linePath.lineTo(x, y);
+        areaPath.lineTo(x, y);
+      }
+      final endX = lastRain == samples.length - 1
+          ? xForTime(samples[lastRain].$1).clamp(0, size.width).toDouble()
+          : ((xForTime(samples[lastRain].$1) +
+                        xForTime(samples[lastRain + 1].$1)) /
+                    2)
+                .clamp(0, size.width)
+                .toDouble();
+      if (lastRain < samples.length - 1) {
+        linePath.lineTo(endX, graphBottom);
+      }
+      areaPath
+        ..lineTo(endX, graphBottom)
+        ..close();
+      canvas.drawPath(
+        areaPath,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              const Color(0xFF346CC5).withValues(alpha: 0.65),
+              const Color(0xFF346CC5).withValues(alpha: 0.08),
+            ],
+          ).createShader(chart),
+      );
+      canvas.drawPath(
+        linePath,
+        Paint()
+          ..color = const Color(0xFF3FA7D6)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..strokeJoin = StrokeJoin.round
+          ..strokeCap = StrokeCap.round,
+      );
     }
-    final areaPath = ui.Path.from(linePath)
-      ..lineTo(points.last.dx, graphBottom)
-      ..lineTo(points.first.dx, graphBottom)
-      ..close();
-    canvas.drawPath(
-      areaPath,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            const Color(0xFF346CC5).withValues(alpha: 0.55),
-            const Color(0xFF346CC5).withValues(alpha: 0.06),
-          ],
-        ).createShader(Rect.fromLTRB(0, chartTop, size.width, graphBottom)),
-    );
-    canvas.drawPath(
-      linePath,
-      Paint()
-        ..color = const Color(0xFF3FA7D6)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
-        ..strokeJoin = StrokeJoin.round
-        ..strokeCap = StrokeCap.round,
-    );
   }
 
   double _rainProfileY(double rainRate, double chartTop, double trackY) {
