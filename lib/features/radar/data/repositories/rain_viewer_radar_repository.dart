@@ -61,6 +61,25 @@ final class RainViewerRadarRepository implements RadarRepository {
     final nowcast = usesLibreWxr
         ? radar['nowcast'] as List<dynamic>? ?? const []
         : const <dynamic>[];
+    if (usesLibreWxr && past.isNotEmpty && response['generated'] is num) {
+      final latestObservation = past
+          .whereType<Map<String, dynamic>>()
+          .map((frame) => frame['time'])
+          .whereType<num>()
+          .fold<int>(
+            0,
+            (latest, value) => value.toInt() > latest ? value.toInt() : latest,
+          );
+      final generatedAt = (response['generated'] as num).toInt();
+      if (latestObservation > 0 &&
+          generatedAt - latestObservation >
+              const Duration(minutes: 20).inSeconds) {
+        throw const WeatherDataException(
+          WeatherDataIssue.providerUnavailable,
+          'Observation radar trop ancienne',
+        );
+      }
+    }
     final rawFrames = RadarFramePolicy.select(
       past
           .whereType<Map<String, dynamic>>()

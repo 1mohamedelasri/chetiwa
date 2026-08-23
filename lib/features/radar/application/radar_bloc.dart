@@ -21,6 +21,12 @@ final class RadarRequested extends RadarEvent {
   const RadarRequested();
 }
 
+/// Silent refresh while the radar screen stays open. It does not count as a
+/// new user radar session and keeps the currently visible frames/playback.
+final class RadarRefreshed extends RadarEvent {
+  const RadarRefreshed();
+}
+
 final class RadarLocationChanged extends RadarEvent {
   const RadarLocationChanged(this.coordinates);
 
@@ -148,6 +154,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
        _usageQuota = usageQuota,
        super(const RadarInitial()) {
     on<RadarRequested>(_load);
+    on<RadarRefreshed>(_load);
     on<RadarLocationChanged>(_changeLocation);
     on<RadarFrameSelected>(_selectFrame);
     on<RadarPlaybackToggled>(_togglePlayback);
@@ -168,9 +175,10 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   var _loadGeneration = 0;
   var _resumeAfterSuspension = false;
 
-  Future<void> _load(RadarRequested event, Emitter<RadarState> emit) async {
+  Future<void> _load(RadarEvent event, Emitter<RadarState> emit) async {
     final generation = ++_loadGeneration;
     final requestedCoordinates = _coordinates;
+    final backgroundRefresh = event is RadarRefreshed && state is RadarReady;
     final wasPlaying =
         _resumeAfterSuspension ||
         switch (state) {
@@ -179,32 +187,54 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
         };
     _stopPlayback();
     RadarReady? visible;
-    final cached = await _repository.getCachedFrames(requestedCoordinates);
-    if (generation != _loadGeneration || emit.isDone) return;
-    if (cached != null) {
+    final activeBeforeRefresh = state;
+    if (backgroundRefresh && activeBeforeRefresh is RadarReady) {
       visible = RadarReady(
-        frames: _limitFrames(cached.frames),
-        selectedIndex: _defaultIndex(_limitFrames(cached.frames)),
-        coordinates: requestedCoordinates,
+        frames: activeBeforeRefresh.frames,
+        selectedIndex: activeBeforeRefresh.selectedIndex,
+        coordinates: activeBeforeRefresh.coordinates,
         health: WeatherDataHealth(
-          freshness: cached.isStaleAt(_clock.nowUtc)
-              ? WeatherDataFreshness.cachedStale
-              : WeatherDataFreshness.cachedFresh,
-          cachedAt: cached.cachedAt,
+          freshness: activeBeforeRefresh.health.freshness,
+          cachedAt: activeBeforeRefresh.health.cachedAt,
+          issue: activeBeforeRefresh.health.issue,
           isRefreshing: true,
         ),
         isPlaying: wasPlaying,
       );
       emit(visible);
       if (wasPlaying && visible.frames.length > 1) {
-        _resumeAfterSuspension = false;
         _startPlaybackTimer();
       }
     } else {
-      emit(const RadarLoading());
+      final cached = await _repository.getCachedFrames(requestedCoordinates);
+      if (generation != _loadGeneration || emit.isDone) return;
+      if (cached != null) {
+        visible = RadarReady(
+          frames: _limitFrames(cached.frames),
+          selectedIndex: _defaultIndex(_limitFrames(cached.frames)),
+          coordinates: requestedCoordinates,
+          health: WeatherDataHealth(
+            freshness: cached.isStaleAt(_clock.nowUtc)
+                ? WeatherDataFreshness.cachedStale
+                : WeatherDataFreshness.cachedFresh,
+            cachedAt: cached.cachedAt,
+            isRefreshing: true,
+          ),
+          isPlaying: wasPlaying,
+        );
+        emit(visible);
+        if (wasPlaying && visible.frames.length > 1) {
+          _resumeAfterSuspension = false;
+          _startPlaybackTimer();
+        }
+      } else {
+        emit(const RadarLoading());
+      }
     }
     try {
-      await _usageQuota?.consumeRadarSession();
+      if (event is RadarRequested) {
+        await _usageQuota?.consumeRadarSession();
+      }
       final frames = _limitFrames(
         await _repository.getFrames(requestedCoordinates),
       );

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:chetiwa/core/location/coordinates.dart';
 import 'package:chetiwa/core/weather/weather_data_provenance.dart';
+import 'package:chetiwa/core/weather/weather_data_health.dart';
 import 'package:chetiwa/features/radar/data/cache/radar_cache_data_source.dart';
 import 'package:chetiwa/features/radar/data/providers/rain_viewer_radar_provider.dart';
 import 'package:chetiwa/features/radar/data/repositories/rain_viewer_radar_repository.dart';
@@ -74,6 +75,42 @@ void main() {
     expect(frames.last.pointRainRateMmPerHour, 1.4);
     expect(frames.last.pointRainSource, 'radar');
     expect(cached?.frames, frames);
+    client.close();
+  });
+
+  test('rejects metadata whose latest observation is too old', () async {
+    final client = MockClient(
+      (request) async => request.method == 'POST'
+          ? http.Response('{}', 200)
+          : http.Response(
+              jsonEncode({
+                'generated': 1787010601,
+                'host': 'https://tiles.example',
+                'radar': {
+                  'past': [
+                    {'time': 1787008800, 'path': '/v2/radar/stale'},
+                  ],
+                  'nowcast': const [],
+                },
+              }),
+              200,
+            ),
+    );
+    final repository = RainViewerRadarRepository(
+      provider: RainViewerRadarProvider(client),
+      cache: const RadarCacheDataSource(),
+    );
+
+    await expectLater(
+      repository.getFrames(Coordinates.paris),
+      throwsA(
+        isA<WeatherDataException>().having(
+          (error) => error.issue,
+          'issue',
+          WeatherDataIssue.providerUnavailable,
+        ),
+      ),
+    );
     client.close();
   });
 }

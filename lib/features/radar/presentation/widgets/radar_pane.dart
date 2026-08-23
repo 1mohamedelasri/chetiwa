@@ -16,6 +16,7 @@ import '../../../../core/time/weather_clock.dart';
 import '../../../../core/widgets/weather_data_status.dart';
 import '../../../forecast/domain/entities/forecast.dart';
 import '../../../forecast/domain/services/forecast_snapshot_builder.dart';
+import '../../../forecast/domain/services/radar_nowcast_alignment.dart';
 import '../../../forecast/domain/services/rain_rate_scale.dart';
 import '../../../monetization/application/usage_quota_controller.dart';
 import '../../application/radar_bloc.dart';
@@ -93,6 +94,7 @@ final class _RadarMapState extends State<_RadarMap> {
   bool _autoPlaybackStarted = false;
   LatLng? _lastCenter;
   Timer? _prefetchDebounce;
+  Timer? _dataRefreshTimer;
 
   @override
   void initState() {
@@ -100,13 +102,17 @@ final class _RadarMapState extends State<_RadarMap> {
     _radarBloc = context.read<RadarBloc>();
     _tileCache.beginSession();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _startPlaybackWhenReady(_radarBloc.state);
+      if (mounted) {
+        _startPlaybackWhenReady(_radarBloc.state);
+        _scheduleDataRefresh(_radarBloc.state);
+      }
     });
   }
 
   @override
   void dispose() {
     _prefetchDebounce?.cancel();
+    _dataRefreshTimer?.cancel();
     _radarBloc.add(const RadarPlaybackPaused());
     _mapController.dispose();
     super.dispose();
@@ -122,9 +128,26 @@ final class _RadarMapState extends State<_RadarMap> {
     _radarBloc.add(const RadarPlaybackRestarted());
   }
 
+  void _scheduleDataRefresh(RadarState state) {
+    _dataRefreshTimer?.cancel();
+    final retrySoon =
+        state is RadarReady &&
+        (state.health.issue != null || state.health.isStale);
+    _dataRefreshTimer = Timer(
+      retrySoon ? const Duration(seconds: 30) : const Duration(minutes: 5),
+      () {
+        if (!mounted) return;
+        _radarBloc.add(const RadarRefreshed());
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) => BlocListener<RadarBloc, RadarState>(
-    listener: (_, state) => _startPlaybackWhenReady(state),
+    listener: (_, state) {
+      _startPlaybackWhenReady(state);
+      _scheduleDataRefresh(state);
+    },
     child: BlocBuilder<RadarBloc, RadarState>(
       builder: (context, state) {
         if (state is RadarFailure) {
@@ -954,6 +977,19 @@ final class RadarTimeline extends StatelessWidget {
   Widget build(BuildContext context) {
     final timelineColors = _RadarTimelineColors.of(context);
     final nowInstant = snapshot.nowUtc;
+    final alignedForecast = alignForecastWithRadarNowcast(
+      forecast,
+      state.frames,
+      nowInstant,
+    );
+    final graphEnd = nowInstant.add(const Duration(hours: 2));
+    final rainPoints = <RainPoint>[
+      snapshot.currentRain,
+      ...alignedForecast.points.where(
+        (point) =>
+            point.time.isAfter(nowInstant) && !point.time.isAfter(graphEnd),
+      ),
+    ];
     final selectedPointRate = state.selectedFrame.pointRainRateMmPerHour;
     final status = state.selectedFrame.isNowcast && selectedPointRate != null
         ? RainRateScale.isRain(selectedPointRate)
@@ -1126,11 +1162,10 @@ final class RadarTimeline extends StatelessWidget {
                     ),
                     painter: _RadarTimeRulerPainter(
                       frames: state.frames,
+                      rainPoints: rainPoints,
                       selectedIndex: state.selectedIndex,
                       timeZone: forecast.timeZone,
                       now: nowInstant,
-                      currentRainRateMmPerHour:
-                          snapshot.currentRain.rateMmPerHour,
                       colors: timelineColors,
                     ),
                     child: const SizedBox.expand(),
@@ -1155,10 +1190,7 @@ final class RadarTimeline extends StatelessWidget {
         ? snapshot.nowUtc.millisecondsSinceEpoch
         : state.frames[startIndex].time.millisecondsSinceEpoch;
     final end = hasNowcast
-        ? math.max(
-            start + const Duration(minutes: 30).inMilliseconds,
-            state.frames[endIndex].time.millisecondsSinceEpoch,
-          )
+        ? start + const Duration(hours: 2).inMilliseconds
         : state.frames[endIndex].time.millisecondsSinceEpoch;
     final selectedTime =
         start + ((end - start) * (x / width).clamp(0, 1)).toDouble();
@@ -1181,18 +1213,18 @@ final class RadarTimeline extends StatelessWidget {
 final class _RadarTimeRulerPainter extends CustomPainter {
   const _RadarTimeRulerPainter({
     required this.frames,
+    required this.rainPoints,
     required this.selectedIndex,
     required this.timeZone,
     required this.now,
-    required this.currentRainRateMmPerHour,
     required this.colors,
   });
 
   final List<RadarFrame> frames;
+  final List<RainPoint> rainPoints;
   final int selectedIndex;
   final String timeZone;
   final DateTime now;
-  final double currentRainRateMmPerHour;
   final _RadarTimelineColors colors;
 
   @override
@@ -1210,10 +1242,9 @@ final class _RadarTimeRulerPainter extends CustomPainter {
     final playbackStartIndex = hasNowcast ? observationIndex : 0;
     final playbackEndIndex = hasNowcast ? frames.length - 1 : observationIndex;
     final start = hasNowcast ? now : frames[playbackStartIndex].time;
-    final lastFrameTime = frames[playbackEndIndex].time;
-    final end = hasNowcast && !lastFrameTime.isAfter(start)
-        ? start.add(const Duration(minutes: 30))
-        : lastFrameTime;
+    final end = hasNowcast
+        ? start.add(const Duration(hours: 2))
+        : frames[playbackEndIndex].time;
     final durationMs = math
         .max(1, end.millisecondsSinceEpoch - start.millisecondsSinceEpoch)
         .toDouble();
@@ -1324,22 +1355,13 @@ final class _RadarTimeRulerPainter extends CustomPainter {
     double chartTop,
     double trackY,
   ) {
-    final sampledFrames = frames
+    final samples = rainPoints
         .where(
-          (frame) =>
-              frame.isNowcast &&
-              frame.pointRainRateMmPerHour != null &&
-              !frame.time.isBefore(start) &&
-              !frame.time.isAfter(end),
+          (point) => !point.time.isBefore(start) && !point.time.isAfter(end),
         )
+        .map((point) => (point.time, point.rateMmPerHour))
         .toList(growable: false);
-    if (sampledFrames.isEmpty) return;
-
-    final samples = <(DateTime, double)>[
-      (start, currentRainRateMmPerHour),
-      for (final frame in sampledFrames)
-        (frame.time, frame.pointRainRateMmPerHour!),
-    ];
+    if (samples.isEmpty) return;
     final graphBottom = trackY - 7;
     final chart = Rect.fromLTRB(0, chartTop, size.width, graphBottom);
     final episodes = RainRateScale.episodeRanges(
@@ -1519,9 +1541,9 @@ final class _RadarTimeRulerPainter extends CustomPainter {
   bool shouldRepaint(covariant _RadarTimeRulerPainter oldDelegate) =>
       frames != oldDelegate.frames ||
       selectedIndex != oldDelegate.selectedIndex ||
+      rainPoints != oldDelegate.rainPoints ||
       timeZone != oldDelegate.timeZone ||
       now != oldDelegate.now ||
-      currentRainRateMmPerHour != oldDelegate.currentRainRateMmPerHour ||
       colors != oldDelegate.colors;
 }
 

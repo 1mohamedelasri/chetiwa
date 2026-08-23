@@ -9,6 +9,7 @@ import '../../../../core/l10n/chetiwa_localizations.dart';
 import '../../application/graph_horizon_cubit.dart';
 import '../../domain/entities/forecast.dart';
 import '../../domain/services/forecast_snapshot_builder.dart';
+import '../../domain/services/radar_nowcast_alignment.dart';
 import '../../domain/services/rain_rate_scale.dart';
 import '../../../radar/domain/entities/radar_frame.dart';
 import 'weather_chrome.dart';
@@ -140,55 +141,6 @@ final class GraphPane extends StatelessWidget {
       },
     );
   }
-}
-
-/// Replaces model values only inside LibreWXR's sampled nowcast window.
-/// Model points before and after that bounded window remain available.
-Forecast alignForecastWithRadarNowcast(
-  Forecast forecast,
-  List<RadarFrame> radarFrames,
-  DateTime nowUtc,
-) {
-  final samples =
-      radarFrames
-          .where(
-            (frame) =>
-                frame.isNowcast &&
-                frame.pointRainRateMmPerHour != null &&
-                frame.time.isAfter(nowUtc),
-          )
-          .map(
-            (frame) => RainPoint(
-              time: frame.time,
-              rateMmPerHour: frame.pointRainRateMmPerHour!,
-              probability: frame.pointRainRateMmPerHour! >= 0.05 ? 1 : 0,
-              intensity: RainRateScale.intensityFor(
-                frame.pointRainRateMmPerHour!,
-              ),
-            ),
-          )
-          .toList(growable: false)
-        ..sort((left, right) => left.time.compareTo(right.time));
-  if (samples.isEmpty) return forecast;
-
-  final radarStart = samples.first.time;
-  final radarEnd = samples.last.time;
-  final merged = <RainPoint>[
-    ...forecast.points.where(
-      (point) =>
-          point.time.isBefore(radarStart) || point.time.isAfter(radarEnd),
-    ),
-    ...samples,
-  ]..sort((left, right) => left.time.compareTo(right.time));
-  final modelLabel = forecast.providerName.contains('AROME')
-      ? 'AROME'
-      : forecast.providerName.contains('Open-Meteo')
-      ? 'Open-Meteo'
-      : forecast.providerName;
-  return forecast.copyWith(
-    points: merged,
-    providerName: 'LibreWXR nowcast + $modelLabel',
-  );
 }
 
 final class _HorizonSelector extends StatelessWidget {
