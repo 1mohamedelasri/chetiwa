@@ -72,245 +72,322 @@ final class _RadarMapState extends State<_RadarMap> {
   // Start close enough to answer "is it raining here?" while staying at the
   // provider's native radar resolution.
   static const _regionalZoom = 7.0;
-  static const _cityZoom = 8.0;
+  static const _cityZoom = 9.0;
   static const _minRadarZoom = 5.0;
-  // RainViewer serves real imagery to z7. One display zoom avoids blurry
-  // magnification while preserving the normal map gesture.
-  static const _maxRadarZoom = 8.0;
+  static const _maxNativeRadarZoom = 10;
+  // LibreWXR is generated through z10. One extra display zoom keeps the layer
+  // visible at the end of a pinch without requesting unsupported z11 tiles.
+  static const _maxRadarZoom = 11.0;
   static const _timelineHeight = 150.0;
 
   final MapController _mapController = MapController();
   final RadarTileCache _tileCache = RadarTileCache.shared;
+  late final RadarBloc _radarBloc;
   _RadarBaseMap _baseMap = _RadarBaseMap.satellite;
   double _radarOpacity = 0.96;
   bool _radarVisible = true;
+  bool _mapReady = false;
+  bool _autoPlaybackStarted = false;
   LatLng? _lastCenter;
+  Timer? _prefetchDebounce;
 
   @override
   void initState() {
     super.initState();
+    _radarBloc = context.read<RadarBloc>();
     _tileCache.beginSession();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _startPlaybackWhenReady(_radarBloc.state);
+    });
   }
 
   @override
   void dispose() {
+    _prefetchDebounce?.cancel();
+    _radarBloc.add(const RadarPlaybackPaused());
     _mapController.dispose();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) => BlocBuilder<RadarBloc, RadarState>(
-    builder: (context, state) {
-      if (state is RadarFailure) {
-        return WeatherDataUnavailableView(
-          issue: state.issue,
-          domainLabel: 'LibreWXR',
-          onRetry: () => context.read<RadarBloc>().add(const RadarRequested()),
-        );
-      }
-      if (state is! RadarReady) {
-        return WeatherDataLoadingView(label: context.l10n.loadingRadar);
-      }
+  void _startPlaybackWhenReady(RadarState state) {
+    if (_autoPlaybackStarted ||
+        state is! RadarReady ||
+        state.frames.length < 2) {
+      return;
+    }
+    _autoPlaybackStarted = true;
+    _radarBloc.add(const RadarPlaybackRestarted());
+  }
 
-      final frame = state.selectedFrame;
-      final center = LatLng(
-        state.coordinates.latitude,
-        state.coordinates.longitude,
-      );
-      if (_lastCenter != null && _lastCenter != center) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _mapController.move(center, _regionalZoom);
-        });
-      }
-      _lastCenter = center;
-      final quota = context.watch<UsageQuotaController?>();
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(ChetiwaRadius.large),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (frame.tileUrlTemplate case final tileUrl?) ...[
-              FlutterMap(
-                mapController: _mapController,
-                options: MapOptions(
-                  initialCenter: center,
-                  initialZoom: _regionalZoom,
-                  minZoom: _minRadarZoom,
-                  maxZoom: _maxRadarZoom,
-                  onPositionChanged: (camera, _) {
-                    unawaited(
-                      _tileCache.prefetchNextFrames(
-                        camera: camera,
-                        frameTemplates: state.frames
-                            .skip(state.selectedIndex + 1)
-                            .map((item) => item.tileUrlTemplate)
-                            .whereType<String>(),
-                      ),
-                    );
-                  },
-                  backgroundColor: Colors.transparent,
-                  interactionOptions: const InteractionOptions(
-                    // Keep the useful navigation gestures explicit and avoid
-                    // accidental map rotation on a compact radar surface.
-                    flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-                  ),
-                ),
-                children: [
-                  TileLayer(
-                    key: ValueKey(_baseMap),
-                    urlTemplate: _baseMap.tileUrl,
-                    subdomains: const ['a', 'b', 'c', 'd'],
-                    userAgentPackageName: 'com.chetiwa.chetiwa',
-                    maxNativeZoom: 20,
-                    maxZoom: 20,
-                  ),
-                  if (_radarVisible)
-                    TileLayer(
-                      // Keep one TileLayer alive across frames. flutter_map
-                      // detects the URL change and reloads its images while
-                      // retaining the previous tiles until the next ones are
-                      // ready; recreating the layer here made playback look
-                      // frozen on physical devices with normal network lag.
-                      urlTemplate: tileUrl,
-                      userAgentPackageName: 'com.chetiwa.chetiwa',
-                      maxNativeZoom: 7,
-                      maxZoom: _maxRadarZoom,
-                      panBuffer: 1,
-                      keepBuffer: 1,
-                      tileProvider: _tileCache.tileProvider,
-                      tileDisplay: const TileDisplay.fadeIn(
-                        duration: Duration(milliseconds: 140),
-                        reloadStartOpacity: 0.25,
-                      ),
-                      evictErrorTileStrategy: EvictErrorTileStrategy.notVisible,
-                      tileBuilder: (context, tileWidget, tile) =>
-                          _buildRadarTile(tileWidget),
+  @override
+  Widget build(BuildContext context) => BlocListener<RadarBloc, RadarState>(
+    listener: (_, state) => _startPlaybackWhenReady(state),
+    child: BlocBuilder<RadarBloc, RadarState>(
+      builder: (context, state) {
+        if (state is RadarFailure) {
+          return WeatherDataUnavailableView(
+            issue: state.issue,
+            domainLabel: 'LibreWXR',
+            onRetry: () =>
+                context.read<RadarBloc>().add(const RadarRequested()),
+          );
+        }
+        if (state is! RadarReady) {
+          return WeatherDataLoadingView(label: context.l10n.loadingRadar);
+        }
+
+        final frame = state.selectedFrame;
+        final center = LatLng(
+          state.coordinates.latitude,
+          state.coordinates.longitude,
+        );
+        if (_lastCenter != null && _lastCenter != center) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _mapController.move(center, _regionalZoom);
+          });
+        }
+        _lastCenter = center;
+        if (_mapReady) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _schedulePrefetch(state, _mapController.camera);
+          });
+        }
+        final quota = context.watch<UsageQuotaController?>();
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(ChetiwaRadius.large),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (frame.tileUrlTemplate case final tileUrl?) ...[
+                FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    initialCenter: center,
+                    initialZoom: _regionalZoom,
+                    minZoom: _minRadarZoom,
+                    maxZoom: _maxRadarZoom,
+                    onMapReady: () {
+                      _mapReady = true;
+                      _schedulePrefetch(
+                        state,
+                        _mapController.camera,
+                        immediate: true,
+                      );
+                    },
+                    onPositionChanged: (camera, _) {
+                      _schedulePrefetch(state, camera);
+                    },
+                    backgroundColor: Colors.transparent,
+                    interactionOptions: const InteractionOptions(
+                      // Keep the useful navigation gestures explicit and avoid
+                      // accidental map rotation on a compact radar surface.
+                      flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
                     ),
-                  if (_baseMap.isSatellite)
+                  ),
+                  children: [
                     TileLayer(
-                      urlTemplate:
-                          'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+                      key: ValueKey(_baseMap),
+                      urlTemplate: _baseMap.tileUrl,
+                      subdomains: const ['a', 'b', 'c', 'd'],
                       userAgentPackageName: 'com.chetiwa.chetiwa',
                       maxNativeZoom: 20,
                       maxZoom: 20,
                     ),
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: center,
-                        width: 52,
-                        height: 52,
-                        child: _UserLocationMarker(
-                          locationName: widget.forecast.locationName,
-                          onDoubleTap: () =>
-                              _mapController.move(center, _cityZoom),
+                    if (_radarVisible)
+                      TileLayer(
+                        // Keep one TileLayer alive across frames. flutter_map
+                        // detects the URL change and reloads its images while
+                        // retaining the previous tiles until the next ones are
+                        // ready; recreating the layer here made playback look
+                        // frozen on physical devices with normal network lag.
+                        urlTemplate: tileUrl,
+                        userAgentPackageName: 'com.chetiwa.chetiwa',
+                        maxNativeZoom: _maxNativeRadarZoom,
+                        // Keep the last native radar tiles visible throughout
+                        // pinch overscroll instead of temporarily removing the
+                        // whole layer when the rounded zoom exceeds its source.
+                        maxZoom: 22,
+                        panBuffer: 1,
+                        keepBuffer: 2,
+                        tileProvider: _tileCache.tileProvider,
+                        tileDisplay: const TileDisplay.fadeIn(
+                          duration: Duration(milliseconds: 120),
+                          // A new animation frame replaces an already visible
+                          // tile. Starting a reload at 25% made rain fade into a
+                          // ghost even when the new PNG was fully available.
+                          reloadStartOpacity: 1,
                         ),
+                        evictErrorTileStrategy:
+                            EvictErrorTileStrategy.notVisible,
+                        tileBuilder: (context, tileWidget, tile) =>
+                            _buildRadarTile(tileWidget),
                       ),
-                    ],
-                  ),
-                ],
-              ),
-            ] else ...[
-              const ColoredBox(color: Color(0xFF162B32)),
-              SvgPicture.asset(
-                'assets/images/paris_radar_roads.svg',
-                fit: BoxFit.cover,
-                colorFilter: ColorFilter.mode(
-                  ChetiwaColors.surfaceSecondary.withValues(alpha: 0.72),
-                  BlendMode.srcIn,
-                ),
-              ),
-              RadarIntensityOverlay(
-                progress: frame.progress,
-                rainRate:
-                    widget.forecast.rainPointAt(frame.time)?.rateMmPerHour ?? 0,
-              ),
-            ],
-            Positioned(
-              left: 16,
-              right: 16,
-              top: 16,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _CompactRadarStatus(
-                      forecast: widget.forecast,
-                      snapshot: widget.snapshot,
-                      selectedInstant: frame.time,
-                      isNowcast: frame.isNowcast,
+                    if (_baseMap.isSatellite)
+                      TileLayer(
+                        urlTemplate:
+                            'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+                        userAgentPackageName: 'com.chetiwa.chetiwa',
+                        maxNativeZoom: 20,
+                        maxZoom: 20,
+                      ),
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: center,
+                          width: 52,
+                          height: 52,
+                          child: _UserLocationMarker(
+                            locationName: widget.forecast.locationName,
+                            onDoubleTap: () =>
+                                _mapController.move(center, _cityZoom),
+                          ),
+                        ),
+                      ],
                     ),
+                  ],
+                ),
+              ] else ...[
+                const ColoredBox(color: Color(0xFF162B32)),
+                SvgPicture.asset(
+                  'assets/images/paris_radar_roads.svg',
+                  fit: BoxFit.cover,
+                  colorFilter: ColorFilter.mode(
+                    ChetiwaColors.surfaceSecondary.withValues(alpha: 0.72),
+                    BlendMode.srcIn,
                   ),
-                  const SizedBox(width: 8),
-                  _LayersButton(selectedMap: _baseMap, onPressed: _showLayers),
-                ],
-              ),
-            ),
-            if (quota != null)
-              Positioned(
-                right: 16,
-                top: 68,
-                child: _RadarQuotaBadge(snapshot: quota.radarSessions),
-              ),
-            if (state.health.issue != null ||
-                state.health.usesCache ||
-                state.health.isRefreshing)
+                ),
+                RadarIntensityOverlay(
+                  progress: frame.progress,
+                  rainRate:
+                      widget.forecast.rainPointAt(frame.time)?.rateMmPerHour ??
+                      0,
+                ),
+              ],
               Positioned(
                 left: 16,
                 right: 16,
-                top: 68,
-                child: WeatherDataStatusBanner(
-                  key: const Key('radar-data-status'),
-                  health: state.health,
-                  domainLabel: 'LibreWXR',
-                  nowUtc: widget.snapshot.nowUtc,
-                  dataUpdatedAt:
-                      state.frames[state.currentObservationIndex].time,
+                top: 16,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _CompactRadarStatus(
+                        forecast: widget.forecast,
+                        snapshot: widget.snapshot,
+                        selectedInstant: frame.time,
+                        isNowcast: frame.isNowcast,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _LayersButton(
+                      selectedMap: _baseMap,
+                      onPressed: _showLayers,
+                    ),
+                  ],
                 ),
               ),
-            if (frame.tileUrlTemplate == null)
-              Center(
-                child: _UserLocationMarker(
-                  locationName: widget.forecast.locationName,
-                  onDoubleTap: () {},
+              if (quota != null)
+                Positioned(
+                  right: 16,
+                  top: 68,
+                  child: _RadarQuotaBadge(snapshot: quota.radarSessions),
                 ),
-              ),
-            if (frame.tileUrlTemplate != null)
+              if (state.health.issue != null ||
+                  state.health.usesCache ||
+                  state.health.isRefreshing)
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  top: 68,
+                  child: WeatherDataStatusBanner(
+                    key: const Key('radar-data-status'),
+                    health: state.health,
+                    domainLabel: 'LibreWXR',
+                    nowUtc: widget.snapshot.nowUtc,
+                    dataUpdatedAt:
+                        state.frames[state.currentObservationIndex].time,
+                  ),
+                ),
+              if (frame.tileUrlTemplate == null)
+                Center(
+                  child: _UserLocationMarker(
+                    locationName: widget.forecast.locationName,
+                    onDoubleTap: () {},
+                  ),
+                ),
+              if (frame.tileUrlTemplate != null)
+                Positioned(
+                  right: 10,
+                  bottom: _timelineHeight + 12,
+                  child: _RecenterButton(
+                    locationName: widget.forecast.locationName,
+                    onPressed: () => _mapController.move(center, _regionalZoom),
+                  ),
+                ),
               Positioned(
-                right: 10,
+                left: 8,
                 bottom: _timelineHeight + 12,
-                child: _RecenterButton(
-                  locationName: widget.forecast.locationName,
-                  onPressed: () => _mapController.move(center, _regionalZoom),
+                child: _RadarLegend(
+                  radarVisible: _radarVisible,
+                  providerName: frame.providerName,
                 ),
               ),
-            Positioned(
-              left: 8,
-              bottom: _timelineHeight + 12,
-              child: _RadarLegend(
-                radarVisible: _radarVisible,
-                providerName: frame.providerName,
+              Positioned(
+                left: 8,
+                bottom: _timelineHeight,
+                child: _MapAttribution(baseMap: _baseMap),
               ),
-            ),
-            Positioned(
-              left: 8,
-              bottom: _timelineHeight,
-              child: _MapAttribution(baseMap: _baseMap),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: RadarTimeline(
-                state: state,
-                forecast: widget.forecast,
-                snapshot: widget.snapshot,
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: RadarTimeline(
+                  state: state,
+                  forecast: widget.forecast,
+                  snapshot: widget.snapshot,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
+        );
+      },
+    ),
+  );
+
+  void _schedulePrefetch(
+    RadarReady state,
+    MapCamera camera, {
+    bool immediate = false,
+  }) {
+    if (!_mapReady || state.frames.length < 2) return;
+    _prefetchDebounce?.cancel();
+    void run() {
+      if (!mounted) return;
+      unawaited(
+        _tileCache.prefetchNextFrames(
+          camera: camera,
+          frameTemplates: _nextFrameTemplates(state),
         ),
       );
-    },
-  );
+    }
+
+    if (immediate) {
+      run();
+    } else {
+      _prefetchDebounce = Timer(const Duration(milliseconds: 120), run);
+    }
+  }
+
+  Iterable<String> _nextFrameTemplates(RadarReady state) sync* {
+    final frameCount = state.frames.length;
+    final maxNextFrames = math.min(2, frameCount - 1);
+    var index = state.selectedIndex;
+    for (var offset = 0; offset < maxNextFrames; offset++) {
+      index++;
+      if (index >= frameCount) index = state.playbackStartIndex;
+      final template = state.frames[index].tileUrlTemplate;
+      if (template != null) yield template;
+    }
+  }
 
   Widget _buildRadarTile(Widget tileWidget) {
     return Opacity(

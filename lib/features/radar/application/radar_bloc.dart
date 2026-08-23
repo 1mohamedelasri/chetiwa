@@ -162,6 +162,10 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   Future<void> _load(RadarRequested event, Emitter<RadarState> emit) async {
     final generation = ++_loadGeneration;
     final requestedCoordinates = _coordinates;
+    final wasPlaying = switch (state) {
+      RadarReady(:final isPlaying) => isPlaying,
+      _ => false,
+    };
     _stopPlayback();
     RadarReady? visible;
     final cached = await _repository.getCachedFrames(requestedCoordinates);
@@ -178,8 +182,10 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
           cachedAt: cached.cachedAt,
           isRefreshing: true,
         ),
+        isPlaying: wasPlaying,
       );
       emit(visible);
+      if (wasPlaying && visible.frames.length > 1) _startPlaybackTimer();
     } else {
       emit(const RadarLoading());
     }
@@ -192,17 +198,37 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
       // allow an older response (for example Paris) to overwrite the newer
       // selected place (for example Lyon).
       if (generation != _loadGeneration || emit.isDone) return;
+      final active = state;
+      final continuePlaying =
+          frames.length > 1 &&
+          (wasPlaying ||
+              active is RadarReady &&
+                  active.coordinates == requestedCoordinates &&
+                  active.isPlaying);
+      final selectedIndex =
+          active is RadarReady && active.coordinates == requestedCoordinates
+          ? _nearestFrameIndex(frames, active.selectedFrame.time)
+          : _defaultIndex(frames);
       emit(
         RadarReady(
           frames: frames,
-          selectedIndex: _defaultIndex(frames),
+          selectedIndex: selectedIndex,
           coordinates: requestedCoordinates,
+          isPlaying: continuePlaying,
         ),
       );
+      if (continuePlaying) _startPlaybackTimer();
     } on Object catch (error) {
       if (generation != _loadGeneration || emit.isDone) return;
       final issue = weatherDataIssueFrom(error);
       if (visible != null) {
+        final active = state;
+        final continuePlaying =
+            visible.frames.length > 1 &&
+            (wasPlaying ||
+                active is RadarReady &&
+                    active.coordinates == requestedCoordinates &&
+                    active.isPlaying);
         emit(
           RadarReady(
             frames: visible.frames,
@@ -213,8 +239,14 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
               cachedAt: visible.health.cachedAt,
               issue: issue,
             ),
+            isPlaying: continuePlaying,
           ),
         );
+        if (continuePlaying) {
+          _startPlaybackTimer();
+        } else {
+          _stopPlayback();
+        }
       } else {
         emit(RadarFailure(issue));
       }
@@ -264,13 +296,10 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
       return;
     }
 
-    emit(
-      _copyReady(
-        current,
-        selectedIndex: current.playbackStartIndex,
-        isPlaying: true,
-      ),
-    );
+    final resumeIndex = current.selectedIndex >= current.frames.length - 1
+        ? current.playbackStartIndex
+        : current.selectedIndex;
+    emit(_copyReady(current, selectedIndex: resumeIndex, isPlaying: true));
     _startPlaybackTimer();
   }
 
@@ -306,12 +335,11 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   void _goToNow(RadarNowRequested event, Emitter<RadarState> emit) {
     final current = state;
     if (current is! RadarReady) return;
-    _stopPlayback();
     emit(
       _copyReady(
         current,
         selectedIndex: current.currentObservationIndex,
-        isPlaying: false,
+        isPlaying: current.isPlaying,
       ),
     );
   }
@@ -351,11 +379,12 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   }
 
   void _startPlaybackTimer() {
+    _stopPlayback();
     _playbackTimer = Timer.periodic(
       // Leave enough time for a physical device to fetch and decode the next
       // radar tiles before advancing again. The tile layer still transitions
       // quickly, but a slow mobile connection no longer skips every image.
-      const Duration(milliseconds: 900),
+      const Duration(milliseconds: 1100),
       (_) => add(const RadarPlaybackAdvanced()),
     );
   }
@@ -373,6 +402,19 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
       (frame) => frame.isObservation,
     );
     return latestObservation < 0 ? frames.length - 1 : latestObservation;
+  }
+
+  int _nearestFrameIndex(List<RadarFrame> frames, DateTime instant) {
+    var nearestIndex = 0;
+    var nearestDistance = frames.first.time.difference(instant).abs();
+    for (var index = 1; index < frames.length; index++) {
+      final distance = frames[index].time.difference(instant).abs();
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    }
+    return nearestIndex;
   }
 
   @override

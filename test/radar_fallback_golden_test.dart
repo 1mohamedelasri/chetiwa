@@ -52,7 +52,14 @@ void main() {
         ),
       ),
     );
-    await _settle(tester);
+    // The production Radar page starts playback on mount. Pause immediately
+    // so this golden captures one deterministic observation frame.
+    for (var index = 0; index < 10; index++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (find.text('Pause').evaluate().isNotEmpty) break;
+    }
+    await tester.tap(find.byKey(const Key('radar-playback-button')));
+    await tester.pump();
 
     expect(find.byKey(const Key('radar-city-pin')), findsOneWidget);
     expect(find.byKey(const Key('fallback-radar-none')), findsOneWidget);
@@ -62,10 +69,4 @@ void main() {
       matchesGoldenFile('goldens/radar_fallback.png'),
     );
   });
-}
-
-Future<void> _settle(WidgetTester tester) async {
-  for (var index = 0; index < 12; index++) {
-    await tester.pump(const Duration(milliseconds: 200));
-  }
 }

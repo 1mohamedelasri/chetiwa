@@ -38,7 +38,7 @@ void main() {
     final frames = await repository.getFrames(Coordinates.paris);
     final cached = await repository.getCachedFrames(Coordinates.paris);
 
-    expect(frames, hasLength(3));
+    expect(frames, hasLength(2));
     expect(frames.first.kind, WeatherDataKind.radarObservation);
     expect(frames.first.providerName, 'LibreWXR');
     expect(frames.first.provenance.provider, 'LibreWXR');

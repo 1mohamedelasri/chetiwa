@@ -68,7 +68,7 @@ final class RadarTileMetrics {
 /// cache/cost metrics without storing coordinates.
 final class RadarTileCache {
   static const _cacheSchemaVersion = 'v3';
-  static const _maxProviderZoom = 7;
+  static const _maxProviderZoom = 10;
 
   RadarTileCache._({http.Client? client})
     : metrics = RadarTileMetrics(),

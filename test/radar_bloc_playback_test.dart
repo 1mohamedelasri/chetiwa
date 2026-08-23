@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:chetiwa/features/radar/application/radar_bloc.dart';
 import 'package:chetiwa/features/radar/data/repositories/fixture_radar_repository.dart';
 import 'package:chetiwa/features/radar/domain/entities/radar_frame.dart';
 import 'package:chetiwa/features/radar/domain/repositories/radar_repository.dart';
 import 'package:chetiwa/core/location/coordinates.dart';
+import 'package:chetiwa/core/weather/weather_data_provenance.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -183,6 +186,70 @@ void main() {
 
     expect((bloc.state as RadarReady).coordinates, lyon);
   });
+
+  test('a network refresh does not stop playback started from cache', () async {
+    final repository = _RefreshingRadarRepository();
+    final bloc = RadarBloc(repository);
+    addTearDown(bloc.close);
+
+    bloc.add(const RadarRequested());
+    final cached = await bloc.stream
+        .where((state) => state is RadarReady)
+        .cast<RadarReady>()
+        .firstWhere((state) => state.isRefreshing)
+        .timeout(const Duration(seconds: 2));
+    expect(cached.isPlaying, isFalse);
+
+    bloc.add(const RadarPlaybackRestarted());
+    await bloc.stream
+        .where((state) => state is RadarReady)
+        .cast<RadarReady>()
+        .firstWhere((state) => state.isPlaying)
+        .timeout(const Duration(seconds: 2));
+
+    repository.completeRefresh();
+    final fresh = await bloc.stream
+        .where((state) => state is RadarReady)
+        .cast<RadarReady>()
+        .firstWhere((state) => !state.isRefreshing)
+        .timeout(const Duration(seconds: 2));
+    expect(fresh.isPlaying, isTrue);
+  });
+}
+
+final class _RefreshingRadarRepository implements RadarRepository {
+  final Completer<void> _refresh = Completer<void>();
+
+  List<RadarFrame> get _frames {
+    final now = DateTime.utc(2026, 8, 22, 12);
+    return List.generate(
+      3,
+      (index) => RadarFrame(
+        time: now.add(Duration(minutes: index * 10)),
+        progress: index / 2,
+        tileUrlTemplate: 'https://example.test/$index/{z}/{x}/{y}.png',
+        kind: index == 0
+            ? WeatherDataKind.radarObservation
+            : WeatherDataKind.radarNowcast,
+      ),
+      growable: false,
+    );
+  }
+
+  void completeRefresh() => _refresh.complete();
+
+  @override
+  Future<CachedRadarFrames?> getCachedFrames(Coordinates coordinates) async =>
+      CachedRadarFrames(
+        frames: _frames,
+        cachedAt: DateTime.utc(2026, 8, 22, 12),
+      );
+
+  @override
+  Future<List<RadarFrame>> getFrames(Coordinates coordinates) async {
+    await _refresh.future;
+    return _frames;
+  }
 }
 
 final class _ObservedOnlyRadarRepository implements RadarRepository {

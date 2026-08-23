@@ -50,11 +50,6 @@ final class RainViewerRadarRepository implements RadarRepository {
       past
           .whereType<Map<String, dynamic>>()
           .map((frame) => (json: frame, forecast: false))
-          .followedBy(
-            nowcast.whereType<Map<String, dynamic>>().map(
-              (frame) => (json: frame, forecast: true),
-            ),
-          )
           .toList(growable: false),
       nowcast
           .whereType<Map<String, dynamic>>()

@@ -56,7 +56,8 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('Lecture'), findsOneWidget);
+    // Radar starts animating as soon as its page becomes visible.
+    expect(find.text('Pause'), findsOneWidget);
     expect(find.byKey(const Key('radar-city-pin')), findsOneWidget);
     expect(find.byKey(const Key('radar-time-ruler')), findsOneWidget);
     expect(find.byKey(const Key('radar-reset-button')), findsOneWidget);
@@ -97,6 +98,12 @@ void main() {
     await tester.pump();
     expect(find.textContaining('dernière observation'), findsOneWidget);
 
+    await tester.tap(find.byKey(const Key('radar-playback-button')));
+    await tester.pump();
+    expect(find.text('Lecture'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 1300));
+    // Time and map interactions never resume an explicit user pause.
+    expect(find.text('Lecture'), findsOneWidget);
     await tester.tap(find.byKey(const Key('radar-playback-button')));
     await tester.pump();
     expect(find.text('Pause'), findsOneWidget);
