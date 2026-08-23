@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -398,9 +399,10 @@ final class _RadarMapState extends State<_RadarMap> {
       opacity: _radarOpacity,
       child: ColorFiltered(
         // LibreWXR scheme 255 supplies the encoded reflectivity as grayscale.
-        // This inexpensive GPU transform makes weak echoes neutral grey and
-        // progressively warms stronger rain to red. It keeps the geography
-        // readable without pretending weak echoes are clouds or probabilities.
+        // This inexpensive GPU transform hides sub-18 dBZ clutter, fades weak
+        // echoes in as neutral grey and progressively warms meaningful rain to
+        // red. The alpha threshold is essential: raw radar contains broad weak
+        // echoes that must not look like certain rain to the user.
         colorFilter: const ColorFilter.matrix([
           0.57,
           0,
@@ -411,17 +413,17 @@ final class _RadarMapState extends State<_RadarMap> {
           -2,
           0,
           0,
-          348,
+          420,
           0,
           0,
           -2,
           0,
-          348,
+          420,
+          4,
           0,
           0,
           0,
-          1,
-          0,
+          -400,
         ]),
         child: tileWidget,
       ),
@@ -945,14 +947,24 @@ final class RadarTimeline extends StatelessWidget {
   Widget build(BuildContext context) {
     final timelineColors = _RadarTimelineColors.of(context);
     final nowInstant = snapshot.nowUtc;
-    final status = state.selectedFrame.isNowcast
+    final selectedPointRate = state.selectedFrame.pointRainRateMmPerHour;
+    final status = state.selectedFrame.isNowcast && selectedPointRate != null
+        ? RainRateScale.isRain(selectedPointRate)
+              ? '${selectedPointRate.toStringAsFixed(1)} mm/h ${context.l10n.isFrench ? 'au point' : 'at point'}'
+              : (context.l10n.isFrench ? 'sec au point' : 'dry at point')
+        : state.selectedFrame.isNowcast
         ? (context.l10n.isFrench ? 'prévision' : 'forecast')
         : state.isAtLatestObservation
         ? (context.l10n.isFrench
               ? 'dernière observation'
               : 'latest observation')
         : (context.l10n.isFrench ? 'observation' : 'observation');
-    final statusColor = state.selectedFrame.isNowcast
+    final statusColor =
+        state.selectedFrame.isNowcast &&
+            selectedPointRate != null &&
+            !RainRateScale.isRain(selectedPointRate)
+        ? timelineColors.muted
+        : state.selectedFrame.isNowcast
         ? ChetiwaColors.warning
         : state.isAtLatestObservation
         ? ChetiwaColors.accentPrimary
@@ -1096,11 +1108,22 @@ final class RadarTimeline extends StatelessWidget {
                     constraints.maxWidth,
                   ),
                   child: CustomPaint(
+                    key: ValueKey(
+                      state.frames.any(
+                            (frame) =>
+                                frame.isNowcast &&
+                                frame.pointRainRateMmPerHour != null,
+                          )
+                          ? 'radar-point-profile-visible'
+                          : 'radar-point-profile-unavailable',
+                    ),
                     painter: _RadarTimeRulerPainter(
                       frames: state.frames,
                       selectedIndex: state.selectedIndex,
                       timeZone: forecast.timeZone,
                       now: nowInstant,
+                      currentRainRateMmPerHour:
+                          snapshot.currentRain.rateMmPerHour,
                       colors: timelineColors,
                     ),
                     child: const SizedBox.expand(),
@@ -1154,6 +1177,7 @@ final class _RadarTimeRulerPainter extends CustomPainter {
     required this.selectedIndex,
     required this.timeZone,
     required this.now,
+    required this.currentRainRateMmPerHour,
     required this.colors,
   });
 
@@ -1161,6 +1185,7 @@ final class _RadarTimeRulerPainter extends CustomPainter {
   final int selectedIndex;
   final String timeZone;
   final DateTime now;
+  final double currentRainRateMmPerHour;
   final _RadarTimelineColors colors;
 
   @override
@@ -1201,6 +1226,18 @@ final class _RadarTimeRulerPainter extends CustomPainter {
       Offset(size.width, trackY),
       track,
     );
+
+    if (hasNowcast) {
+      _paintPointRainProfile(
+        canvas,
+        size,
+        start,
+        end,
+        xForTime,
+        chartTop,
+        trackY,
+      );
+    }
 
     final minorTick = Paint()
       ..color = colors.muted.withValues(alpha: 0.65)
@@ -1269,6 +1306,72 @@ final class _RadarTimeRulerPainter extends CustomPainter {
       cursor,
     );
     canvas.drawCircle(Offset(cursorX, chartTop), 3.5, cursor);
+  }
+
+  void _paintPointRainProfile(
+    Canvas canvas,
+    Size size,
+    DateTime start,
+    DateTime end,
+    double Function(DateTime) xForTime,
+    double chartTop,
+    double trackY,
+  ) {
+    final sampledFrames = frames
+        .where(
+          (frame) =>
+              frame.isNowcast &&
+              frame.pointRainRateMmPerHour != null &&
+              !frame.time.isBefore(start) &&
+              !frame.time.isAfter(end),
+        )
+        .toList(growable: false);
+    if (sampledFrames.isEmpty) return;
+
+    final points = <Offset>[
+      Offset(0, _rainProfileY(currentRainRateMmPerHour, chartTop, trackY)),
+      for (final frame in sampledFrames)
+        Offset(
+          xForTime(frame.time).clamp(0, size.width).toDouble(),
+          _rainProfileY(frame.pointRainRateMmPerHour!, chartTop, trackY),
+        ),
+    ];
+    final graphBottom = trackY - 7;
+    final linePath = ui.Path()..moveTo(points.first.dx, points.first.dy);
+    for (final point in points.skip(1)) {
+      linePath.lineTo(point.dx, point.dy);
+    }
+    final areaPath = ui.Path.from(linePath)
+      ..lineTo(points.last.dx, graphBottom)
+      ..lineTo(points.first.dx, graphBottom)
+      ..close();
+    canvas.drawPath(
+      areaPath,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            const Color(0xFF346CC5).withValues(alpha: 0.55),
+            const Color(0xFF346CC5).withValues(alpha: 0.06),
+          ],
+        ).createShader(Rect.fromLTRB(0, chartTop, size.width, graphBottom)),
+    );
+    canvas.drawPath(
+      linePath,
+      Paint()
+        ..color = const Color(0xFF3FA7D6)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..strokeJoin = StrokeJoin.round
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  double _rainProfileY(double rainRate, double chartTop, double trackY) {
+    final graphBottom = trackY - 7;
+    final graphHeight = math.max(1.0, graphBottom - chartTop - 8);
+    return graphBottom - graphHeight * RainRateScale.normalized(rainRate);
   }
 
   DateTime _wallTime(DateTime instant) =>
@@ -1374,6 +1477,7 @@ final class _RadarTimeRulerPainter extends CustomPainter {
       selectedIndex != oldDelegate.selectedIndex ||
       timeZone != oldDelegate.timeZone ||
       now != oldDelegate.now ||
+      currentRainRateMmPerHour != oldDelegate.currentRainRateMmPerHour ||
       colors != oldDelegate.colors;
 }
 
