@@ -9,6 +9,8 @@ final class RadarFrame extends Equatable {
     this.tileUrlTemplate,
     this.kind = WeatherDataKind.radarObservation,
     this.providerName = 'LibreWXR',
+    this.pointRainRateMmPerHour,
+    this.pointRainSource,
   });
 
   final DateTime time;
@@ -16,6 +18,11 @@ final class RadarFrame extends Equatable {
   final String? tileUrlTemplate;
   final WeatherDataKind kind;
   final String providerName;
+
+  /// Precipitation sampled by the radar/nowcast provider at the selected
+  /// location. Null means unavailable; zero is a genuine dry result.
+  final double? pointRainRateMmPerHour;
+  final String? pointRainSource;
 
   bool get isObservation => kind == WeatherDataKind.radarObservation;
   bool get isNowcast => kind == WeatherDataKind.radarNowcast;
@@ -30,5 +37,7 @@ final class RadarFrame extends Equatable {
     tileUrlTemplate,
     kind,
     providerName,
+    pointRainRateMmPerHour,
+    pointRainSource,
   ];
 }

@@ -145,18 +145,22 @@ final class Forecast extends Equatable {
     );
   }
 
-  Forecast copyWith({String? locationName}) => Forecast(
+  Forecast copyWith({
+    String? locationName,
+    List<RainPoint>? points,
+    String? providerName,
+  }) => Forecast(
     locationName: locationName ?? this.locationName,
     updatedAt: updatedAt,
     temperatureCelsius: temperatureCelsius,
     windKph: windKph,
     brief: brief,
-    points: points,
+    points: points ?? this.points,
     windows: windows,
     currentWeatherCode: currentWeatherCode,
     utcOffsetSeconds: utcOffsetSeconds,
     timeZone: timeZone,
-    providerName: providerName,
+    providerName: providerName ?? this.providerName,
     hourly: hourly,
     daily: daily,
   );

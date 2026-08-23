@@ -10,110 +10,185 @@ import '../../application/graph_horizon_cubit.dart';
 import '../../domain/entities/forecast.dart';
 import '../../domain/services/forecast_snapshot_builder.dart';
 import '../../domain/services/rain_rate_scale.dart';
+import '../../../radar/domain/entities/radar_frame.dart';
 import 'weather_chrome.dart';
 import '../forecast_strings.dart';
 
 final class GraphPane extends StatelessWidget {
-  const GraphPane({required this.forecast, required this.snapshot, super.key});
+  const GraphPane({
+    required this.forecast,
+    required this.snapshot,
+    this.radarFrames = const [],
+    super.key,
+  });
 
   final Forecast forecast;
   final ForecastSnapshot snapshot;
+  final List<RadarFrame> radarFrames;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final chartColors = _ChartColors.of(context);
-      final now = snapshot.nowUtc;
-      final textScale = MediaQuery.textScalerOf(context).scale(1);
-      final compact = constraints.maxHeight < 500 || textScale > 1.45;
-      final summary = Padding(
-        padding: const EdgeInsets.symmetric(horizontal: ChetiwaSpacing.x6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    localizedBriefHeadline(
-                      context.l10n,
-                      snapshot.brief,
-                      snapshot.nowUtc,
+  Widget build(BuildContext context) {
+    final alignedForecast = alignForecastWithRadarNowcast(
+      forecast,
+      radarFrames,
+      snapshot.nowUtc,
+    );
+    final alignedSnapshot = identical(alignedForecast, forecast)
+        ? snapshot
+        : ForecastSnapshotBuilder.build(
+            forecast: alignedForecast,
+            nowUtc: snapshot.nowUtc,
+          );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final chartColors = _ChartColors.of(context);
+        final now = alignedSnapshot.nowUtc;
+        final textScale = MediaQuery.textScalerOf(context).scale(1);
+        final compact = constraints.maxHeight < 500 || textScale > 1.45;
+        final usesRadarNowcast = alignedForecast.providerName.contains(
+          'LibreWXR nowcast',
+        );
+        final summary = Padding(
+          padding: const EdgeInsets.symmetric(horizontal: ChetiwaSpacing.x6),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      localizedBriefHeadline(
+                        context.l10n,
+                        alignedSnapshot.brief,
+                        alignedSnapshot.nowUtc,
+                      ),
+                      style: Theme.of(context).textTheme.titleLarge,
                     ),
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: ChetiwaSpacing.x1),
-                  Text(
-                    localizedBriefDetail(
-                      context.l10n,
-                      snapshot.brief,
-                      snapshot.nowUtc,
-                      forecast.timeZone,
+                    const SizedBox(height: ChetiwaSpacing.x1),
+                    Text(
+                      localizedBriefDetail(
+                        context.l10n,
+                        alignedSnapshot.brief,
+                        alignedSnapshot.nowUtc,
+                        alignedForecast.timeZone,
+                      ),
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: ChetiwaSpacing.x1),
-                  Text(
-                    '${context.l10n.modelForecast} · ${snapshot.forecastProvenance.provider.toUpperCase()}',
-                    key: const Key('graph-provenance-label'),
-                    style: TextStyle(
-                      color: chartColors.muted,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.25,
+                    const SizedBox(height: ChetiwaSpacing.x1),
+                    Text(
+                      '${usesRadarNowcast ? (context.l10n.isFrench ? 'PRÉVISION AU POINT' : 'POINT FORECAST') : context.l10n.modelForecast} · ${alignedSnapshot.forecastProvenance.provider.toUpperCase()}',
+                      key: const Key('graph-provenance-label'),
+                      style: TextStyle(
+                        color: chartColors.muted,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.25,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            const _HorizonSelector(),
-          ],
-        ),
-      );
-      final metrics = Padding(
-        padding: const EdgeInsets.symmetric(horizontal: ChetiwaSpacing.x6),
-        child: LiveMetrics(forecast: forecast, snapshot: snapshot),
-      );
-      final chart = BlocBuilder<GraphHorizonCubit, GraphHorizon>(
-        builder: (context, horizon) => _ChetiwaRainChart(
-          key: ValueKey(horizon),
-          points: forecast.points,
-          currentRain: snapshot.currentRain,
-          now: now,
-          rainStart: snapshot.brief.rainStart,
-          timeZone: forecast.timeZone,
-          providerName: snapshot.forecastProvenance.provider,
-          horizon: horizon,
-          languageCode: context.l10n.locale.languageCode,
-          colors: chartColors,
-        ),
-      );
-      if (compact) {
-        return ListView(
-          key: const Key('compact-graph-scroll'),
-          padding: const EdgeInsets.only(bottom: 12),
+              const SizedBox(width: 8),
+              const _HorizonSelector(),
+            ],
+          ),
+        );
+        final metrics = Padding(
+          padding: const EdgeInsets.symmetric(horizontal: ChetiwaSpacing.x6),
+          child: LiveMetrics(
+            forecast: alignedForecast,
+            snapshot: alignedSnapshot,
+          ),
+        );
+        final chart = BlocBuilder<GraphHorizonCubit, GraphHorizon>(
+          builder: (context, horizon) => _ChetiwaRainChart(
+            key: ValueKey(horizon),
+            points: alignedForecast.points,
+            currentRain: alignedSnapshot.currentRain,
+            now: now,
+            rainStart: alignedSnapshot.brief.rainStart,
+            timeZone: alignedForecast.timeZone,
+            providerName: alignedSnapshot.forecastProvenance.provider,
+            horizon: horizon,
+            languageCode: context.l10n.locale.languageCode,
+            colors: chartColors,
+          ),
+        );
+        if (compact) {
+          return ListView(
+            key: const Key('compact-graph-scroll'),
+            padding: const EdgeInsets.only(bottom: 12),
+            children: [
+              summary,
+              const SizedBox(height: ChetiwaSpacing.x3),
+              metrics,
+              const SizedBox(height: ChetiwaSpacing.x3),
+              SizedBox(height: 260, child: chart),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             summary,
             const SizedBox(height: ChetiwaSpacing.x3),
             metrics,
             const SizedBox(height: ChetiwaSpacing.x3),
-            SizedBox(height: 260, child: chart),
+            Expanded(child: chart),
           ],
         );
-      }
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          summary,
-          const SizedBox(height: ChetiwaSpacing.x3),
-          metrics,
-          const SizedBox(height: ChetiwaSpacing.x3),
-          Expanded(child: chart),
-        ],
-      );
-    },
+      },
+    );
+  }
+}
+
+/// Replaces model values only inside LibreWXR's sampled nowcast window.
+/// Model points before and after that bounded window remain available.
+Forecast alignForecastWithRadarNowcast(
+  Forecast forecast,
+  List<RadarFrame> radarFrames,
+  DateTime nowUtc,
+) {
+  final samples =
+      radarFrames
+          .where(
+            (frame) =>
+                frame.isNowcast &&
+                frame.pointRainRateMmPerHour != null &&
+                frame.time.isAfter(nowUtc),
+          )
+          .map(
+            (frame) => RainPoint(
+              time: frame.time,
+              rateMmPerHour: frame.pointRainRateMmPerHour!,
+              probability: frame.pointRainRateMmPerHour! >= 0.05 ? 1 : 0,
+              intensity: RainRateScale.intensityFor(
+                frame.pointRainRateMmPerHour!,
+              ),
+            ),
+          )
+          .toList(growable: false)
+        ..sort((left, right) => left.time.compareTo(right.time));
+  if (samples.isEmpty) return forecast;
+
+  final radarStart = samples.first.time;
+  final radarEnd = samples.last.time;
+  final merged = <RainPoint>[
+    ...forecast.points.where(
+      (point) =>
+          point.time.isBefore(radarStart) || point.time.isAfter(radarEnd),
+    ),
+    ...samples,
+  ]..sort((left, right) => left.time.compareTo(right.time));
+  final modelLabel = forecast.providerName.contains('AROME')
+      ? 'AROME'
+      : forecast.providerName.contains('Open-Meteo')
+      ? 'Open-Meteo'
+      : forecast.providerName;
+  return forecast.copyWith(
+    points: merged,
+    providerName: 'LibreWXR nowcast + $modelLabel',
   );
 }
 
@@ -336,7 +411,7 @@ final class _RainChartPainter extends CustomPainter {
 
     _text(
       canvas,
-      '${_isFrench ? 'PRÉVISION MODÈLE' : 'MODEL FORECAST'} · ${providerName.toUpperCase()}',
+      '${providerName.contains('LibreWXR nowcast') ? (_isFrench ? 'NOWCAST AU POINT + MODÈLE' : 'POINT NOWCAST + MODEL') : (_isFrench ? 'PRÉVISION MODÈLE' : 'MODEL FORECAST')} · ${providerName.toUpperCase()}',
       const Offset(_left, 12),
       color: colors.foreground,
       size: 11,

@@ -84,7 +84,9 @@ final class _RadarMapState extends State<_RadarMap> {
   final RadarTileCache _tileCache = RadarTileCache.shared;
   late final RadarBloc _radarBloc;
   _RadarBaseMap _baseMap = _RadarBaseMap.satellite;
-  double _radarOpacity = 0.96;
+  // Preserve geographic context and avoid making weak echoes look more severe
+  // than they are. Users can still raise this from the layer sheet.
+  double _radarOpacity = 0.78;
   bool _radarVisible = true;
   bool _mapReady = false;
   bool _autoPlaybackStarted = false;
@@ -275,6 +277,7 @@ final class _RadarMapState extends State<_RadarMap> {
                         snapshot: widget.snapshot,
                         selectedInstant: frame.time,
                         isNowcast: frame.isNowcast,
+                        pointRainRateMmPerHour: frame.pointRainRateMmPerHour,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -391,8 +394,8 @@ final class _RadarMapState extends State<_RadarMap> {
 
   Widget _buildRadarTile(Widget tileWidget) {
     return Opacity(
-      // Universal Blue is the provider's actual precipitation palette. Keep
-      // it untouched: it is not a cloud layer and recolouring it is misleading.
+      // Keep LibreWXR's Viper HD precipitation palette untouched. It conveys
+      // intensity; this is not a cloud or probability layer.
       key: const Key('native-radar-precipitation-tile'),
       opacity: _radarOpacity,
       child: tileWidget,
@@ -488,8 +491,8 @@ final class _RadarMapState extends State<_RadarMap> {
                 Text(
                   key: const Key('radar-precipitation-explanation'),
                   context.l10n.isFrench
-                      ? 'Bleu = précipitations détectées par le radar, du plus clair au plus soutenu. Ce calque ne montre jamais les nuages. La prévision des 2 h est affichée séparément dans Graph.'
-                      : 'Blue = precipitation detected by radar, from lighter to deeper blue. This layer never shows clouds. The 2-hour forecast is shown separately in Graph.',
+                      ? 'Couleurs = intensité des précipitations, pas probabilité ni nuages. Le Graph utilise le nowcast LibreWXR au point, puis le modèle météo.'
+                      : 'Colours = precipitation intensity, not probability or clouds. Graph uses LibreWXR point nowcast, then the weather model.',
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontSize: 12,
@@ -583,12 +586,14 @@ final class _CompactRadarStatus extends StatelessWidget {
     required this.snapshot,
     required this.selectedInstant,
     required this.isNowcast,
+    required this.pointRainRateMmPerHour,
   });
 
   final Forecast forecast;
   final ForecastSnapshot snapshot;
   final DateTime selectedInstant;
   final bool isNowcast;
+  final double? pointRainRateMmPerHour;
 
   @override
   Widget build(BuildContext context) {
@@ -606,6 +611,20 @@ final class _CompactRadarStatus extends StatelessWidget {
         : (context.l10n.isFrench
               ? 'précipitations observées'
               : 'observed precipitation');
+    final nowcastAtPoint = switch (pointRainRateMmPerHour) {
+      null =>
+        context.l10n.isFrench
+            ? '$location · mesure au point indisponible'
+            : '$location · point reading unavailable',
+      < 0.05 =>
+        context.l10n.isFrench
+            ? '$location · sec au point · pluie proche possible'
+            : '$location · dry at point · nearby rain possible',
+      final rate =>
+        context.l10n.isFrench
+            ? '$location · ${rate.toStringAsFixed(1)} mm/h au point'
+            : '$location · ${rate.toStringAsFixed(1)} mm/h at point',
+    };
     return Container(
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -640,7 +659,7 @@ final class _CompactRadarStatus extends StatelessWidget {
                   ),
                   const SizedBox(height: 1),
                   Text(
-                    isNowcast ? frameState : modelAtPoint,
+                    isNowcast ? nowcastAtPoint : modelAtPoint,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -754,8 +773,8 @@ final class _RadarLegend extends StatelessWidget {
                   ),
                   Tooltip(
                     message: context.l10n.isFrench
-                        ? 'Bleu = précipitations détectées, pas des nuages. La couleur devient plus soutenue avec l’intensité du signal radar.'
-                        : 'Blue = detected precipitation, not clouds. The colour deepens with radar-signal intensity.',
+                        ? 'Cyan/vert = faible, jaune/orange = modérée, rouge = forte. Ce sont des précipitations, jamais des nuages ni une probabilité.'
+                        : 'Cyan/green = light, yellow/orange = moderate, red = heavy. This is precipitation, never clouds or probability.',
                     child: const Icon(Icons.info_outline_rounded, size: 11),
                   ),
                 ],
@@ -767,10 +786,11 @@ final class _RadarLegend extends StatelessWidget {
                   borderRadius: BorderRadius.circular(ChetiwaRadius.full),
                   gradient: LinearGradient(
                     colors: const [
-                      Color(0xFF9DEBFF),
-                      Color(0xFF43C7EF),
-                      Color(0xFF008BD2),
-                      Color(0xFF1254A3),
+                      Color(0xFF0C89C9),
+                      Color(0xFF24DD79),
+                      Color(0xFFFFF71C),
+                      Color(0xFFFF9D00),
+                      Color(0xFFF90000),
                     ],
                   ),
                 ),

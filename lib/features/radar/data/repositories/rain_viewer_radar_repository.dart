@@ -24,11 +24,19 @@ final class RainViewerRadarRepository implements RadarRepository {
 
   @override
   Future<List<RadarFrame>> getFrames(Coordinates coordinates) async {
-    final response = await _provider.fetchMetadata();
-    final host = response['host'];
     final usesLibreWxr = ApiConfig.radarMetadataUrl.contains(
       'radar.ezplatforms.com',
     );
+    final pointNowcastFuture = usesLibreWxr
+        ? _provider.fetchPointNowcast(coordinates)
+        : Future<List<Map<String, dynamic>>>.value(const []);
+    final response = await _provider.fetchMetadata();
+    final pointNowcast = await pointNowcastFuture;
+    final pointByTimestamp = <int, Map<String, dynamic>>{
+      for (final point in pointNowcast)
+        if (point['time'] is num) (point['time'] as num).toInt(): point,
+    };
+    final host = response['host'];
     final configuredUri = Uri.parse(ApiConfig.radarMetadataUrl);
     final tileHost = usesLibreWxr
         ? '${configuredUri.scheme}://${configuredUri.authority}'
@@ -74,6 +82,16 @@ final class RainViewerRadarRepository implements RadarRepository {
             'Image radar invalide',
           );
         }
+        final point = pointByTimestamp[timestamp.toInt()];
+        final pointSource = point?['source'] as String?;
+        final pointCoverage = point?['coverage'] as String?;
+        final pointRate = point?['rate_mmh'];
+        final hasPointValue =
+            raw.forecast &&
+            pointCoverage == 'in_range' &&
+            pointSource != null &&
+            pointSource != 'none' &&
+            pointRate is num;
         return RadarFrame(
           time: DateTime.fromMillisecondsSinceEpoch(
             timestamp.toInt() * 1000,
@@ -86,6 +104,8 @@ final class RainViewerRadarRepository implements RadarRepository {
               ? WeatherDataKind.radarNowcast
               : WeatherDataKind.radarObservation,
           providerName: usesLibreWxr ? 'LibreWXR' : 'RainViewer',
+          pointRainRateMmPerHour: hasPointValue ? pointRate.toDouble() : null,
+          pointRainSource: hasPointValue ? pointSource : null,
         );
       }, growable: false),
     );

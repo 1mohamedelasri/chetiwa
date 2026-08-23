@@ -29,6 +29,9 @@ final class RadarCacheDataSource {
               tileUrlTemplate: frame['tile_url'] as String?,
               kind: _kindFromJson(frame),
               providerName: frame['provider_name'] as String? ?? 'LibreWXR',
+              pointRainRateMmPerHour: (frame['point_rain_rate_mmh'] as num?)
+                  ?.toDouble(),
+              pointRainSource: frame['point_rain_source'] as String?,
             );
           })
           .toList(growable: false);
@@ -67,6 +70,8 @@ final class RadarCacheDataSource {
                 'tile_url': frame.tileUrlTemplate,
                 'kind': frame.kind.name,
                 'provider_name': frame.providerName,
+                'point_rain_rate_mmh': frame.pointRainRateMmPerHour,
+                'point_rain_source': frame.pointRainSource,
               },
             )
             .toList(growable: false),

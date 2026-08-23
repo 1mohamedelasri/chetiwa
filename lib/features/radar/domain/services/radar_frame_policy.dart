@@ -23,6 +23,8 @@ abstract final class RadarFramePolicy {
           tileUrlTemplate: frames[index].tileUrlTemplate,
           kind: frames[index].kind,
           providerName: frames[index].providerName,
+          pointRainRateMmPerHour: frames[index].pointRainRateMmPerHour,
+          pointRainSource: frames[index].pointRainSource,
         ),
         growable: false,
       );

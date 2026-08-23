@@ -15,20 +15,37 @@ void main() {
 
   test('keeps LibreWXR observations and nowcast frames', () async {
     final client = MockClient(
-      (_) async => http.Response(
-        jsonEncode({
-          'host': 'https://tiles.example',
-          'radar': {
-            'past': [
-              {'time': 1787008800, 'path': '/v2/radar/observed'},
-            ],
-            'nowcast': [
-              {'time': 1787009400, 'path': '/v2/radar/forecast'},
-            ],
-          },
-        }),
-        200,
-      ),
+      (request) async => request.method == 'POST'
+          ? http.Response(
+              'event: message\n'
+              'data: ${jsonEncode({
+                'jsonrpc': '2.0',
+                'id': 1,
+                'result': {
+                  'structuredContent': {
+                    'result': [
+                      {'time': 1787009400, 'rate_mmh': 1.4, 'source': 'radar', 'coverage': 'in_range'},
+                    ],
+                  },
+                },
+              })}\n\n',
+              200,
+              headers: {'content-type': 'text/event-stream'},
+            )
+          : http.Response(
+              jsonEncode({
+                'host': 'https://tiles.example',
+                'radar': {
+                  'past': [
+                    {'time': 1787008800, 'path': '/v2/radar/observed'},
+                  ],
+                  'nowcast': [
+                    {'time': 1787009400, 'path': '/v2/radar/forecast'},
+                  ],
+                },
+              }),
+              200,
+            ),
     );
     final repository = RainViewerRadarRepository(
       provider: RainViewerRadarProvider(client),
@@ -51,6 +68,8 @@ void main() {
       contains('/256/{z}/{x}/{y}/10/1_1.png'),
     );
     expect(frames.last.kind, WeatherDataKind.radarNowcast);
+    expect(frames.last.pointRainRateMmPerHour, 1.4);
+    expect(frames.last.pointRainSource, 'radar');
     expect(cached?.frames, frames);
     client.close();
   });

@@ -50,6 +50,9 @@ final class ChetiwaRadarRepository implements RadarRepository {
               ? WeatherDataKind.radarNowcast
               : WeatherDataKind.radarObservation,
           providerName: providerName,
+          pointRainRateMmPerHour: (frame['pointRainRateMmPerHour'] as num?)
+              ?.toDouble(),
+          pointRainSource: frame['pointRainSource'] as String?,
         );
       }, growable: false);
       await _cache.write(coordinates, frames);

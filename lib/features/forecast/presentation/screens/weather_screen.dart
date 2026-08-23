@@ -200,11 +200,17 @@ final class _WeatherViewState extends State<_WeatherView>
                     ),
                     switchInCurve: Curves.easeOutCubic,
                     child: switch (section) {
-                      WeatherSection.graph => GraphPane(
-                        key: const ValueKey('graph'),
-                        forecast: forecast,
-                        snapshot: state.snapshot,
-                      ),
+                      WeatherSection.graph =>
+                        BlocBuilder<RadarBloc, RadarState>(
+                          builder: (context, radarState) => GraphPane(
+                            key: const ValueKey('graph'),
+                            forecast: forecast,
+                            snapshot: state.snapshot,
+                            radarFrames: radarState is RadarReady
+                                ? radarState.frames
+                                : const [],
+                          ),
+                        ),
                       WeatherSection.radar => RadarPane(
                         key: const ValueKey('radar'),
                         forecast: forecast,

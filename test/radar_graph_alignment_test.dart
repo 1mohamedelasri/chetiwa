@@ -1,0 +1,51 @@
+import 'package:chetiwa/core/time/weather_clock.dart';
+import 'package:chetiwa/core/weather/weather_data_provenance.dart';
+import 'package:chetiwa/features/forecast/data/datasources/fixture_forecast_data_source.dart';
+import 'package:chetiwa/features/forecast/domain/entities/forecast.dart';
+import 'package:chetiwa/features/forecast/presentation/widgets/graph_pane.dart';
+import 'package:chetiwa/features/radar/domain/entities/radar_frame.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('Graph uses LibreWXR point samples inside the nowcast window', () async {
+    final now = DateTime.utc(2026, 8, 20, 12);
+    final forecast = await FixtureForecastDataSource(
+      fixtureName: 'dry',
+      clock: FixedWeatherClock(now),
+    ).load();
+    final radarTime = now.add(const Duration(minutes: 10));
+
+    final aligned = alignForecastWithRadarNowcast(forecast, [
+      RadarFrame(
+        time: radarTime,
+        progress: 1,
+        kind: WeatherDataKind.radarNowcast,
+        pointRainRateMmPerHour: 5,
+        pointRainSource: 'radar',
+      ),
+    ], now);
+
+    expect(aligned.rainPointAt(radarTime)?.intensity, RainIntensity.heavy);
+    expect(aligned.providerName, contains('LibreWXR nowcast'));
+  });
+
+  test('Graph keeps the model when point sampling is unavailable', () async {
+    final now = DateTime.utc(2026, 8, 20, 12);
+    final forecast = await FixtureForecastDataSource(
+      fixtureName: 'dry',
+      clock: FixedWeatherClock(now),
+    ).load();
+
+    final aligned = alignForecastWithRadarNowcast(forecast, [
+      RadarFrame(
+        time: now.add(const Duration(minutes: 10)),
+        progress: 1,
+        kind: WeatherDataKind.radarNowcast,
+      ),
+    ], now);
+
+    expect(identical(aligned, forecast), isTrue);
+  });
+}
