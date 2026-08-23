@@ -187,6 +187,9 @@ final class _WeatherViewState extends State<_WeatherView>
                     domainLabel: 'Open-Meteo',
                     nowUtc: state.snapshot.nowUtc,
                     dataUpdatedAt: state.forecast.updatedAt,
+                    onRetry: () => context.read<ForecastBloc>().add(
+                      const ForecastRefreshed(),
+                    ),
                   ),
                 ),
                 const SizedBox(height: ChetiwaSpacing.x2),

@@ -10,6 +10,7 @@ final class WeatherDataStatusBanner extends StatelessWidget {
     required this.domainLabel,
     required this.nowUtc,
     required this.dataUpdatedAt,
+    this.onRetry,
     super.key,
   });
 
@@ -17,6 +18,7 @@ final class WeatherDataStatusBanner extends StatelessWidget {
   final String domainLabel;
   final DateTime nowUtc;
   final DateTime dataUpdatedAt;
+  final VoidCallback? onRetry;
 
   bool get _isVisible =>
       health.issue != null || health.usesCache || health.isRefreshing;
@@ -129,6 +131,21 @@ final class WeatherDataStatusBanner extends StatelessWidget {
                   strokeWidth: 1.5,
                   color: color,
                 ),
+              ),
+            ],
+            if (onRetry != null && !health.isRefreshing) ...[
+              const SizedBox(width: 4),
+              IconButton(
+                key: const Key('weather-data-retry'),
+                onPressed: onRetry,
+                tooltip: context.l10n.retry,
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 28,
+                  height: 28,
+                ),
+                icon: Icon(Icons.refresh_rounded, size: 16, color: color),
               ),
             ],
           ],

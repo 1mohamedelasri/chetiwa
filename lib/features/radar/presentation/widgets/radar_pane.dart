@@ -95,6 +95,7 @@ final class _RadarMapState extends State<_RadarMap> {
   LatLng? _lastCenter;
   Timer? _prefetchDebounce;
   Timer? _dataRefreshTimer;
+  var _refreshFailureStreak = 0;
 
   @override
   void initState() {
@@ -130,11 +131,23 @@ final class _RadarMapState extends State<_RadarMap> {
 
   void _scheduleDataRefresh(RadarState state) {
     _dataRefreshTimer?.cancel();
+    if (state is RadarReady && state.isRefreshing) return;
     final retrySoon =
-        state is RadarReady &&
-        (state.health.issue != null || state.health.isStale);
+        state is RadarReady && (state.health.issue != null || state.isStale);
+    final retryDelay = switch (_refreshFailureStreak) {
+      0 => const Duration(minutes: 1),
+      1 => const Duration(minutes: 2),
+      2 => const Duration(minutes: 4),
+      3 => const Duration(minutes: 8),
+      _ => const Duration(minutes: 15),
+    };
+    if (retrySoon) {
+      _refreshFailureStreak = math.min(_refreshFailureStreak + 1, 4);
+    } else {
+      _refreshFailureStreak = 0;
+    }
     _dataRefreshTimer = Timer(
-      retrySoon ? const Duration(seconds: 30) : const Duration(minutes: 5),
+      retrySoon ? retryDelay : const Duration(minutes: 5),
       () {
         if (!mounted) return;
         _radarBloc.add(const RadarRefreshed());
@@ -332,6 +345,7 @@ final class _RadarMapState extends State<_RadarMap> {
                     nowUtc: widget.snapshot.nowUtc,
                     dataUpdatedAt:
                         state.frames[state.currentObservationIndex].time,
+                    onRetry: () => _radarBloc.add(const RadarRefreshed()),
                   ),
                 ),
               if (frame.tileUrlTemplate == null)
