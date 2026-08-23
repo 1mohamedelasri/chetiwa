@@ -246,10 +246,7 @@ final class _RadarMapState extends State<_RadarMap> {
                         evictErrorTileStrategy:
                             EvictErrorTileStrategy.notVisible,
                         tileBuilder: (context, tileWidget, tile) =>
-                            _buildRadarTile(
-                              tileWidget,
-                              hasServerPalette: tileUrl.contains('/13/1_0'),
-                            ),
+                            _buildRadarTile(tileWidget),
                       ),
                     if (_baseMap.isSatellite)
                       TileLayer(
@@ -419,44 +416,16 @@ final class _RadarMapState extends State<_RadarMap> {
     }
   }
 
-  Widget _buildRadarTile(Widget tileWidget, {required bool hasServerPalette}) {
+  Widget _buildRadarTile(Widget tileWidget) {
     return Opacity(
       key: const Key('chetiwa-radar-precipitation-tile'),
       opacity: _radarOpacity,
-      // LibreWXR scheme 13 applies Chetiwa's nonlinear dBZ palette at the
-      // source. Unlike a client-side matrix, it can keep weak echoes grey,
-      // suppress clutter and reserve red for genuine precipitation cores.
-      child: hasServerPalette
-          ? tileWidget
-          : ColorFiltered(
-              // Safe fallback while an older LibreWXR origin still advertises
-              // raw scheme 255. It is deliberately temporary and noisier than
-              // the server LUT, but prevents unknown scheme IDs from silently
-              // falling back to a rainbow palette during a rolling deploy.
-              colorFilter: const ColorFilter.matrix([
-                0.57,
-                0,
-                0,
-                0,
-                132,
-                0,
-                -2,
-                0,
-                0,
-                420,
-                0,
-                0,
-                -2,
-                0,
-                420,
-                4,
-                0,
-                0,
-                0,
-                -400,
-              ]),
-              child: tileWidget,
-            ),
+      // Never recolour raw scheme 255 in the client. The previous fallback
+      // matrix derived alpha from the red channel, making blue/green and weak
+      // echoes fully transparent. The server's scheme 13 supplies the grey /
+      // red Chetiwa palette once deployed; until then native pixels remain
+      // visible and functional.
+      child: tileWidget,
     );
   }
 
