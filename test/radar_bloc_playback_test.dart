@@ -215,6 +215,53 @@ void main() {
         .timeout(const Duration(seconds: 2));
     expect(fresh.isPlaying, isTrue);
   });
+
+  test('background suspension resumes unless the user paused', () async {
+    final bloc = RadarBloc(const FixtureRadarRepository());
+    addTearDown(bloc.close);
+
+    bloc.add(const RadarRequested());
+    await bloc.stream
+        .where((state) => state is RadarReady)
+        .cast<RadarReady>()
+        .first
+        .timeout(const Duration(seconds: 2));
+    bloc.add(const RadarPlaybackRestarted());
+    await bloc.stream
+        .where((state) => state is RadarReady)
+        .cast<RadarReady>()
+        .firstWhere((state) => state.isPlaying)
+        .timeout(const Duration(seconds: 2));
+
+    bloc.add(const RadarPlaybackSuspended());
+    await bloc.stream
+        .where((state) => state is RadarReady)
+        .cast<RadarReady>()
+        .firstWhere((state) => !state.isPlaying)
+        .timeout(const Duration(seconds: 2));
+
+    bloc.add(const RadarRequested());
+    final resumed = await bloc.stream
+        .where((state) => state is RadarReady)
+        .cast<RadarReady>()
+        .firstWhere((state) => state.isPlaying)
+        .timeout(const Duration(seconds: 2));
+    expect(resumed.isPlaying, isTrue);
+
+    bloc.add(const RadarPlaybackPaused());
+    await bloc.stream
+        .where((state) => state is RadarReady)
+        .cast<RadarReady>()
+        .firstWhere((state) => !state.isPlaying)
+        .timeout(const Duration(seconds: 2));
+    bloc.add(const RadarRequested());
+    final manuallyPaused = await bloc.stream
+        .where((state) => state is RadarReady)
+        .cast<RadarReady>()
+        .firstWhere((state) => !state.isRefreshing)
+        .timeout(const Duration(seconds: 2));
+    expect(manuallyPaused.isPlaying, isFalse);
+  });
 }
 
 final class _RefreshingRadarRepository implements RadarRepository {

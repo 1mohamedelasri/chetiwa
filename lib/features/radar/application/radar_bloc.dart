@@ -47,6 +47,13 @@ final class RadarPlaybackPaused extends RadarEvent {
   const RadarPlaybackPaused();
 }
 
+/// Temporarily stops playback while the application is not visible. Unlike
+/// [RadarPlaybackPaused], this remembers that playback must resume after the
+/// next successful refresh.
+final class RadarPlaybackSuspended extends RadarEvent {
+  const RadarPlaybackSuspended();
+}
+
 final class RadarPlaybackAdvanced extends RadarEvent {
   const RadarPlaybackAdvanced();
 }
@@ -145,6 +152,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
     on<RadarFrameSelected>(_selectFrame);
     on<RadarPlaybackToggled>(_togglePlayback);
     on<RadarPlaybackPaused>(_pausePlayback);
+    on<RadarPlaybackSuspended>(_suspendPlayback);
     on<RadarPlaybackAdvanced>(_advancePlayback);
     on<RadarNowRequested>(_goToNow);
     on<RadarPlaybackRestarted>(_restartPlayback);
@@ -158,14 +166,17 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   Coordinates _coordinates = Coordinates.paris;
   Timer? _playbackTimer;
   var _loadGeneration = 0;
+  var _resumeAfterSuspension = false;
 
   Future<void> _load(RadarRequested event, Emitter<RadarState> emit) async {
     final generation = ++_loadGeneration;
     final requestedCoordinates = _coordinates;
-    final wasPlaying = switch (state) {
-      RadarReady(:final isPlaying) => isPlaying,
-      _ => false,
-    };
+    final wasPlaying =
+        _resumeAfterSuspension ||
+        switch (state) {
+          RadarReady(:final isPlaying) => isPlaying,
+          _ => false,
+        };
     _stopPlayback();
     RadarReady? visible;
     final cached = await _repository.getCachedFrames(requestedCoordinates);
@@ -185,7 +196,10 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
         isPlaying: wasPlaying,
       );
       emit(visible);
-      if (wasPlaying && visible.frames.length > 1) _startPlaybackTimer();
+      if (wasPlaying && visible.frames.length > 1) {
+        _resumeAfterSuspension = false;
+        _startPlaybackTimer();
+      }
     } else {
       emit(const RadarLoading());
     }
@@ -217,7 +231,10 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
           isPlaying: continuePlaying,
         ),
       );
-      if (continuePlaying) _startPlaybackTimer();
+      if (continuePlaying) {
+        _resumeAfterSuspension = false;
+        _startPlaybackTimer();
+      }
     } on Object catch (error) {
       if (generation != _loadGeneration || emit.isDone) return;
       final issue = weatherDataIssueFrom(error);
@@ -243,6 +260,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
           ),
         );
         if (continuePlaying) {
+          _resumeAfterSuspension = false;
           _startPlaybackTimer();
         } else {
           _stopPlayback();
@@ -291,6 +309,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
     if (current is! RadarReady || current.frames.length < 2) return;
 
     if (current.isPlaying) {
+      _resumeAfterSuspension = false;
       _stopPlayback();
       emit(_copyReady(current, isPlaying: false));
       return;
@@ -300,14 +319,27 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
         ? current.playbackStartIndex
         : current.selectedIndex;
     emit(_copyReady(current, selectedIndex: resumeIndex, isPlaying: true));
+    _resumeAfterSuspension = false;
     _startPlaybackTimer();
   }
 
   void _pausePlayback(RadarPlaybackPaused event, Emitter<RadarState> emit) {
     final current = state;
+    _resumeAfterSuspension = false;
     if (current is! RadarReady || !current.isPlaying) return;
     _stopPlayback();
     emit(_copyReady(current, isPlaying: false));
+  }
+
+  void _suspendPlayback(
+    RadarPlaybackSuspended event,
+    Emitter<RadarState> emit,
+  ) {
+    final current = state;
+    if (current is! RadarReady) return;
+    _resumeAfterSuspension = current.isPlaying;
+    _stopPlayback();
+    if (current.isPlaying) emit(_copyReady(current, isPlaying: false));
   }
 
   void _advancePlayback(RadarPlaybackAdvanced event, Emitter<RadarState> emit) {

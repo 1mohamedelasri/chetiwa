@@ -110,7 +110,7 @@ final class _WeatherViewState extends State<_WeatherView>
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
-      context.read<RadarBloc>().add(const RadarPlaybackPaused());
+      context.read<RadarBloc>().add(const RadarPlaybackSuspended());
     }
   }
 
