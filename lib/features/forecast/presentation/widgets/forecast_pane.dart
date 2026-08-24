@@ -256,7 +256,10 @@ final class _Hour extends StatelessWidget {
         Icon(
           weatherIcon(item.weatherCode),
           size: 28,
-          color: weatherColor(item.weatherCode),
+          color: weatherColor(
+            item.weatherCode,
+            neutralColor: Theme.of(context).colorScheme.onSurface,
+          ),
         ),
         const SizedBox(height: 6),
         if (item.precipitationProbability > 10)
@@ -336,7 +339,10 @@ final class _Day extends StatelessWidget {
               children: [
                 Icon(
                   weatherIcon(item.weatherCode),
-                  color: weatherColor(item.weatherCode),
+                  color: weatherColor(
+                    item.weatherCode,
+                    neutralColor: Theme.of(context).colorScheme.onSurface,
+                  ),
                   size: 25,
                 ),
                 if (item.precipitationProbability > 10)
@@ -368,7 +374,10 @@ final class _Day extends StatelessWidget {
                 gradient: LinearGradient(
                   colors: [
                     ChetiwaColors.rainLight,
-                    weatherColor(item.weatherCode),
+                    weatherColor(
+                      item.weatherCode,
+                      neutralColor: Theme.of(context).colorScheme.onSurface,
+                    ),
                     ChetiwaColors.warning,
                   ],
                 ),
@@ -469,12 +478,15 @@ IconData weatherIcon(int code) => switch (code) {
   _ => Icons.cloud_outlined,
 };
 
-Color weatherColor(int code) => switch (code) {
+Color weatherColor(
+  int code, {
+  Color neutralColor = ChetiwaColors.textPrimary,
+}) => switch (code) {
   0 => ChetiwaColors.warning,
   >= 51 && <= 67 => ChetiwaColors.rainLight,
-  >= 71 && <= 86 => ChetiwaColors.textPrimary,
+  >= 71 && <= 86 => neutralColor,
   >= 95 => ChetiwaColors.rainHeavy,
-  _ => ChetiwaColors.textPrimary,
+  _ => neutralColor,
 };
 
 String weatherLabel(int code) => switch (code) {
