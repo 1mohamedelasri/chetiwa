@@ -20,3 +20,5 @@
   réelles, benchmark borné et supervision publique multi-régions ; adapté à
   la VM 4 Gio avec swap de sécurité, pression mémoire auto-détectée,
   préchauffage massif désactivé et grâce de démarrage du watchdog.
+- Stress test Radar public borné : plateau mesuré à environ 8 tuiles froides/s,
+  seuils de rollout documentés et arrêt automatique sur erreur ou p95 élevé.

@@ -124,6 +124,12 @@ reproductible et publiable avec le reste des sources du service.
 | Plusieurs cœurs durablement nécessaires | Basculer en profil `multi` sur une VM 8+ cœurs / 32 Go |
 | Plusieurs instances | Ne pas partager le cache local ; concevoir un stockage/cache partagé et un répartiteur avant d'ajouter une seconde origine |
 
+Le stress test du 24 août 2026 place le plateau de la VM actuelle autour de
+8 tuiles froides/s, avec dégradation au-delà de 8–12 requêtes simultanées. Pour
+conserver la collecte météo et le nowcast, exploiter au maximum 3 tuiles
+origine/s continues. Passer à 4 vCPU/8 Gio avant 5 000 DAU, ou dès 2 000 DAU
+si le taux de HIT Cloudflare est inférieur à 90 %.
+
 Le dimensionnement est volontairement contrôlé par des métriques. Il ne faut
 pas déclencher une VM plus grande uniquement selon le nombre d'installations :
 les tuiles effectivement servies, le taux de cache et les limites CPU/RAM sont

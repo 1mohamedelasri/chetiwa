@@ -30,6 +30,46 @@ Le contrôle post-déploiement sur Paris, Freetown, New York, Tokyo et Sydney a
 mesuré les MISS entre 122 et 502 ms et les HIT entre 36 et 43 ms. Le benchmark
 post-déploiement de 12 tuiles a donné p50 574 ms, p95 641 ms et 6,24 tuiles/s.
 
+## Stress test borné du 24 août 2026
+
+Le script [`stress-test-public-radar.sh`](../../deploy/librewxr/stress-test-public-radar.sh)
+a demandé 288 tuiles froides uniques, par paliers de 48, sans erreur, OOM ou
+restart :
+
+| Concurrence | p50 | p95 | Débit observé |
+| ---: | ---: | ---: | ---: |
+| 1 | 216 ms | 297 ms | 1,37 tuile/s |
+| 2 | 361 ms | 534 ms | 5,33 tuiles/s |
+| 4 | 529 ms | 723 ms | 6,00 tuiles/s |
+| 8 | 756 ms | 1,16 s | 8,00 tuiles/s |
+| 12 | 1,23 s | 1,68 s | 8,00 tuiles/s |
+| 16 | 1,75 s | 2,33 s | 6,86 tuiles/s |
+
+La saturation commence après huit requêtes froides simultanées : ajouter de la
+concurrence augmente ensuite la latence sans augmenter le débit. Le test a
+commencé pendant le cycle RRQPE/nowcast de 22:50 ; la toute première tuile a
+mis 22,6 s alors que le p95 du palier est resté à 297 ms. Ce cas extrême
+confirme que les deux vCPU sont le goulot pendant la collecte, même si
+Cloudflare masque normalement ce coût pour les tuiles déjà demandées.
+
+La planification conserve donc seulement **3 tuiles origine/s continues**,
+moins de la moitié du maximum de burst, afin de laisser de la CPU aux cycles
+météo. Avec deux sessions Radar/jour, 96 tentatives par animation et 15 % du
+trafic quotidien dans l'heure de pointe :
+
+| HIT CDN/mobile | Radar simultanés prudents | DAU prudents |
+| ---: | ---: | ---: |
+| 80 % | 9 | ~1 900 |
+| 90 % | 19 | ~3 750 |
+| 95 % | 38 | ~7 500 |
+
+Décision de rollout : zone verte jusqu'à 2 000 DAU ; surveillance renforcée
+entre 2 000 et 4 000 ; passer à au moins 4 vCPU/8 Gio avant 5 000 DAU, ou plus
+tôt si le HIT réel reste sous 90 %, si le p95 MISS dépasse 2 s ou si les cycles
+de calcul provoquent des attentes visibles. À 50 000 DAU, prévoir le profil
+multi-worker 8+ vCPU/32 Gio et une architecture redondante ; la VM actuelle ne
+suffit pas.
+
 Pour la planification, Chetiwa ne consomme que **3 tuiles origine/s** — 50 %
 du débit observé — afin de garder de la marge pour les cycles de collecte,
 les point-nowcasts et les variations réseau.
@@ -124,6 +164,13 @@ Vérifier la surface publique depuis n'importe quelle région :
 ```bash
 CHETIWA_PROBE_REGION=paris deploy/librewxr/probe-public-radar.sh
 deploy/librewxr/benchmark-public-radar.sh
+```
+
+Le stress test est volontairement plafonné à 16 requêtes simultanées et 64
+tuiles par palier :
+
+```bash
+deploy/librewxr/stress-test-public-radar.sh
 ```
 
 Créer la sonde Google Cloud depuis Europe, USA et Asie :
