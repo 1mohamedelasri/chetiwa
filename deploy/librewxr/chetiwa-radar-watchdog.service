@@ -1,6 +1,6 @@
 [Unit]
 Description=Chetiwa LibreWXR origin and Cloudflare Tunnel watchdog
-After=docker.service cloudflared.service network-online.target
+After=docker.service network-online.target
 Wants=network-online.target
 
 [Service]

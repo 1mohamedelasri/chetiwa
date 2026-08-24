@@ -10,10 +10,12 @@ librewxr_dir=${CHETIWA_LIBREWXR_DIR:-/opt/chetiwa/librewxr}
 local_health_url=${CHETIWA_RADAR_LOCAL_HEALTH_URL:-http://127.0.0.1:8080/public/weather-maps.json}
 public_probe_url=${CHETIWA_RADAR_PUBLIC_PROBE_URL:-https://radar.ezplatforms.com/public/weather-maps.json}
 cloudflared_service=${CHETIWA_CLOUDFLARED_SERVICE:-cloudflared.service}
+cloudflared_container=${CHETIWA_CLOUDFLARED_CONTAINER:-cloudflared}
 state_dir=${CHETIWA_RADAR_WATCHDOG_STATE_DIR:-/var/lib/chetiwa-radar-watchdog}
 failure_threshold=${CHETIWA_RADAR_FAILURE_THRESHOLD:-3}
 cooldown_seconds=${CHETIWA_RADAR_RESTART_COOLDOWN_SECONDS:-900}
 probe_timeout_seconds=${CHETIWA_RADAR_PROBE_TIMEOUT_SECONDS:-12}
+startup_grace_seconds=${CHETIWA_RADAR_STARTUP_GRACE_SECONDS:-600}
 
 mkdir -p "$state_dir"
 
@@ -62,22 +64,44 @@ mark_restarted() {
   date +%s > "$state_dir/$1.last-restart"
 }
 
+origin_in_startup_grace() {
+  container_id=$(docker compose --project-directory "$librewxr_dir" ps -q librewxr 2>/dev/null | head -n 1)
+  [ -n "$container_id" ] || return 1
+  started_at=$(docker inspect --format '{{.State.StartedAt}}' "$container_id" 2>/dev/null) || return 1
+  started_epoch=$(date -d "$started_at" +%s 2>/dev/null) || return 1
+  now=$(date +%s)
+  [ $((now - started_epoch)) -lt "$startup_grace_seconds" ]
+}
+
+restart_tunnel() {
+  if systemctl cat "$cloudflared_service" >/dev/null 2>&1; then
+    systemctl restart "$cloudflared_service"
+    return
+  fi
+  if docker inspect "$cloudflared_container" >/dev/null 2>&1; then
+    docker restart "$cloudflared_container" >/dev/null
+    return
+  fi
+  echo "No Cloudflare service or container found." >&2
+  return 1
+}
+
 if ! probe "$local_health_url"; then
+  if origin_in_startup_grace; then
+    reset_failures origin
+    echo "LibreWXR is starting; watchdog grace period is active."
+    exit 0
+  fi
   failures=$(record_failure origin)
   echo "LibreWXR local health failed ($failures/$failure_threshold)." >&2
   if [ "$failures" -lt "$failure_threshold" ] || ! restart_allowed origin; then
     exit 1
   fi
   mark_restarted origin
-  docker compose --project-directory "$librewxr_dir" restart
-  sleep 5
-  if probe "$local_health_url"; then
-    reset_failures origin
-    echo 'LibreWXR recovered after container restart.'
-    exit 0
-  fi
-  echo 'LibreWXR is still unhealthy after container restart.' >&2
-  exit 1
+  docker compose --project-directory "$librewxr_dir" restart librewxr
+  reset_failures origin
+  echo 'LibreWXR restart initiated; startup grace period is active.'
+  exit 0
 fi
 reset_failures origin
 
@@ -88,7 +112,7 @@ if ! probe "$public_probe_url"; then
     exit 1
   fi
   mark_restarted tunnel
-  systemctl restart "$cloudflared_service"
+  restart_tunnel
   sleep 5
   if probe "$public_probe_url"; then
     reset_failures tunnel

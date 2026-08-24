@@ -2,6 +2,17 @@
 
 ## Verdict actuel
 
+Le profil 4 Gio a été déployé le 24 août 2026 à 22:38 UTC après identification
+de 25 redémarrages du conteneur et de plusieurs `oom-kill`. La cause directe
+des `502` était l'origine LibreWXR tuée à sa limite de 3 Gio, pas une panne du
+Tunnel Cloudflare. Le préchauffage soumettait jusqu'à 35 076 tuiles après un
+cycle et amplifiait la pression mémoire.
+
+Après correction : aucun redémarrage, aucun OOM, environ 678 Mio au repos,
+cache tuiles borné à 256 Mo, préchauffage désactivé et watchdog sain. Le pic du
+démarrage a atteint 2,9 Gio et 321 Mio de swap ; la VM 4 Gio reste donc un
+profil de lancement minimal, pas la cible définitive de montée en charge.
+
 La capacité LibreWXR ne doit pas être exprimée comme un nombre fixe
 d'installations. Elle dépend des tuiles demandées par session, de la dispersion
 géographique et surtout du taux de HIT Cloudflare. Le benchmark public borné du
@@ -14,6 +25,10 @@ géographique et surtout du taux de HIT Cloudflare. Le benchmark public borné d
 | p50 | 519 ms |
 | p95 | 673 ms |
 | Débit mesuré à concurrence 4 | 5,94 tuiles/s |
+
+Le contrôle post-déploiement sur Paris, Freetown, New York, Tokyo et Sydney a
+mesuré les MISS entre 122 et 502 ms et les HIT entre 36 et 43 ms. Le benchmark
+post-déploiement de 12 tuiles a donné p50 574 ms, p95 641 ms et 6,24 tuiles/s.
 
 Pour la planification, Chetiwa ne consomme que **3 tuiles origine/s** — 50 %
 du débit observé — afin de garder de la marge pour les cycles de collecte,
@@ -99,9 +114,10 @@ Déployer le profil versionné et le watchdog depuis un poste autorisé :
 deploy/librewxr/deploy-production-profile.sh root@116.203.124.254
 ```
 
-Le script vérifie au moins 7 Go de RAM, sauvegarde `.env`, valide Compose,
-applique le cache 256 Mo, installe le timer et restaure automatiquement le
-profil précédent si les sondes échouent.
+Le script vérifie la VM 4 Gio, crée un swap de sécurité de 2 Gio si nécessaire,
+sauvegarde `.env`, valide Compose, applique le cache 256 Mo, désactive le
+préchauffage massif, installe le timer et restaure automatiquement le profil
+précédent si les sondes échouent.
 
 Vérifier la surface publique depuis n'importe quelle région :
 

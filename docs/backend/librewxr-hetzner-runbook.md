@@ -2,15 +2,14 @@
 
 ## Décision
 
-L'instance auto-hébergée n'est pas nécessaire au lancement : Chetiwa utilise
-l'API publique LibreWXR via son backend Cloud Run et le cache de tuiles. Cette
-configuration est le plan de bascule lorsque les métriques montrent que la
-fiabilité ou le volume justifie une origine dédiée.
+L'instance auto-hébergée est l'origine Radar actuellement publiée derrière
+Cloudflare Tunnel. Les téléphones utilisent uniquement son URL publique et le
+cache CDN ; le port d'origine ne doit pas être exposé directement.
 
-Le premier serveur est une VM Hetzner **dédiée à LibreWXR**, avec 4 vCPU et
-8 Go de RAM au minimum. Ne pas installer ce service sur le serveur domicile
-multi-services ni sur Cloud Run : LibreWXR exécute un collecteur continu et
-garde un cache de frames persistant.
+Le serveur de lancement actuel est une VM Hetzner **dédiée à LibreWXR**, avec
+2 vCPU et 4 Gio de RAM. Le profil contrôlé réserve 3 Gio au conteneur et crée
+2 Gio de swap de sécurité. Pour absorber davantage de trafic ou réactiver le
+préchauffage, passer d'abord à 8 Gio de RAM.
 
 ## Profil initial
 
@@ -87,15 +86,17 @@ radar terrestre là où LibreWXR ne dispose pas de composite radar natif.
    ```
 
    Pour mettre à niveau une installation existante vers le profil versionné
-   (6 Go, cache tuiles 256 Mo et watchdog corrigé), lancer depuis le Mac :
+   (limite conteneur 3 Gio, cache tuiles 256 Mo, préchauffage désactivé et
+   watchdog corrigé), lancer depuis le Mac :
 
    ```sh
    deploy/librewxr/deploy-production-profile.sh root@116.203.124.254
    ```
 
    Le script recrée uniquement le conteneur LibreWXR avec son `.env`, réinstalle
-   le timer et vérifie les métadonnées locales/publiques. Il ne modifie ni les
-   credentials Cloudflare, ni le DNS, ni le pare-feu.
+   le timer et vérifie les métadonnées locales/publiques. Il crée un swap de
+   sécurité de 2 Gio s'il n'en existe aucun. Il ne modifie ni les credentials
+   Cloudflare, ni le DNS, ni le pare-feu.
 
 8. Changer seulement ces variables dans le runtime du backend Chetiwa :
 
@@ -127,6 +128,12 @@ Le dimensionnement est volontairement contrôlé par des métriques. Il ne faut
 pas déclencher une VM plus grande uniquement selon le nombre d'installations :
 les tuiles effectivement servies, le taux de cache et les limites CPU/RAM sont
 les vrais signaux.
+
+Le profil 4 Gio est acceptable pour le rollout initial uniquement tant que le
+taux de HIT CDN reste élevé et qu'aucun OOM ne réapparaît. Le démarrage peut
+consommer environ 2,9 Gio et utiliser temporairement le swap pendant le
+chargement RRQPE/ECMWF. Une utilisation durable du swap, un redémarrage ou une
+RAM supérieure à 75 % impose le passage à 8 Gio avant d'augmenter le trafic.
 
 Le calcul de capacité, la sonde de tuiles, le benchmark borné et la procédure
 de supervision multi-régions sont documentés dans

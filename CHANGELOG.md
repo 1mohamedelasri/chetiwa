@@ -17,4 +17,6 @@
 - Automatisation GitHub Actions pour vérifier et construire les candidats
   Android/iOS, plus déploiement Cloud Run et supervision de l'API.
 - Profil LibreWXR 256 Mo avec rollback, watchdog origine/tunnel, sondes Radar
-  réelles, benchmark borné et supervision publique multi-régions.
+  réelles, benchmark borné et supervision publique multi-régions ; adapté à
+  la VM 4 Gio avec swap de sécurité, pression mémoire auto-détectée,
+  préchauffage massif désactivé et grâce de démarrage du watchdog.

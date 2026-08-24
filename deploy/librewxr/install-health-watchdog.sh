@@ -19,9 +19,11 @@ if [ ! -f /etc/chetiwa-radar-watchdog.env ]; then
     'CHETIWA_RADAR_LOCAL_HEALTH_URL=http://127.0.0.1:8080/public/weather-maps.json' \
     'CHETIWA_RADAR_PUBLIC_PROBE_URL=https://radar.ezplatforms.com/public/weather-maps.json' \
     'CHETIWA_CLOUDFLARED_SERVICE=cloudflared.service' \
+    'CHETIWA_CLOUDFLARED_CONTAINER=cloudflared' \
     'CHETIWA_RADAR_FAILURE_THRESHOLD=3' \
     'CHETIWA_RADAR_RESTART_COOLDOWN_SECONDS=900' \
     'CHETIWA_RADAR_PROBE_TIMEOUT_SECONDS=12' \
+    'CHETIWA_RADAR_STARTUP_GRACE_SECONDS=600' \
     > /etc/chetiwa-radar-watchdog.env
 else
   sed -i \
@@ -30,6 +32,16 @@ else
   if ! grep -q '^CHETIWA_RADAR_PROBE_TIMEOUT_SECONDS=' \
     /etc/chetiwa-radar-watchdog.env; then
     printf '%s\n' 'CHETIWA_RADAR_PROBE_TIMEOUT_SECONDS=12' \
+      >> /etc/chetiwa-radar-watchdog.env
+  fi
+  if ! grep -q '^CHETIWA_CLOUDFLARED_CONTAINER=' \
+    /etc/chetiwa-radar-watchdog.env; then
+    printf '%s\n' 'CHETIWA_CLOUDFLARED_CONTAINER=cloudflared' \
+      >> /etc/chetiwa-radar-watchdog.env
+  fi
+  if ! grep -q '^CHETIWA_RADAR_STARTUP_GRACE_SECONDS=' \
+    /etc/chetiwa-radar-watchdog.env; then
+    printf '%s\n' 'CHETIWA_RADAR_STARTUP_GRACE_SECONDS=600' \
       >> /etc/chetiwa-radar-watchdog.env
   fi
 fi
