@@ -23,12 +23,18 @@ final class ChetiwaRadarRepository implements RadarRepository {
   @override
   Future<List<RadarFrame>> getFrames(Coordinates coordinates) async {
     try {
-      final data = await _api.getData(
-        '/v1/radar/frames',
-        query: <String, String>{
-          'latitude': coordinates.latitude.toString(),
-          'longitude': coordinates.longitude.toString(),
-        },
+      final query = <String, String>{
+        'latitude': coordinates.latitude.toString(),
+        'longitude': coordinates.longitude.toString(),
+      };
+      // Point sampling enriches Graph but must never make the radar tile
+      // timeline unavailable. Start both calls together and degrade to model
+      // data when the optional point endpoint fails.
+      final pointSamplesFuture = _getPointSamples(query);
+      final data = await _api.getData('/v1/radar/frames', query: query);
+      final pointSamples = await pointSamplesFuture.timeout(
+        const Duration(milliseconds: 1200),
+        onTimeout: () => const <int, _PointSample>{},
       );
       final rawFrames = data['frames'] as List<dynamic>? ?? const [];
       final provider = data['provider'] as Map<String, dynamic>?;
@@ -42,17 +48,23 @@ final class ChetiwaRadarRepository implements RadarRepository {
       }
       final frames = List<RadarFrame>.generate(mapped.length, (index) {
         final frame = mapped[index];
+        final time = DateTime.parse(frame['time'] as String).toUtc();
+        final point = pointSamples[time.millisecondsSinceEpoch];
         return RadarFrame(
-          time: DateTime.parse(frame['time'] as String).toUtc(),
+          time: time,
           progress: mapped.length == 1 ? 1 : index / (mapped.length - 1),
           tileUrlTemplate: frame['tileUrlTemplate'] as String?,
           kind: frame['kind'] == 'nowcast'
               ? WeatherDataKind.radarNowcast
               : WeatherDataKind.radarObservation,
           providerName: providerName,
-          pointRainRateMmPerHour: (frame['pointRainRateMmPerHour'] as num?)
-              ?.toDouble(),
-          pointRainSource: frame['pointRainSource'] as String?,
+          pointRainRateMmPerHour: frame['kind'] == 'nowcast'
+              ? point?.rainRateMmPerHour ??
+                    (frame['pointRainRateMmPerHour'] as num?)?.toDouble()
+              : null,
+          pointRainSource: frame['kind'] == 'nowcast'
+              ? point?.source ?? frame['pointRainSource'] as String?
+              : null,
         );
       }, growable: false);
       await _cache.write(coordinates, frames);
@@ -73,4 +85,37 @@ final class ChetiwaRadarRepository implements RadarRepository {
       );
     }
   }
+
+  Future<Map<int, _PointSample>> _getPointSamples(
+    Map<String, String> query,
+  ) async {
+    try {
+      final data = await _api.getData('/v1/radar/point-nowcast', query: query);
+      final samples = data['samples'] as List<dynamic>? ?? const [];
+      return <int, _PointSample>{
+        for (final sample in samples.whereType<Map<String, dynamic>>())
+          if (sample['time'] is String &&
+              sample['rainRateMmPerHour'] is num &&
+              sample['source'] is String &&
+              sample['source'] != 'none' &&
+              sample['coverage'] == 'in_range')
+            DateTime.parse(
+              sample['time'] as String,
+            ).toUtc().millisecondsSinceEpoch: _PointSample(
+              rainRateMmPerHour: (sample['rainRateMmPerHour'] as num)
+                  .toDouble(),
+              source: sample['source'] as String,
+            ),
+      };
+    } on Object {
+      return const <int, _PointSample>{};
+    }
+  }
+}
+
+final class _PointSample {
+  const _PointSample({required this.rainRateMmPerHour, required this.source});
+
+  final double rainRateMmPerHour;
+  final String source;
 }

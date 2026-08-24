@@ -4,6 +4,7 @@ import 'package:chetiwa/core/notifications/rain_notification_scheduler.dart';
 import 'package:chetiwa/core/time/weather_clock.dart';
 import 'package:chetiwa/features/alerts/application/alert_preferences_controller.dart';
 import 'package:chetiwa/features/alerts/application/local_rain_alert_coordinator.dart';
+import 'package:chetiwa/features/alerts/application/remote_rain_alert_gateway.dart';
 import 'package:chetiwa/features/forecast/domain/entities/forecast.dart';
 import 'package:chetiwa/features/forecast/domain/repositories/forecast_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -51,6 +52,101 @@ void main() {
 
     expect(await coordinator.sync(), RainAlertSyncResult.noMainLocation);
     expect(scheduler.scheduled, isNull);
+  });
+
+  test('utilise le push distant sans programmer de doublon local', () async {
+    final preferences = AlertPreferencesController(persist: false);
+    await preferences.setEnabled(true);
+    final scheduler = FixtureRainNotificationScheduler();
+    final remote = FixtureRemoteRainAlertGateway();
+    final coordinator = LocalRainAlertCoordinator(
+      forecastRepository: _ForecastRepository(now),
+      locationRepository: _LocationRepository(paris),
+      preferences: preferences,
+      scheduler: scheduler,
+      clock: FixedWeatherClock(now),
+      remoteGateway: remote,
+    );
+
+    expect(await coordinator.sync(), RainAlertSyncResult.scheduled);
+    expect(remote.syncCount, 1);
+    expect(scheduler.scheduled, isNull);
+  });
+
+  test(
+    'conserve le distant exclusif pendant une panne de resynchronisation',
+    () async {
+      final preferences = AlertPreferencesController(persist: false);
+      await preferences.setEnabled(true);
+      final scheduler = FixtureRainNotificationScheduler();
+      await scheduler.schedule(
+        RainNotification(
+          scheduledAt: now.add(const Duration(minutes: 15)),
+          timeZone: 'Europe/Paris',
+          locationLabel: 'Paris, France',
+          body: 'ancienne alerte locale',
+        ),
+      );
+      final remote = FixtureRemoteRainAlertGateway(
+        result: RemoteRainAlertSyncResult.retained,
+      );
+      final coordinator = LocalRainAlertCoordinator(
+        forecastRepository: _ForecastRepository(now),
+        locationRepository: _LocationRepository(paris),
+        preferences: preferences,
+        scheduler: scheduler,
+        clock: FixedWeatherClock(now),
+        remoteGateway: remote,
+      );
+
+      expect(await coordinator.sync(), RainAlertSyncResult.scheduled);
+      expect(scheduler.scheduled, isNull);
+    },
+  );
+
+  test(
+    'conserve le repli local avant la première inscription distante',
+    () async {
+      final preferences = AlertPreferencesController(persist: false);
+      await preferences.setEnabled(true);
+      final scheduler = FixtureRainNotificationScheduler();
+      final coordinator = LocalRainAlertCoordinator(
+        forecastRepository: _ForecastRepository(now),
+        locationRepository: _LocationRepository(paris),
+        preferences: preferences,
+        scheduler: scheduler,
+        clock: FixedWeatherClock(now),
+        remoteGateway: FixtureRemoteRainAlertGateway(
+          result: RemoteRainAlertSyncResult.failed,
+        ),
+      );
+
+      expect(await coordinator.sync(), RainAlertSyncResult.scheduled);
+      expect(scheduler.scheduled, isNotNull);
+    },
+  );
+
+  test('resynchronise la règle quand Firebase renouvelle le token', () async {
+    final preferences = AlertPreferencesController(persist: false);
+    await preferences.setEnabled(true);
+    final remote = FixtureRemoteRainAlertGateway();
+    final coordinator = LocalRainAlertCoordinator(
+      forecastRepository: _ForecastRepository(now),
+      locationRepository: _LocationRepository(paris),
+      preferences: preferences,
+      scheduler: FixtureRainNotificationScheduler(),
+      clock: FixedWeatherClock(now),
+      remoteGateway: remote,
+    );
+
+    await coordinator.initialize();
+    expect(remote.syncCount, 1);
+
+    remote.emitToken('renewed-fcm-token');
+    await Future<void>.delayed(Duration.zero);
+    expect(remote.syncCount, 2);
+
+    await coordinator.dispose();
   });
 }
 

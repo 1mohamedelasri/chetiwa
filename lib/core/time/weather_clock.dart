@@ -25,10 +25,11 @@ final class FixedWeatherClock implements WeatherClock {
 /// Converts between API wall-clock values and absolute UTC instants.
 ///
 /// Open-Meteo returns the selected IANA zone with local timestamps. Domain
-/// entities keep absolute instants; formatting is the only place where those
-/// instants become a city's wall clock.
+/// entities keep absolute instants. The selected place's zone is used only to
+/// parse provider wall-clock values; UI formatting follows the phone's zone.
 abstract final class WeatherTimeZone {
   static bool _initialized = false;
+  static String? _displayTimeZoneOverride;
 
   static void _ensureInitialized() {
     if (_initialized) return;
@@ -84,9 +85,72 @@ abstract final class WeatherTimeZone {
   }
 
   /// Formats an absolute instant using the selected place's wall clock.
-  /// Every weather surface uses this helper instead of the device timezone.
+  /// This is for provider/domain calculations, not user-facing timestamps.
   static String hourMinute(DateTime instant, String timeZone) =>
       formatWallHourMinute(atLocation(instant, timeZone));
+
+  /// Wall clock used by the UI. Production follows the phone configuration;
+  /// tests can pin an IANA zone to remain deterministic on every CI host.
+  static DateTime displayWallTime(DateTime instant) {
+    final override = _displayTimeZoneOverride;
+    return override == null ? instant.toLocal() : wallTime(instant, override);
+  }
+
+  static String displayHourMinute(DateTime instant) =>
+      formatWallHourMinute(displayWallTime(instant));
+
+  static String displayHour(DateTime instant) =>
+      displayWallTime(instant).hour.toString().padLeft(2, '0');
+
+  static DateTime displayInstantFromWall(DateTime wallTime) {
+    final override = _displayTimeZoneOverride;
+    if (override != null) return instantFromLocal(wallTime, override);
+    return DateTime(
+      wallTime.year,
+      wallTime.month,
+      wallTime.day,
+      wallTime.hour,
+      wallTime.minute,
+      wallTime.second,
+      wallTime.millisecond,
+      wallTime.microsecond,
+    ).toUtc();
+  }
+
+  static String displayUtcOffsetLabel(DateTime instant) {
+    final override = _displayTimeZoneOverride;
+    final offset = override == null
+        ? instant.toLocal().timeZoneOffset
+        : atLocation(instant, override).timeZoneOffset;
+    return _offsetLabel(offset);
+  }
+
+  /// Test-only display-zone pin. The assignment is removed in release builds.
+  static void debugSetDisplayTimeZone(String? timeZone) {
+    assert(() {
+      _displayTimeZoneOverride = timeZone;
+      return true;
+    }());
+  }
+
+  /// Compact offset shown next to local wall-clock values (for example
+  /// `UTC`, `UTC+2` or `UTC+5:45`). The offset is computed for the instant so
+  /// daylight-saving changes remain correct.
+  static String utcOffsetLabel(DateTime instant, String timeZone) {
+    return _offsetLabel(atLocation(instant, timeZone).timeZoneOffset);
+  }
+
+  static String _offsetLabel(Duration offset) {
+    final totalMinutes = offset.inMinutes;
+    if (totalMinutes == 0) return 'UTC';
+    final sign = totalMinutes < 0 ? '−' : '+';
+    final absolute = totalMinutes.abs();
+    final hours = absolute ~/ 60;
+    final minutes = absolute % 60;
+    return minutes == 0
+        ? 'UTC$sign$hours'
+        : 'UTC$sign$hours:${minutes.toString().padLeft(2, '0')}';
+  }
 
   static String hour(DateTime instant, String timeZone) =>
       atLocation(instant, timeZone).hour.toString().padLeft(2, '0');

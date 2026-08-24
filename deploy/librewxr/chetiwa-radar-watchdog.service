@@ -1,0 +1,10 @@
+[Unit]
+Description=Chetiwa LibreWXR origin and Cloudflare Tunnel watchdog
+After=docker.service cloudflared.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/chetiwa-radar-watchdog.env
+ExecStart=/usr/local/sbin/chetiwa-radar-watchdog
+Nice=10

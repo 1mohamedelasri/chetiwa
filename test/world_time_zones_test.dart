@@ -96,6 +96,10 @@ void main() {
           _hourMinute(item.expectedWallTime),
         );
         expect(
+          WeatherTimeZone.utcOffsetLabel(item.instantUtc, item.timeZone),
+          _offsetLabel(item.expectedOffsetSeconds),
+        );
+        expect(
           WeatherTimeZone.instantFromLocal(
             item.expectedWallTime,
             item.timeZone,
@@ -180,6 +184,8 @@ void main() {
       testWidgets('${item.city} is consistent across weather surfaces', (
         tester,
       ) async {
+        WeatherTimeZone.debugSetDisplayTimeZone('Europe/Paris');
+        addTearDown(() => WeatherTimeZone.debugSetDisplayTimeZone(null));
         tester.view.physicalSize = const Size(390, 760);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
@@ -189,7 +195,15 @@ void main() {
           forecast: forecast,
           nowUtc: item.instantUtc,
         );
-        final expectedTime = _hourMinute(item.expectedWallTime);
+        final expectedTime = WeatherTimeZone.hourMinute(
+          item.instantUtc,
+          'Europe/Paris',
+        );
+        final expectedOffset = WeatherTimeZone.utcOffsetLabel(
+          item.instantUtc,
+          'Europe/Paris',
+        );
+        final expectedTimeWithZone = '$expectedTime · $expectedOffset';
         final radarState = RadarReady(
           frames: [RadarFrame(time: item.instantUtc, progress: 1)],
           selectedIndex: 0,
@@ -234,33 +248,103 @@ void main() {
           ),
           findsWidgets,
         );
+        final timeSemantics = tester.widget<Semantics>(
+          find.byKey(const Key('current-local-time-semantics')).first,
+        );
+        expect(timeSemantics.properties.label, contains(expectedTimeWithZone));
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('current-local-time')),
+            matching: find.text('HEURE TÉL.'),
+          ),
+          findsWidgets,
+        );
         final graphSemantics = tester.widget<Semantics>(
           find.byKey(const Key('rain-chart-intensity-none')),
         );
         expect(graphSemantics.properties.label, contains(expectedTime));
-        expect(graphSemantics.properties.label, contains(item.timeZone));
+        expect(graphSemantics.properties.label, contains(expectedOffset));
 
         final forecastSemantics = tester.widget<Semantics>(
           find.byKey(const Key('forecast-local-time')),
         );
         expect(forecastSemantics.properties.label, contains(expectedTime));
-        expect(forecastSemantics.properties.label, contains(item.timeZone));
+        expect(forecastSemantics.properties.label, contains(expectedOffset));
 
         final radarSemantics = tester.widget<Semantics>(
           find.byKey(const Key('radar-local-time')),
         );
         expect(radarSemantics.properties.label, contains(expectedTime));
-        expect(radarSemantics.properties.label, contains(item.timeZone));
+        expect(radarSemantics.properties.label, contains(expectedOffset));
 
         expect(tester.takeException(), isNull);
       });
     }
+
+    testWidgets('changing the target zone never changes the phone clock', (
+      tester,
+    ) async {
+      WeatherTimeZone.debugSetDisplayTimeZone('Europe/Paris');
+      addTearDown(() => WeatherTimeZone.debugSetDisplayTimeZone(null));
+      tester.view.physicalSize = const Size(390, 760);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final instant = DateTime.utc(2026, 8, 20, 18, 24);
+      for (final targetZone in ['Europe/Paris', 'Africa/Freetown']) {
+        final item = (
+          city: targetZone == 'Europe/Paris' ? 'Paris' : 'Freetown',
+          timeZone: targetZone,
+          instantUtc: instant,
+          expectedWallTime: WeatherTimeZone.wallTime(instant, targetZone),
+          expectedOffsetSeconds: targetZone == 'Europe/Paris' ? 7200 : 0,
+        );
+        final forecast = _forecastFor(item);
+        final snapshot = ForecastSnapshotBuilder.build(
+          forecast: forecast,
+          nowUtc: instant,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: LiveMetrics(forecast: forecast, snapshot: snapshot),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('current-local-time')),
+            matching: find.text('20:24'),
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('20:24 · UTC+2'), findsNothing);
+        final timeSemantics = tester.widget<Semantics>(
+          find.byKey(const Key('current-local-time-semantics')).first,
+        );
+        expect(timeSemantics.properties.label, contains('20:24 · UTC+2'));
+      }
+    });
   });
 }
 
 String _hourMinute(DateTime value) =>
     '${value.hour.toString().padLeft(2, '0')}:'
     '${value.minute.toString().padLeft(2, '0')}';
+
+String _offsetLabel(int seconds) {
+  final minutes = seconds ~/ 60;
+  if (minutes == 0) return 'UTC';
+  final sign = minutes < 0 ? '−' : '+';
+  final absolute = minutes.abs();
+  final hours = absolute ~/ 60;
+  final remainder = absolute % 60;
+  return remainder == 0
+      ? 'UTC$sign$hours'
+      : 'UTC$sign$hours:${remainder.toString().padLeft(2, '0')}';
+}
 
 Forecast _forecastFor(_WorldTimeCase item) => Forecast(
   locationName: item.city,

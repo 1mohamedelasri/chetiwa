@@ -14,6 +14,8 @@ void main() {
   tz.initializeTimeZones();
 
   testWidgets('Forecast pane remains visually stable', (tester) async {
+    WeatherTimeZone.debugSetDisplayTimeZone('Europe/Paris');
+    addTearDown(() => WeatherTimeZone.debugSetDisplayTimeZone(null));
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);

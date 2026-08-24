@@ -19,12 +19,34 @@ final class UsageQuotaSnapshot {
   int get remaining => (limit - used).clamp(0, limit);
 }
 
+final class RadarSessionDecision {
+  const RadarSessionDecision({
+    required this.allowed,
+    required this.enforced,
+    required this.used,
+    required this.limit,
+    required this.resetAt,
+  });
+
+  final bool allowed;
+  final bool enforced;
+  final int used;
+  final int limit;
+  final DateTime resetAt;
+}
+
+abstract interface class RadarSessionGateway {
+  Future<RadarSessionDecision> open({required bool premium});
+}
+
 final class UsageQuotaController extends ChangeNotifier {
   UsageQuotaController({
     required EntitlementController entitlement,
     bool persist = true,
+    RadarSessionGateway? radarSessionGateway,
   }) : _entitlement = entitlement,
-       _persist = persist {
+       _persist = persist,
+       _radarSessionGateway = radarSessionGateway {
     _entitlement.addListener(_entitlementChanged);
     if (persist) unawaited(_restore());
   }
@@ -33,8 +55,12 @@ final class UsageQuotaController extends ChangeNotifier {
   static const _monthKey = 'monetization:radar_sessions_month:v1';
   final EntitlementController _entitlement;
   final bool _persist;
+  final RadarSessionGateway? _radarSessionGateway;
   int _used = 0;
   String _month = _monthId(DateTime.now());
+  int? _serverLimit;
+  DateTime? _serverResetAt;
+  Future<bool>? _openingRadarSession;
 
   PremiumLimits get limits => PremiumLimits.forEntitlement(_entitlement);
   UsageQuotaSnapshot get radarSessions {
@@ -43,8 +69,8 @@ final class UsageQuotaController extends ChangeNotifier {
     final nextMonth = DateTime(now.year, now.month + 1);
     return UsageQuotaSnapshot(
       used: _used,
-      limit: limits.monthlyRadarSessions,
-      resetAt: nextMonth,
+      limit: _serverLimit ?? limits.monthlyRadarSessions,
+      resetAt: _serverResetAt ?? nextMonth,
     );
   }
 
@@ -56,6 +82,40 @@ final class UsageQuotaController extends ChangeNotifier {
     notifyListeners();
     await _persistValue();
     return true;
+  }
+
+  /// Records exactly one user-visible Radar opening. Backend/network failures
+  /// never remove weather data; only an explicit enforced server decision can
+  /// deny access.
+  Future<bool> openRadarSession() {
+    final inFlight = _openingRadarSession;
+    if (inFlight != null) return inFlight;
+    final operation = _openRadarSession();
+    _openingRadarSession = operation;
+    unawaited(
+      operation.whenComplete(() {
+        if (identical(_openingRadarSession, operation)) {
+          _openingRadarSession = null;
+        }
+      }),
+    );
+    return operation;
+  }
+
+  Future<bool> _openRadarSession() async {
+    final gateway = _radarSessionGateway;
+    if (gateway == null) return consumeRadarSession();
+    try {
+      final decision = await gateway.open(premium: _entitlement.isPremium);
+      _used = decision.used;
+      _serverLimit = decision.limit;
+      _serverResetAt = decision.resetAt;
+      notifyListeners();
+      await _persistValue();
+      return !decision.enforced || decision.allowed;
+    } on Object {
+      return true;
+    }
   }
 
   void _entitlementChanged() => notifyListeners();
@@ -73,6 +133,8 @@ final class UsageQuotaController extends ChangeNotifier {
     if (_month == month) return;
     _month = month;
     _used = 0;
+    _serverLimit = null;
+    _serverResetAt = null;
     unawaited(_persistValue());
   }
 

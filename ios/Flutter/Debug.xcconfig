@@ -1,2 +1,5 @@
 #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
 #include "Generated.xcconfig"
+// Official Google sample app ID. Replace through an approved production
+// configuration before enabling real ad-unit IDs.
+ADMOB_APP_ID=ca-app-pub-3940256099942544~1458002511

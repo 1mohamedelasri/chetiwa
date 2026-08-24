@@ -34,16 +34,31 @@ void main() {
     await tracker.locationSearchRequested();
     await tracker.locationSelected('precise');
     await tracker.alertPreferenceChanged(true);
+    await tracker.radarAvailabilityIssue(
+      issue: 'providerUnavailable',
+      surface: 'metadata',
+      cachedDataVisible: true,
+    );
 
     expect(events.map((event) => event.name), [
       'weather_tab_selected',
       'location_search_requested',
       'location_selected',
       'rain_alert_preference_changed',
+      'radar_availability_issue',
     ]);
     expect(events[0].parameters, <String, Object>{'tab': 'radar'});
     expect(events[1].parameters, isNull);
     expect(events[2].parameters, <String, Object>{'source': 'precise'});
     expect(events[3].parameters, <String, Object>{'enabled': 'true'});
+    expect(events[4].parameters, <String, Object>{
+      'issue': 'providerUnavailable',
+      'surface': 'metadata',
+      'cached_data_visible': 'true',
+    });
+    expect(
+      events.expand((event) => event.parameters?.keys ?? const <String>[]),
+      isNot(contains(anyOf('latitude', 'longitude', 'location', 'url'))),
+    );
   });
 }

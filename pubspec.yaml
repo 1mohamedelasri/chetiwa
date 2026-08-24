@@ -49,6 +49,8 @@ dependencies:
   url_launcher: ^6.3.2
   firebase_core: ^4.13.0
   firebase_analytics: ^12.4.6
+  firebase_messaging: ^16.5.0
+  flutter_timezone: ^5.1.0
   package_info_plus: ^9.0.1
   flutter_local_notifications: ^18.0.1
   in_app_purchase: ^3.2.3
@@ -72,6 +74,11 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  # CocoaPods remains required by flutter_local_notifications. Keep one iOS
+  # dependency manager so a clean checkout cannot install duplicate plugins or
+  # depend on a pre-existing build/ios/SourcePackages directory.
+  config:
+    enable-swift-package-manager: false
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

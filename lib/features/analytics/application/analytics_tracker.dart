@@ -37,6 +37,21 @@ final class AnalyticsTracker {
     parameters: {'enabled': enabled ? 'true' : 'false'},
   );
 
+  /// Records operational degradation without any location, URL, provider
+  /// payload, device identifier or weather value.
+  Future<void> radarAvailabilityIssue({
+    required String issue,
+    required String surface,
+    required bool cachedDataVisible,
+  }) => _log(
+    'radar_availability_issue',
+    parameters: <String, Object>{
+      'issue': issue,
+      'surface': surface,
+      'cached_data_visible': cachedDataVisible ? 'true' : 'false',
+    },
+  );
+
   Future<void> _log(String name, {Map<String, Object>? parameters}) async {
     if (!_consent.isEnabled) return;
     try {

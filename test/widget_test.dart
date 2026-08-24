@@ -2,12 +2,16 @@ import 'package:chetiwa/app/app.dart';
 import 'package:chetiwa/app/di/chetiwa_dependencies.dart';
 import 'package:chetiwa/core/location/coordinates.dart';
 import 'package:chetiwa/core/location/location_repository.dart';
+import 'package:chetiwa/core/notifications/rain_alert_navigation_controller.dart';
 import 'package:chetiwa/features/forecast/data/datasources/fixture_forecast_data_source.dart';
 import 'package:chetiwa/features/forecast/data/repositories/fixture_forecast_repository.dart';
+import 'package:chetiwa/features/forecast/application/weather_section_cubit.dart';
+import 'package:chetiwa/features/radar/application/radar_bloc.dart';
 import 'package:chetiwa/features/radar/data/repositories/fixture_radar_repository.dart';
 import 'package:chetiwa/features/radar/domain/entities/radar_frame.dart';
 import 'package:chetiwa/features/radar/domain/repositories/radar_repository.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -19,10 +23,10 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(
-      ChetiwaApp(dependencies: ChetiwaDependencies.fixture()),
-    );
+    final dependencies = ChetiwaDependencies.fixture();
+    await tester.pumpWidget(ChetiwaApp(dependencies: dependencies));
     await _loadFixture(tester);
+    expect(dependencies.usageQuotaController.radarSessions.used, 0);
 
     expect(
       (tester.getCenter(find.text('Chetiwa')).dy -
@@ -33,7 +37,9 @@ void main() {
     expect(find.byKey(const Key('open-settings-navigation')), findsOneWidget);
     expect(find.byKey(const Key('rain-chart')), findsOneWidget);
     expect(find.byKey(const ValueKey('rain-chart-cursor-now')), findsOneWidget);
-    expect(find.byKey(const Key('graph-provenance-label')), findsOneWidget);
+    // Source details remain available in Sources & Licences; the primary
+    // Graph header stays focused on the actual rain answer.
+    expect(find.byKey(const Key('graph-provenance-label')), findsNothing);
     expect(find.text('2H'), findsOneWidget);
     expect(find.text('Graph'), findsOneWidget);
     expect(find.byKey(const Key('adaptive-ad-banner-slot')), findsOneWidget);
@@ -41,6 +47,16 @@ void main() {
       find.byKey(const Key('selected-navigation-indicator')),
       findsOneWidget,
     );
+    // Radar stays mounted offstage so its current viewport is warm before the
+    // first navigation tap.
+    expect(
+      find.byKey(const ValueKey('radar'), skipOffstage: false),
+      findsOneWidget,
+    );
+    final radarBloc = tester
+        .element(find.byKey(const ValueKey('graph')))
+        .read<RadarBloc>();
+    expect((radarBloc.state as RadarReady).isPlaying, isFalse);
 
     await tester.drag(
       find.byKey(const Key('rain-chart')),
@@ -55,9 +71,18 @@ void main() {
     await tester.tap(find.text('Radar'));
     await tester.pump();
     await tester.pumpAndSettle();
+    expect(dependencies.usageQuotaController.radarSessions.used, 1);
+    await tester.tap(find.text('Radar'));
+    await tester.pump();
+    expect(dependencies.usageQuotaController.radarSessions.used, 1);
 
-    // Radar starts animating as soon as its page becomes visible.
-    expect(find.text('Pause'), findsOneWidget);
+    // Radar starts automatically when its surface becomes visible. Real tile
+    // builds additionally wait for the first decoded PNG before autoplay.
+    final section = tester
+        .element(find.byKey(const ValueKey('radar'), skipOffstage: false))
+        .read<WeatherSectionCubit>();
+    expect(section.state, WeatherSection.radar);
+    expect((radarBloc.state as RadarReady).isPlaying, isTrue);
     expect(find.byKey(const Key('radar-city-pin')), findsOneWidget);
     expect(find.byKey(const Key('radar-time-ruler')), findsOneWidget);
     expect(find.byKey(const Key('radar-reset-button')), findsOneWidget);
@@ -101,21 +126,20 @@ void main() {
     await tester.tap(find.byKey(const Key('radar-playback-button')));
     await tester.pump();
     expect(find.text('Lecture'), findsOneWidget);
-    await tester.pump(const Duration(milliseconds: 1300));
-    // Time and map interactions never resume an explicit user pause.
+    expect((radarBloc.state as RadarReady).isPlaying, isFalse);
+    await tester.pump(const Duration(milliseconds: 2600));
     expect(find.text('Lecture'), findsOneWidget);
+    expect((radarBloc.state as RadarReady).isPlaying, isFalse);
     await tester.tap(find.byKey(const Key('radar-playback-button')));
     await tester.pump();
     expect(find.text('Pause'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('radar-playback-button')));
-    await tester.pump();
-    expect(find.text('Lecture'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('radar-reset-button')));
     await tester.pump();
     expect(find.text('Pause'), findsOneWidget);
     await tester.tap(find.byKey(const Key('radar-playback-button')));
     await tester.pump();
+    expect(find.text('Lecture'), findsOneWidget);
 
     await tester.tap(find.text('Prévisions'));
     await tester.pump();
@@ -171,6 +195,35 @@ void main() {
     expect(
       radar.requestedCoordinates,
       contains(LocationCatalog.locations[2].coordinates),
+    );
+    expect(radar.requestedCoordinates, hasLength(1));
+  });
+
+  testWidgets('a tapped rain push opens Radar on its target coordinates', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final dependencies = ChetiwaDependencies.fixture();
+    await tester.pumpWidget(ChetiwaApp(dependencies: dependencies));
+    await _loadFixture(tester);
+    dependencies.rainAlertNavigationController.open(
+      const RainAlertNavigationIntent(
+        eventId: 'event-sierra-leone',
+        locationLabel: 'Freetown, Sierra Leone',
+        coordinates: Coordinates(latitude: 8.4657, longitude: -13.2317),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+
+    expect(
+      dependencies.activeLocationController.location?.coordinates,
+      const Coordinates(latitude: 8.4657, longitude: -13.2317),
     );
   });
 }

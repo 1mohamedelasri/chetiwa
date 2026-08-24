@@ -95,6 +95,15 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
       );
       return;
     }
+    if (!enabled && result == RainAlertSyncResult.failed && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Alertes coupées sur ce téléphone. La suppression serveur sera réessayée.',
+          ),
+        ),
+      );
+    }
     if (mounted) {
       if (analytics != null) {
         unawaited(analytics.alertPreferenceChanged(enabled));

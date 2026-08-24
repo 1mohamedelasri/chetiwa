@@ -60,7 +60,7 @@ final class OpenMeteoForecastRepository implements ForecastRepository {
     final summary = WeatherBriefBuilder.build(
       now: updatedAt,
       points: decisionPoints,
-      formatTime: (instant) => WeatherTimeZone.hourMinute(instant, timeZone),
+      formatTime: WeatherTimeZone.displayHourMinute,
     );
     final hourly = _mapHourly(response['hourly'], updatedAt, timeZone);
     final daily = _mapDaily(response['daily'], timeZone);

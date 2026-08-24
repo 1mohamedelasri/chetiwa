@@ -14,6 +14,7 @@ publié.
 | Préférences d’alerte locales | Délai, seuil, quiet hours, état actif | Appareil de l'utilisateur | Jusqu’à désinstallation ou effacement local | Désactivation/effacement app |
 | Position actuelle | Afficher la météo après action explicite | Mémoire pendant le parcours | Non persistée comme position GPS | Fin du parcours / changement de lieu |
 | Coordonnées du lieu consulté | Appeler météo, radar et carte | Requête aux fournisseurs concernés | Selon leurs conditions, à vérifier avant bêta externe | Choisir un autre lieu / arrêter d'utiliser le service |
+| Événements Analytics autorisés | Usage essentiel et disponibilité Radar après consentement | Firebase Analytics, sans lieu/coordonnées/URL/valeur météo | Selon la configuration Firebase publiée | Désactivation dans Réglages et procédure Firebase applicable |
 
 ## Hors MVP — ne pas activer sans mise à jour de cet inventaire
 

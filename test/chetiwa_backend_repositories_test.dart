@@ -69,22 +69,52 @@ void main() {
   });
 
   test('radar repository maps observation and nowcast frames', () async {
-    final repository = ChetiwaRadarRepository(
-      api: _apiFor('/v1/radar/frames', <String, Object?>{
-        'frames': <Object?>[
-          <String, Object?>{
-            'time': '2026-08-20T17:50:00.000Z',
-            'kind': 'observation',
-            'tileUrlTemplate': 'https://tiles.test/past/{z}/{x}/{y}.png',
-          },
-          <String, Object?>{
-            'time': '2026-08-20T18:00:00.000Z',
-            'kind': 'nowcast',
-            'tileUrlTemplate': 'https://tiles.test/future/{z}/{x}/{y}.png',
-          },
-        ],
-        'provider': <String, Object?>{'id': 'licensed-radar'},
+    final requestedPaths = <String>[];
+    final api = ChetiwaApiClient(
+      baseUri: Uri.parse('https://api.chetiwa.test'),
+      client: MockClient((request) async {
+        requestedPaths.add(request.url.path);
+        final data = request.url.path == '/v1/radar/point-nowcast'
+            ? <String, Object?>{
+                'samples': <Object?>[
+                  <String, Object?>{
+                    'time': '2026-08-20T18:00:00.000Z',
+                    'rainRateMmPerHour': 2.4,
+                    'source': 'radar',
+                    'coverage': 'in_range',
+                  },
+                ],
+              }
+            : <String, Object?>{
+                'frames': <Object?>[
+                  <String, Object?>{
+                    'time': '2026-08-20T17:50:00.000Z',
+                    'kind': 'observation',
+                    'tileUrlTemplate':
+                        'https://tiles.test/past/{z}/{x}/{y}.png',
+                  },
+                  <String, Object?>{
+                    'time': '2026-08-20T18:00:00.000Z',
+                    'kind': 'nowcast',
+                    'tileUrlTemplate':
+                        'https://tiles.test/future/{z}/{x}/{y}.png',
+                  },
+                ],
+                'provider': <String, Object?>{'id': 'librewxr'},
+              };
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'data': data,
+            'meta': <String, Object?>{
+              'generatedAt': '2026-08-20T18:00:00.000Z',
+            },
+          }),
+          200,
+        );
       }),
+    );
+    final repository = ChetiwaRadarRepository(
+      api: api,
       cache: const RadarCacheDataSource(),
     );
 
@@ -94,7 +124,58 @@ void main() {
     expect(frames.first.isObservation, isTrue);
     expect(frames.last.isNowcast, isTrue);
     expect(frames.last.progress, 1);
-    expect(frames.last.providerName, 'licensed-radar via Chetiwa');
+    expect(frames.last.providerName, 'librewxr via Chetiwa');
+    expect(frames.last.pointRainRateMmPerHour, 2.4);
+    expect(frames.last.pointRainSource, 'radar');
+    expect(frames.first.pointRainRateMmPerHour, isNull);
+    expect(
+      requestedPaths,
+      containsAll(<String>['/v1/radar/frames', '/v1/radar/point-nowcast']),
+    );
+  });
+
+  test('radar repository keeps frames when point sampling fails', () async {
+    final api = ChetiwaApiClient(
+      baseUri: Uri.parse('https://api.chetiwa.test'),
+      client: MockClient((request) async {
+        if (request.url.path == '/v1/radar/point-nowcast') {
+          return http.Response(
+            jsonEncode(<String, Object?>{
+              'error': <String, Object?>{
+                'code': 'radar_point_nowcast_unavailable',
+                'message': 'Point sampling unavailable',
+              },
+            }),
+            503,
+          );
+        }
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'data': <String, Object?>{
+              'frames': <Object?>[
+                <String, Object?>{
+                  'time': '2026-08-20T18:00:00.000Z',
+                  'kind': 'nowcast',
+                  'tileUrlTemplate':
+                      'https://tiles.test/future/{z}/{x}/{y}.png',
+                },
+              ],
+              'provider': <String, Object?>{'id': 'librewxr'},
+            },
+          }),
+          200,
+        );
+      }),
+    );
+    final repository = ChetiwaRadarRepository(
+      api: api,
+      cache: const RadarCacheDataSource(),
+    );
+
+    final frames = await repository.getFrames(Coordinates.paris);
+
+    expect(frames, hasLength(1));
+    expect(frames.single.pointRainRateMmPerHour, isNull);
   });
 
   test('location repository maps worldwide backend search results', () async {

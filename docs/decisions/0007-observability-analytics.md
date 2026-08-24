@@ -32,10 +32,13 @@ feedback de bêta et mesures locales minimales passent en premier.
 - `location_selected` avec `source` selected/precise/reducedAccuracy/
   lastKnownPosition, sans ville ni coordonnées.
 - `rain_alert_preference_changed` avec `enabled` true/false.
+- `radar_availability_issue` avec seulement `issue`, `surface` metadata/tiles
+  et présence d'un cache ; aucun fournisseur, URL, lieu, coordonnée ou valeur
+  météo.
 
 Les événements d'ouverture, de chargement, de paywall, d'achat, de publicité ou
-d'erreur ne sont pas ajoutés tant que leur finalité, leur base légale et le
-produit concerné ne sont pas validés.
+d'erreur non listés ne sont pas ajoutés tant que leur finalité, leur base légale
+et le produit concerné ne sont pas validés.
 
 Tout nouvel événement doit avoir une finalité, un propriétaire et une durée de
 rétention documentés avant implémentation.

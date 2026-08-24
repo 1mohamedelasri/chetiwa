@@ -42,6 +42,9 @@ void main() {
   });
 
   group('ForecastSnapshot', () {
+    setUp(() => WeatherTimeZone.debugSetDisplayTimeZone('Europe/Paris'));
+    tearDown(() => WeatherTimeZone.debugSetDisplayTimeZone(null));
+
     final now = DateTime.utc(2026, 8, 19, 17, 58);
     final forecast = Forecast(
       locationName: 'Paris, France',

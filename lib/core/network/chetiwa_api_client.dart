@@ -89,8 +89,9 @@ final class ChetiwaApiClient {
 
   Future<Map<String, dynamic>> postData(
     String path,
-    Map<String, Object?> body,
-  ) => _writeData('POST', path, body);
+    Map<String, Object?> body, {
+    Map<String, String> headers = const {},
+  }) => _writeData('POST', path, body, headers: headers);
 
   Future<Map<String, dynamic>> patchData(
     String path,
@@ -104,12 +105,14 @@ final class ChetiwaApiClient {
   Future<Map<String, dynamic>> _writeData(
     String method,
     String path,
-    Map<String, Object?> body,
-  ) async {
+    Map<String, Object?> body, {
+    Map<String, String> headers = const {},
+  }) async {
     final response = await _requestWithoutCache(
       method,
       path,
       body: jsonEncode(body),
+      headers: headers,
     );
     return _decodeData(response.body);
   }
@@ -118,6 +121,7 @@ final class ChetiwaApiClient {
     String method,
     String path, {
     String? body,
+    Map<String, String> headers = const {},
   }) async {
     final uri = _baseUri.resolve(path);
     try {
@@ -127,6 +131,7 @@ final class ChetiwaApiClient {
           'accept': 'application/json',
           'x-chetiwa-device-id': installationId,
           if (body != null) 'content-type': 'application/json',
+          ...headers,
         });
       if (body != null) request.body = body;
       final streamed = await _client

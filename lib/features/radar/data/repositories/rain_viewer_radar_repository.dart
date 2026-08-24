@@ -12,11 +12,13 @@ final class RainViewerRadarRepository implements RadarRepository {
   const RainViewerRadarRepository({
     required RainViewerRadarProvider provider,
     required RadarCacheDataSource cache,
+    this.pointEnrichmentBudget = const Duration(milliseconds: 1200),
   }) : _provider = provider,
        _cache = cache;
 
   final RainViewerRadarProvider _provider;
   final RadarCacheDataSource _cache;
+  final Duration pointEnrichmentBudget;
 
   @override
   Future<CachedRadarFrames?> getCachedFrames(Coordinates coordinates) =>
@@ -31,7 +33,13 @@ final class RainViewerRadarRepository implements RadarRepository {
         ? _provider.fetchPointNowcast(coordinates)
         : Future<List<Map<String, dynamic>>>.value(const []);
     final response = await _provider.fetchMetadata();
-    final pointNowcast = await pointNowcastFuture;
+    // Point sampling enriches Graph but must never hold the primary radar
+    // image hostage. LibreWXR's MCP endpoint can take up to eight seconds on a
+    // cold worker; use the model-labelled Graph fallback after a short budget.
+    final pointNowcast = await pointNowcastFuture.timeout(
+      pointEnrichmentBudget,
+      onTimeout: () => const <Map<String, dynamic>>[],
+    );
     final pointByTimestamp = <int, Map<String, dynamic>>{
       for (final point in pointNowcast)
         if (point['time'] is num) (point['time'] as num).toInt(): point,

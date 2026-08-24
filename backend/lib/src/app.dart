@@ -23,6 +23,7 @@ Handler createApp({
   ProviderGateway? providers,
   JsonResponseCache? cache,
   RequestRateLimiter? rateLimiter,
+  RequestRateLimiter? tileRateLimiter,
   DeviceAlertStore? deviceAlertStore,
   DateTime Function()? now,
   RadarQuotaTracker? radarQuota,
@@ -34,6 +35,10 @@ Handler createApp({
   final responseCache = cache ?? JsonResponseCache();
   final clock = now ?? DateTime.now;
   final limiter = rateLimiter ?? RequestRateLimiter();
+  // Radar animation legitimately fans out into several XYZ requests per
+  // frame. Keep it isolated from the low-volume JSON API bucket so normal
+  // playback cannot throttle forecast, location or session calls.
+  final radarTileLimiter = tileRateLimiter ?? RequestRateLimiter(limit: 600);
   final metrics = operationalMetrics ?? OperationalMetrics();
   final binaryTileCache = tileCache ?? TileResponseCache();
   final sharedCounter = config.sharedCounterUrl == null
@@ -190,18 +195,6 @@ Handler createApp({
         if (config.globalKillSwitch || !radarGuard.policy.enabled) {
           throw radarDisabled();
         }
-        final quota = distributedQuota == null
-            ? radarGuard.evaluate(
-                ownerKey: radarQuotaOwner(request),
-                plan: radarPlanFromRequest(request),
-                now: clock(),
-              )
-            : await distributedQuota.evaluate(
-                ownerKey: radarQuotaOwner(request),
-                plan: radarPlanFromRequest(request),
-                now: clock(),
-              );
-        if (!quota.allowed) throw radarQuotaExceeded(quota);
         final latitude = _coordinate(request, 'latitude', -90, 90);
         final longitude = _coordinate(request, 'longitude', -180, 180);
         return await _serveCached(
@@ -219,13 +212,78 @@ Handler createApp({
               gateway.radarFrames(latitude: latitude, longitude: longitude),
         );
       } on ApiException catch (error) {
-        final response = _apiError(error);
-        if (error.code == 'radar_quota_exceeded') {
-          return response.change(
-            headers: {...response.headers, 'retry-after': '2592000'},
-          );
+        return _apiError(error);
+      }
+    })
+    ..post('/v1/radar/sessions', (Request request) async {
+      try {
+        if (config.globalKillSwitch || !radarGuard.policy.enabled) {
+          throw radarDisabled();
         }
-        return response;
+        final ownerKey = _installationOwnerHash(request);
+        final sessionId = _radarSessionId(request);
+        final plan = radarPlanFromRequest(request);
+        final quota = distributedQuota == null
+            ? radarGuard.evaluate(
+                ownerKey: ownerKey,
+                sessionId: sessionId,
+                plan: plan,
+                now: clock(),
+              )
+            : await distributedQuota.evaluate(
+                ownerKey: ownerKey,
+                sessionId: sessionId,
+                plan: plan,
+                now: clock(),
+              );
+        final overLimit = !quota.allowed;
+        return _dataResponse(
+          <String, Object?>{
+            'session': <String, Object?>{
+              // During the controlled beta we still count real openings but
+              // do not let a local or unverified entitlement counter remove
+              // weather data. Enforcement can be enabled after server-side
+              // purchase validation and a shared counter are deployed.
+              'allowed': !config.radarQuotaEnforced || quota.allowed,
+              'enforced': config.radarQuotaEnforced,
+              'overLimit': overLimit,
+              'plan': plan.name,
+              'used': quota.used,
+              'limit': quota.limit,
+              'remaining': quota.remaining,
+              'resetAt': quota.resetAt.toIso8601String(),
+            },
+          },
+          now: clock,
+          statusCode: 201,
+        );
+      } on ApiException catch (error) {
+        return _apiError(error);
+      }
+    })
+    ..get('/v1/radar/point-nowcast', (Request request) async {
+      try {
+        if (config.globalKillSwitch || !config.radarEnabled) {
+          throw radarDisabled();
+        }
+        final latitude = _coordinate(request, 'latitude', -90, 90);
+        final longitude = _coordinate(request, 'longitude', -180, 180);
+        return await _serveCached(
+          request: request,
+          cache: responseCache,
+          now: clock,
+          key: 'radar-point-nowcast:${_coordinateKey(latitude, longitude)}',
+          policy: const CachePolicy(
+            freshFor: Duration(minutes: 2),
+            staleIfErrorFor: Duration(minutes: 30),
+          ),
+          loader: () => gateway.radarPointNowcast(
+            latitude: latitude,
+            longitude: longitude,
+          ),
+        );
+      } on ApiException catch (error) {
+        return _apiError(error);
       }
     })
     ..get('/v1/radar/tiles/<frame>/<z>/<x>/<y>', (
@@ -469,7 +527,7 @@ Handler createApp({
       .addMiddleware(operationalMetricsMiddleware(metrics))
       .addMiddleware(_responseHeaders())
       .addMiddleware(_gzipResponses())
-      .addMiddleware(_rateLimit(limiter, clock))
+      .addMiddleware(_rateLimit(limiter, radarTileLimiter, clock))
       .addHandler(router.call);
 }
 
@@ -604,6 +662,25 @@ String _installationOwnerHash(Request request) {
   return sha256.convert(utf8.encode(installationId)).toString();
 }
 
+String _radarSessionId(Request request) {
+  final sessionId = request.headers['x-chetiwa-radar-session-id']?.trim();
+  if (sessionId == null || sessionId.isEmpty) {
+    throw const ApiException(
+      statusCode: 400,
+      code: 'missing_radar_session_id',
+      message: 'X-Chetiwa-Radar-Session-Id is required',
+    );
+  }
+  if (!RegExp(r'^[A-Za-z0-9._-]{16,128}$').hasMatch(sessionId)) {
+    throw const ApiException(
+      statusCode: 400,
+      code: 'invalid_radar_session_id',
+      message: 'X-Chetiwa-Radar-Session-Id has an invalid format',
+    );
+  }
+  return sessionId;
+}
+
 Future<Map<String, Object?>> _readJsonObject(
   Request request, {
   int maximumBytes = 16 * 1024,
@@ -672,6 +749,7 @@ DeviceRegistration _deviceRegistration(Map<String, Object?> body) {
     fallback: false,
   );
   final pushToken = _optionalString(body, 'pushToken', maximumLength: 4096);
+  final appVersion = _optionalString(body, 'appVersion', maximumLength: 64);
   if (notificationsEnabled && pushToken == null) {
     throw const ApiException(
       statusCode: 400,
@@ -685,6 +763,7 @@ DeviceRegistration _deviceRegistration(Map<String, Object?> body) {
     timeZone: timeZone,
     notificationsEnabled: notificationsEnabled,
     pushToken: pushToken,
+    appVersion: appVersion,
   );
 }
 
@@ -780,6 +859,7 @@ Map<String, Object?> _deviceJson(DeviceRecord device) => <String, Object?>{
   'locale': device.locale,
   'timeZone': device.timeZone,
   'notificationsEnabled': device.notificationsEnabled,
+  if (device.appVersion case final version?) 'appVersion': version,
   'createdAt': device.createdAt.toIso8601String(),
   'updatedAt': device.updatedAt.toIso8601String(),
 };
@@ -993,36 +1073,43 @@ Middleware _responseHeaders() => (Handler innerHandler) {
   };
 };
 
-Middleware _rateLimit(RequestRateLimiter limiter, DateTime Function() now) =>
-    (Handler innerHandler) {
-      return (Request request) async {
-        if (!request.url.path.startsWith('v1/')) {
-          return innerHandler(request);
-        }
-        final decision = limiter.evaluate(_clientKey(request), now());
-        final headers = <String, String>{
-          'x-ratelimit-limit': decision.limit.toString(),
-          'x-ratelimit-remaining': decision.remaining.toString(),
-        };
-        if (!decision.allowed) {
-          return _jsonResponse(const <String, Object?>{
-            'error': <String, Object?>{
-              'code': 'rate_limit_exceeded',
-              'message': 'Too many requests; retry later',
-            },
-          }, statusCode: 429).change(
-            headers: <String, String>{
-              ...headers,
-              'retry-after': decision.retryAfter.inSeconds
-                  .clamp(1, 60)
-                  .toString(),
-            },
-          );
-        }
-        final response = await innerHandler(request);
-        return response.change(headers: headers);
-      };
+Middleware _rateLimit(
+  RequestRateLimiter limiter,
+  RequestRateLimiter tileLimiter,
+  DateTime Function() now,
+) => (Handler innerHandler) {
+  return (Request request) async {
+    if (!request.url.path.startsWith('v1/')) {
+      return innerHandler(request);
+    }
+    final isRadarTile = request.url.path.startsWith('v1/radar/tiles/');
+    final bucket = isRadarTile ? tileLimiter : limiter;
+    final clientKey = _clientKey(request);
+    final decision = bucket.evaluate(
+      '$clientKey:${isRadarTile ? 'radar-tiles' : 'api'}',
+      now(),
+    );
+    final headers = <String, String>{
+      'x-ratelimit-limit': decision.limit.toString(),
+      'x-ratelimit-remaining': decision.remaining.toString(),
     };
+    if (!decision.allowed) {
+      return _jsonResponse(const <String, Object?>{
+        'error': <String, Object?>{
+          'code': 'rate_limit_exceeded',
+          'message': 'Too many requests; retry later',
+        },
+      }, statusCode: 429).change(
+        headers: <String, String>{
+          ...headers,
+          'retry-after': decision.retryAfter.inSeconds.clamp(1, 60).toString(),
+        },
+      );
+    }
+    final response = await innerHandler(request);
+    return response.change(headers: headers);
+  };
+};
 
 String _clientKey(Request request) {
   final deviceId = request.headers['x-chetiwa-device-id'];

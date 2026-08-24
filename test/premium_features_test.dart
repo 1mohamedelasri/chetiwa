@@ -1,10 +1,20 @@
+import 'dart:convert';
+import 'dart:math';
+
 import 'package:chetiwa/core/location/coordinates.dart';
+import 'package:chetiwa/core/network/chetiwa_api_client.dart';
 import 'package:chetiwa/features/monetization/application/saved_places_controller.dart';
 import 'package:chetiwa/features/monetization/application/usage_quota_controller.dart';
+import 'package:chetiwa/features/monetization/data/chetiwa_radar_session_gateway.dart';
 import 'package:chetiwa/features/monetization/domain/premium_entitlement.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
   final paris = const ChetiwaLocation(
     city: 'Paris',
     country: 'France',
@@ -52,6 +62,69 @@ void main() {
     expect(await quota.consumeRadarSession(), isFalse);
     expect(quota.radarSessions.used, 20);
     expect(quota.radarSessions.remaining, 0);
+
+    quota.dispose();
+    entitlement.dispose();
+  });
+
+  test('backend session opening sends plan and synchronizes usage', () async {
+    late http.Request captured;
+    var requestCount = 0;
+    final api = ChetiwaApiClient(
+      baseUri: Uri.parse('https://api.chetiwa.test'),
+      client: MockClient((request) async {
+        requestCount++;
+        captured = request;
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'data': <String, Object?>{
+              'session': <String, Object?>{
+                'allowed': true,
+                'enforced': false,
+                'used': 7,
+                'limit': 200,
+                'remaining': 193,
+                'resetAt': '2026-09-01T00:00:00.000Z',
+              },
+            },
+          }),
+          201,
+        );
+      }),
+    );
+    final entitlement = EntitlementController(
+      gateway: FixturePremiumPurchaseGateway(),
+      persist: false,
+      autoSync: false,
+    );
+    await entitlement.setFixturePremium(true);
+    final quota = UsageQuotaController(
+      entitlement: entitlement,
+      persist: false,
+      radarSessionGateway: ChetiwaRadarSessionGateway(api, random: Random(7)),
+    );
+
+    final decisions = await Future.wait(<Future<bool>>[
+      quota.openRadarSession(),
+      quota.openRadarSession(),
+    ]);
+
+    expect(decisions, everyElement(isTrue));
+    expect(requestCount, 1);
+    expect(captured.method, 'POST');
+    expect(captured.url.path, '/v1/radar/sessions');
+    expect(captured.headers['x-chetiwa-plan'], 'premium');
+    expect(
+      captured.headers['x-chetiwa-radar-session-id'],
+      matches(RegExp(r'^[a-f0-9]{32}$')),
+    );
+    expect(
+      captured.headers['x-chetiwa-device-id'],
+      matches(RegExp(r'^[a-f0-9]{32}$')),
+    );
+    expect(quota.radarSessions.used, 7);
+    expect(quota.radarSessions.limit, 200);
 
     quota.dispose();
     entitlement.dispose();

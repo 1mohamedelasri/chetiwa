@@ -17,6 +17,8 @@ void main() {
   tz.initializeTimeZones();
 
   testWidgets('Graph remains visually stable in both themes', (tester) async {
+    WeatherTimeZone.debugSetDisplayTimeZone('Europe/Paris');
+    addTearDown(() => WeatherTimeZone.debugSetDisplayTimeZone(null));
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -71,6 +73,61 @@ void main() {
       find.byType(Scaffold).first,
       matchesGoldenFile('goldens/weather_graph_themes.png'),
     );
+  });
+
+  testWidgets('Graph removes redundant copy and keeps live metrics separated', (
+    tester,
+  ) async {
+    WeatherTimeZone.debugSetDisplayTimeZone('Europe/Paris');
+    addTearDown(() => WeatherTimeZone.debugSetDisplayTimeZone(null));
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final clock = FixedWeatherClock(DateTime.utc(2026, 8, 20, 12));
+    final forecast = await FixtureForecastDataSource(
+      fixtureName: 'dry',
+      clock: clock,
+    ).load();
+    final snapshot = ForecastSnapshotBuilder.build(
+      forecast: forecast,
+      nowUtc: clock.nowUtc,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ChetiwaTheme.light,
+        locale: const Locale('fr'),
+        supportedLocales: ChetiwaLocalizations.supportedLocales,
+        localizationsDelegates: const [
+          ChetiwaLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        home: Scaffold(
+          body: BlocProvider(
+            create: (_) => GraphHorizonCubit(),
+            child: GraphPane(forecast: forecast, snapshot: snapshot),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const Key('graph-provenance-label')), findsNothing);
+    expect(find.textContaining('Conditions sèches'), findsNothing);
+    final time = find.descendant(
+      of: find.byKey(const Key('current-local-time')),
+      matching: find.text('14:00'),
+    );
+    final rain = find.text('0 mm/h');
+    expect(time, findsOneWidget);
+    expect(rain, findsOneWidget);
+    expect(
+      tester.getTopRight(time).dx + 4,
+      lessThan(tester.getTopLeft(rain).dx),
+    );
+    expect(tester.takeException(), isNull);
   });
 }
 

@@ -6,7 +6,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/location/coordinates.dart';
 import '../../../core/time/weather_clock.dart';
 import '../../../core/weather/weather_data_health.dart';
-import '../../monetization/application/usage_quota_controller.dart';
 import '../domain/entities/radar_frame.dart';
 import '../domain/repositories/radar_repository.dart';
 
@@ -49,6 +48,12 @@ final class RadarPlaybackToggled extends RadarEvent {
   const RadarPlaybackToggled();
 }
 
+/// Idempotent UI autoplay request sent only after the first visible tile is
+/// ready. Unlike a toggle, duplicate readiness callbacks cannot pause Radar.
+final class RadarPlaybackStarted extends RadarEvent {
+  const RadarPlaybackStarted();
+}
+
 final class RadarPlaybackPaused extends RadarEvent {
   const RadarPlaybackPaused();
 }
@@ -58,6 +63,12 @@ final class RadarPlaybackPaused extends RadarEvent {
 /// next successful refresh.
 final class RadarPlaybackSuspended extends RadarEvent {
   const RadarPlaybackSuspended();
+}
+
+/// Resumes only playback that was running before an application suspension.
+/// A user-paused animation remains paused.
+final class RadarPlaybackResumed extends RadarEvent {
+  const RadarPlaybackResumed();
 }
 
 final class RadarPlaybackAdvanced extends RadarEvent {
@@ -147,19 +158,19 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
     WeatherClock clock = const SystemWeatherClock(),
     int maxFrames = 24,
     int? historyHours,
-    UsageQuotaController? usageQuota,
   }) : _clock = clock,
        _maxFrames = maxFrames,
        _historyHours = historyHours,
-       _usageQuota = usageQuota,
        super(const RadarInitial()) {
     on<RadarRequested>(_load);
     on<RadarRefreshed>(_load);
     on<RadarLocationChanged>(_changeLocation);
     on<RadarFrameSelected>(_selectFrame);
     on<RadarPlaybackToggled>(_togglePlayback);
+    on<RadarPlaybackStarted>(_startPlayback);
     on<RadarPlaybackPaused>(_pausePlayback);
     on<RadarPlaybackSuspended>(_suspendPlayback);
+    on<RadarPlaybackResumed>(_resumePlayback);
     on<RadarPlaybackAdvanced>(_advancePlayback);
     on<RadarNowRequested>(_goToNow);
     on<RadarPlaybackRestarted>(_restartPlayback);
@@ -169,7 +180,6 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   final WeatherClock _clock;
   final int _maxFrames;
   final int? _historyHours;
-  final UsageQuotaController? _usageQuota;
   Coordinates _coordinates = Coordinates.paris;
   Timer? _playbackTimer;
   var _loadGeneration = 0;
@@ -232,9 +242,6 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
       }
     }
     try {
-      if (event is RadarRequested) {
-        await _usageQuota?.consumeRadarSession();
-      }
       final frames = _limitFrames(
         await _repository.getFrames(requestedCoordinates),
       );
@@ -353,6 +360,21 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
     _startPlaybackTimer();
   }
 
+  void _startPlayback(RadarPlaybackStarted event, Emitter<RadarState> emit) {
+    final current = state;
+    if (current is! RadarReady ||
+        current.frames.length < 2 ||
+        current.isPlaying) {
+      return;
+    }
+    final startIndex = current.selectedIndex >= current.frames.length - 1
+        ? current.playbackStartIndex
+        : current.selectedIndex;
+    emit(_copyReady(current, selectedIndex: startIndex, isPlaying: true));
+    _resumeAfterSuspension = false;
+    _startPlaybackTimer();
+  }
+
   void _pausePlayback(RadarPlaybackPaused event, Emitter<RadarState> emit) {
     final current = state;
     _resumeAfterSuspension = false;
@@ -367,9 +389,25 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   ) {
     final current = state;
     if (current is! RadarReady) return;
-    _resumeAfterSuspension = current.isPlaying;
+    // Mobile platforms commonly send inactive and then paused for one sleep.
+    // Preserve the first event's playback intent instead of clearing it when
+    // the second event observes the already-suspended state.
+    _resumeAfterSuspension = _resumeAfterSuspension || current.isPlaying;
     _stopPlayback();
     if (current.isPlaying) emit(_copyReady(current, isPlaying: false));
+  }
+
+  void _resumePlayback(RadarPlaybackResumed event, Emitter<RadarState> emit) {
+    final current = state;
+    if (!_resumeAfterSuspension ||
+        current is! RadarReady ||
+        current.frames.length < 2 ||
+        current.isPlaying) {
+      return;
+    }
+    _resumeAfterSuspension = false;
+    emit(_copyReady(current, isPlaying: true));
+    _startPlaybackTimer();
   }
 
   void _advancePlayback(RadarPlaybackAdvanced event, Emitter<RadarState> emit) {
@@ -443,10 +481,9 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   void _startPlaybackTimer() {
     _stopPlayback();
     _playbackTimer = Timer.periodic(
-      // Leave enough time for a physical device to fetch and decode the next
-      // radar tiles before advancing again. The tile layer still transitions
-      // quickly, but a slow mobile connection no longer skips every image.
-      const Duration(milliseconds: 1100),
+      // The next viewport is prefetched in a bounded batch. 1.5 s remains
+      // readable on Android while avoiding the sluggish 2.5 s cadence.
+      const Duration(milliseconds: 1500),
       (_) => add(const RadarPlaybackAdvanced()),
     );
   }

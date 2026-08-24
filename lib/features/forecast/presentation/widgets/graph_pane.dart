@@ -10,6 +10,7 @@ import '../../application/graph_horizon_cubit.dart';
 import '../../domain/entities/forecast.dart';
 import '../../domain/services/forecast_snapshot_builder.dart';
 import '../../domain/services/radar_nowcast_alignment.dart';
+import '../../domain/services/rain_chart_series.dart';
 import '../../domain/services/rain_rate_scale.dart';
 import '../../../radar/domain/entities/radar_frame.dart';
 import 'weather_chrome.dart';
@@ -46,9 +47,6 @@ final class GraphPane extends StatelessWidget {
         final now = alignedSnapshot.nowUtc;
         final textScale = MediaQuery.textScalerOf(context).scale(1);
         final compact = constraints.maxHeight < 500 || textScale > 1.45;
-        final usesRadarNowcast = alignedForecast.providerName.contains(
-          'LibreWXR nowcast',
-        );
         final summary = Padding(
           padding: const EdgeInsets.symmetric(horizontal: ChetiwaSpacing.x6),
           child: Row(
@@ -65,27 +63,6 @@ final class GraphPane extends StatelessWidget {
                         alignedSnapshot.nowUtc,
                       ),
                       style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: ChetiwaSpacing.x1),
-                    Text(
-                      localizedBriefDetail(
-                        context.l10n,
-                        alignedSnapshot.brief,
-                        alignedSnapshot.nowUtc,
-                        alignedForecast.timeZone,
-                      ),
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: ChetiwaSpacing.x1),
-                    Text(
-                      '${usesRadarNowcast ? (context.l10n.isFrench ? 'PRÉVISION AU POINT' : 'POINT FORECAST') : context.l10n.modelForecast} · ${alignedSnapshot.forecastProvenance.provider.toUpperCase()}',
-                      key: const Key('graph-provenance-label'),
-                      style: TextStyle(
-                        color: chartColors.muted,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.25,
-                      ),
                     ),
                   ],
                 ),
@@ -109,7 +86,6 @@ final class GraphPane extends StatelessWidget {
             currentRain: alignedSnapshot.currentRain,
             now: now,
             rainStart: alignedSnapshot.brief.rainStart,
-            timeZone: alignedForecast.timeZone,
             horizon: horizon,
             languageCode: context.l10n.locale.languageCode,
             colors: chartColors,
@@ -229,7 +205,6 @@ final class _ChetiwaRainChart extends StatefulWidget {
     required this.now,
     required this.rainStart,
     required this.horizon,
-    required this.timeZone,
     required this.languageCode,
     required this.colors,
     super.key,
@@ -240,7 +215,6 @@ final class _ChetiwaRainChart extends StatefulWidget {
   final DateTime now;
   final DateTime? rainStart;
   final GraphHorizon horizon;
-  final String timeZone;
   final String languageCode;
   final _ChartColors colors;
 
@@ -256,19 +230,12 @@ final class _ChetiwaRainChartState extends State<_ChetiwaRainChart> {
       : const Duration(hours: 24);
 
   List<RainPoint> get _visiblePoints {
-    final end = widget.now.add(_duration);
-    final ordered = [...widget.points]
-      ..sort((left, right) => left.time.compareTo(right.time));
-    if (ordered.isEmpty) return const [];
-
-    final result = <RainPoint>[widget.currentRain];
-
-    result.addAll(
-      ordered.where(
-        (point) => point.time.isAfter(widget.now) && !point.time.isAfter(end),
-      ),
+    return buildRainChartSeries(
+      points: widget.points,
+      currentRain: widget.currentRain,
+      now: widget.now,
+      duration: _duration,
     );
-    return result;
   }
 
   RainIntensity get _visibleIntensity =>
@@ -282,8 +249,8 @@ final class _ChetiwaRainChartState extends State<_ChetiwaRainChart> {
     key: ValueKey('rain-chart-intensity-${_visibleIntensity.name}'),
     label: context.l10n.maximumRainIntensity(
       context.l10n.rainIntensityName(_visibleIntensity.name),
-      widget.timeZone,
-      WeatherTimeZone.hourMinute(widget.now, widget.timeZone),
+      WeatherTimeZone.displayUtcOffsetLabel(widget.now),
+      WeatherTimeZone.displayHourMinute(widget.now),
     ),
     child: GestureDetector(
       key: const Key('rain-chart'),
@@ -306,7 +273,6 @@ final class _ChetiwaRainChartState extends State<_ChetiwaRainChart> {
           now: widget.now,
           duration: _duration,
           rainStart: widget.rainStart,
-          timeZone: widget.timeZone,
           languageCode: widget.languageCode,
           cursorX: _cursorX,
           colors: widget.colors,
@@ -324,7 +290,6 @@ final class _RainChartPainter extends CustomPainter {
     required this.duration,
     required this.rainStart,
     required this.cursorX,
-    required this.timeZone,
     required this.languageCode,
     required this.colors,
   });
@@ -334,7 +299,6 @@ final class _RainChartPainter extends CustomPainter {
   final Duration duration;
   final DateTime? rainStart;
   final double? cursorX;
-  final String timeZone;
   final String languageCode;
   final _ChartColors colors;
 
@@ -488,40 +452,26 @@ final class _RainChartPainter extends CustomPainter {
         chart.bottom -
         chart.height * RainRateScale.normalized(point.rateMmPerHour);
 
-    final episodes = RainRateScale.episodeRanges(
-      points.map((point) => point.rateMmPerHour),
+    if (points.isEmpty) return false;
+    final first = Offset(xFor(points.first), yFor(points.first));
+    final line = Path()..moveTo(first.dx, first.dy);
+    final area = Path()
+      ..moveTo(first.dx, chart.bottom)
+      ..lineTo(first.dx, first.dy);
+    for (final sample in points.skip(1)) {
+      final point = Offset(xFor(sample), yFor(sample));
+      line.lineTo(point.dx, point.dy);
+      area.lineTo(point.dx, point.dy);
+    }
+    final lastX = xFor(points.last);
+    area
+      ..lineTo(lastX, chart.bottom)
+      ..close();
+
+    final hasRain = points.any(
+      (point) => point.rateMmPerHour >= RainRateScale.traceThreshold,
     );
-    for (final episode in episodes) {
-      final firstRain = episode.first;
-      final lastRain = episode.last;
-      final line = Path();
-      final area = Path();
-      if (firstRain == 0) {
-        final first = Offset(xFor(points[firstRain]), yFor(points[firstRain]));
-        line.moveTo(first.dx, first.dy);
-        area
-          ..moveTo(first.dx, chart.bottom)
-          ..lineTo(first.dx, first.dy);
-      } else {
-        final startX =
-            (xFor(points[firstRain - 1]) + xFor(points[firstRain])) / 2;
-        line.moveTo(startX, chart.bottom);
-        area.moveTo(startX, chart.bottom);
-      }
-      for (var rainIndex = firstRain; rainIndex <= lastRain; rainIndex++) {
-        final point = Offset(xFor(points[rainIndex]), yFor(points[rainIndex]));
-        line.lineTo(point.dx, point.dy);
-        area.lineTo(point.dx, point.dy);
-      }
-      final endX = lastRain == points.length - 1
-          ? xFor(points[lastRain])
-          : (xFor(points[lastRain]) + xFor(points[lastRain + 1])) / 2;
-      if (lastRain < points.length - 1) {
-        line.lineTo(endX, chart.bottom);
-      }
-      area
-        ..lineTo(endX, chart.bottom)
-        ..close();
+    if (hasRain) {
       canvas.drawPath(
         area,
         Paint()
@@ -531,21 +481,23 @@ final class _RainChartPainter extends CustomPainter {
             colors: [Color(0xCC2F6EDB), Color(0x1A2F6EDB)],
           ).createShader(chart),
       );
-      canvas.drawPath(
-        line,
-        Paint()
-          ..color = ChetiwaColors.rainLight
-          ..strokeWidth = 2.5
-          ..style = PaintingStyle.stroke
-          ..strokeJoin = StrokeJoin.round
-          ..strokeCap = StrokeCap.round,
-      );
     }
-    return episodes.isNotEmpty;
+    // Keep the curve continuous through dry intervals. A zero value is still
+    // meaningful forecast data and must remain visible on the baseline.
+    canvas.drawPath(
+      line,
+      Paint()
+        ..color = ChetiwaColors.rainLight
+        ..strokeWidth = 2.5
+        ..style = PaintingStyle.stroke
+        ..strokeJoin = StrokeJoin.round
+        ..strokeCap = StrokeCap.round,
+    );
+    return hasRain;
   }
 
   String _formatTime(DateTime instant) =>
-      WeatherTimeZone.hourMinute(instant, timeZone);
+      WeatherTimeZone.displayHourMinute(instant);
 
   void _bubble(Canvas canvas, Size size, double x, String label) {
     final left = (x - 30).clamp(8.0, size.width - 68);
@@ -594,7 +546,6 @@ final class _RainChartPainter extends CustomPainter {
       oldDelegate.duration != duration ||
       oldDelegate.cursorX != cursorX ||
       oldDelegate.languageCode != languageCode ||
-      oldDelegate.timeZone != timeZone ||
       oldDelegate.colors != colors;
 }
 

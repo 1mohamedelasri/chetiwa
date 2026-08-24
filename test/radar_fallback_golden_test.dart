@@ -17,6 +17,8 @@ void main() {
   tz.initializeTimeZones();
 
   testWidgets('Radar fallback remains visually stable', (tester) async {
+    WeatherTimeZone.debugSetDisplayTimeZone('Europe/Paris');
+    addTearDown(() => WeatherTimeZone.debugSetDisplayTimeZone(null));
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -52,14 +54,13 @@ void main() {
         ),
       ),
     );
-    // The production Radar page starts playback on mount. Pause immediately
-    // so this golden captures one deterministic observation frame.
+    // Autoplay must already be visible when Radar opens. Capture it before the
+    // 1.5 s timer advances to the next deterministic frame.
     for (var index = 0; index < 10; index++) {
       await tester.pump(const Duration(milliseconds: 50));
       if (find.text('Pause').evaluate().isNotEmpty) break;
     }
-    await tester.tap(find.byKey(const Key('radar-playback-button')));
-    await tester.pump();
+    expect(find.text('Pause'), findsOneWidget);
 
     expect(find.byKey(const Key('radar-city-pin')), findsOneWidget);
     expect(find.byKey(const Key('fallback-radar-none')), findsOneWidget);
@@ -68,5 +69,6 @@ void main() {
       find.byType(Scaffold),
       matchesGoldenFile('goldens/radar_fallback.png'),
     );
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 }

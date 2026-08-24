@@ -77,11 +77,11 @@ final class RainViewerRadarProvider {
     final uri = Uri.parse(ApiConfig.radarMetadataUrl);
     Object? lastError;
     var terminalIssue = WeatherDataIssue.offline;
-    for (var attempt = 0; attempt < 3; attempt++) {
+    for (var attempt = 0; attempt < 2; attempt++) {
       try {
         final response = await _client
             .get(uri, headers: const {'Accept': 'application/json'})
-            .timeout(const Duration(seconds: 12));
+            .timeout(const Duration(seconds: 4));
         if (response.statusCode == 200) {
           final decoded = jsonDecode(response.body);
           if (decoded is! Map<String, dynamic>) {
@@ -108,13 +108,13 @@ final class RainViewerRadarProvider {
         lastError = error;
         terminalIssue = WeatherDataIssue.offline;
       }
-      if (attempt < 2) {
-        await Future<void>.delayed(Duration(milliseconds: 350 * (attempt + 1)));
+      if (attempt < 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
       }
     }
     throw WeatherDataException(
       terminalIssue,
-      'Radar inaccessible après 3 tentatives: $lastError',
+      'Radar inaccessible après 2 tentatives: $lastError',
     );
   }
 }

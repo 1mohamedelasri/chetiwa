@@ -1,4 +1,9 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:latlong2/latlong.dart';
 
 import 'package:chetiwa/features/radar/data/cache/radar_tile_cache.dart';
 
@@ -42,5 +47,38 @@ void main() {
     expect(snapshot.downloadedBytes, 256);
     expect(snapshot.downloadedTiles, 2);
     expect(snapshot.sessionTiles, 2);
+  });
+
+  test('first ready tile does not wait for a slow sibling', () async {
+    final slow = Completer<bool>();
+
+    final result = await RadarTileCache.firstReady([
+      Future<bool>.delayed(const Duration(milliseconds: 5), () => true),
+      slow.future,
+    ]);
+
+    expect(result, isTrue);
+    slow.complete(false);
+  });
+
+  test('viewport prioritizes the tile under the map center', () {
+    final camera = MapCamera(
+      crs: const Epsg3857(),
+      center: const LatLng(48.8566, 2.3522),
+      zoom: 7,
+      rotation: 0,
+      nonRotatedSize: const Size(390, 500),
+    );
+
+    final urls = TileViewport.visibleTileUrls(
+      camera,
+      const ['https://tiles.test/{z}/{x}/{y}.png'],
+      margin: 1,
+      maxTiles: 4,
+      maxZoom: 10,
+    );
+
+    expect(urls, hasLength(4));
+    expect(urls.first, 'https://tiles.test/7/64/44.png');
   });
 }

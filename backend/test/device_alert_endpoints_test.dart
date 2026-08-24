@@ -192,6 +192,7 @@ void main() {
         config: RuntimeConfig.fromEnvironment(const <String, String>{
           'CHETIWA_ENV': 'production',
           'GOOGLE_CLOUD_PROJECT': 'chetiwa-production',
+          'RADAR_ENABLED': 'false',
         }),
       );
 

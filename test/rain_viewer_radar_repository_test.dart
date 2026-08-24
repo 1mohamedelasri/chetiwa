@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:chetiwa/core/location/coordinates.dart';
@@ -145,4 +146,37 @@ void main() {
       client.close();
     },
   );
+
+  test('optional point nowcast never delays visible radar frames', () async {
+    final pointResponse = Completer<http.Response>();
+    final client = MockClient((request) async {
+      if (request.method == 'POST') return pointResponse.future;
+      return http.Response(
+        jsonEncode({
+          'host': 'https://tiles.example',
+          'radar': {
+            'past': [
+              {'time': 1787008800, 'path': '/v2/radar/observed'},
+            ],
+            'nowcast': const [],
+          },
+        }),
+        200,
+      );
+    });
+    final repository = RainViewerRadarRepository(
+      provider: RainViewerRadarProvider(client),
+      cache: const RadarCacheDataSource(),
+      pointEnrichmentBudget: const Duration(milliseconds: 10),
+    );
+
+    final stopwatch = Stopwatch()..start();
+    final frames = await repository.getFrames(Coordinates.paris);
+    stopwatch.stop();
+
+    expect(frames, hasLength(1));
+    expect(stopwatch.elapsed, lessThan(const Duration(milliseconds: 250)));
+    pointResponse.complete(http.Response('{}', 200));
+    client.close();
+  });
 }

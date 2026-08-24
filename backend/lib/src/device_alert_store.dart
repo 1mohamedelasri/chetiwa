@@ -9,6 +9,7 @@ final class DeviceRegistration {
     required this.timeZone,
     required this.notificationsEnabled,
     this.pushToken,
+    this.appVersion,
   });
 
   final String platform;
@@ -16,6 +17,7 @@ final class DeviceRegistration {
   final String timeZone;
   final bool notificationsEnabled;
   final String? pushToken;
+  final String? appVersion;
 }
 
 final class DeviceRecord {
@@ -27,7 +29,9 @@ final class DeviceRecord {
     required this.notificationsEnabled,
     required this.createdAt,
     required this.updatedAt,
+    required this.expiresAt,
     this.pushToken,
+    this.appVersion,
   });
 
   final String ownerHash;
@@ -36,8 +40,10 @@ final class DeviceRecord {
   final String timeZone;
   final bool notificationsEnabled;
   final String? pushToken;
+  final String? appVersion;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final DateTime expiresAt;
 }
 
 final class AlertLocation {
@@ -190,8 +196,10 @@ final class InMemoryDeviceAlertStore implements DeviceAlertStore {
       pushToken: registration.notificationsEnabled
           ? registration.pushToken
           : null,
+      appVersion: registration.appVersion,
       createdAt: existing?.createdAt ?? instant,
       updatedAt: instant,
+      expiresAt: instant.add(const Duration(days: 180)),
     );
     _devices[ownerHash] = record;
     return record;

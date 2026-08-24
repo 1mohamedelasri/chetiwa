@@ -64,8 +64,7 @@ abstract final class ForecastSnapshotBuilder {
     final summary = WeatherBriefBuilder.build(
       now: now,
       points: decisionPoints,
-      formatTime: (instant) =>
-          WeatherTimeZone.hourMinute(instant, forecast.timeZone),
+      formatTime: WeatherTimeZone.displayHourMinute,
     );
     final currentHour = WeatherTimeZone.startOfLocalHour(
       now,

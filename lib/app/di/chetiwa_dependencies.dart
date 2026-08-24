@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:http/http.dart' as http;
 
 import '../../core/config/api_config.dart';
@@ -10,6 +12,8 @@ import '../../core/location/open_meteo_location_repository.dart';
 import '../../core/network/chetiwa_api_client.dart';
 import '../../core/notifications/notification_permission_gateway.dart';
 import '../../core/notifications/rain_notification_scheduler.dart';
+import '../../core/notifications/firebase_push_messaging.dart';
+import '../../core/notifications/rain_alert_navigation_controller.dart';
 import '../../core/time/weather_clock.dart';
 import '../../features/forecast/data/cache/forecast_cache_data_source.dart';
 import '../../features/forecast/data/datasources/fixture_forecast_data_source.dart';
@@ -26,11 +30,14 @@ import '../../features/radar/data/providers/rain_viewer_radar_provider.dart';
 import '../../features/radar/domain/repositories/radar_repository.dart';
 import '../../features/alerts/application/alert_preferences_controller.dart';
 import '../../features/alerts/application/local_rain_alert_coordinator.dart';
+import '../../features/alerts/application/remote_rain_alert_gateway.dart';
+import '../../features/alerts/data/chetiwa_alert_api.dart';
 import '../../features/monetization/domain/ads_repository.dart';
 import '../../features/monetization/domain/consent_repository.dart';
 import '../../features/monetization/application/saved_places_controller.dart';
 import '../../features/monetization/application/usage_quota_controller.dart';
 import '../../features/monetization/data/store_purchase_gateway.dart';
+import '../../features/monetization/data/chetiwa_radar_session_gateway.dart';
 import '../../features/monetization/data/google_ads_repository.dart';
 import '../../features/monetization/data/google_consent_repository.dart';
 import '../../features/monetization/domain/premium_entitlement.dart';
@@ -48,13 +55,17 @@ final class ChetiwaDependencies {
     required this.alertPreferencesController,
     required this.notificationPermissionGateway,
     required this.rainNotificationScheduler,
+    RainAlertNavigationController? rainAlertNavigationController,
+    this.remoteRainAlertGateway,
     required this.adsRepository,
     required this.consentRepository,
     required this.entitlementController,
     required this.savedPlacesController,
     required this.usageQuotaController,
     http.Client? client,
-  }) : _client = client;
+  }) : rainAlertNavigationController =
+           rainAlertNavigationController ?? RainAlertNavigationController(),
+       _client = client;
 
   factory ChetiwaDependencies.live() {
     final client = http.Client();
@@ -66,9 +77,25 @@ final class ChetiwaDependencies {
     final savedPlacesController = SavedPlacesController(
       entitlement: entitlementController,
     );
+    final api = ApiConfig.usesChetiwaBackend
+        ? ChetiwaApiClient(
+            baseUri: ApiConfig.requireChetiwaApiBaseUri(),
+            client: client,
+          )
+        : null;
     final usageQuotaController = UsageQuotaController(
       entitlement: entitlementController,
+      radarSessionGateway: api == null ? null : ChetiwaRadarSessionGateway(api),
     );
+    final rainAlertNavigationController = RainAlertNavigationController();
+    final remoteRainAlertGateway = api == null
+        ? null
+        : ChetiwaRemoteRainAlertGateway(
+            api: ChetiwaAlertApi(api),
+            messaging: FirebasePushMessagingGateway(
+              navigation: rainAlertNavigationController,
+            ),
+          );
     const weatherClock = SystemWeatherClock();
     const forecastCache = ForecastCacheDataSource(clock: weatherClock);
     const radarCache = RadarCacheDataSource(clock: weatherClock);
@@ -107,6 +134,8 @@ final class ChetiwaDependencies {
         notificationPermissionGateway:
             const SystemNotificationPermissionGateway(),
         rainNotificationScheduler: SystemRainNotificationScheduler(),
+        rainAlertNavigationController: rainAlertNavigationController,
+        remoteRainAlertGateway: remoteRainAlertGateway,
         adsRepository: adsRepository,
         consentRepository: consentRepository,
         entitlementController: entitlementController,
@@ -121,12 +150,8 @@ final class ChetiwaDependencies {
       );
     }
 
-    final api = ChetiwaApiClient(
-      baseUri: ApiConfig.requireChetiwaApiBaseUri(),
-      client: client,
-    );
     final backendForecast = ChetiwaForecastRepository(
-      api: api,
+      api: api!,
       cache: forecastCache,
     );
     final backendRadar = ChetiwaRadarRepository(api: api, cache: radarCache);
@@ -146,6 +171,8 @@ final class ChetiwaDependencies {
       notificationPermissionGateway:
           const SystemNotificationPermissionGateway(),
       rainNotificationScheduler: SystemRainNotificationScheduler(),
+      rainAlertNavigationController: rainAlertNavigationController,
+      remoteRainAlertGateway: remoteRainAlertGateway,
       adsRepository: adsRepository,
       consentRepository: consentRepository,
       entitlementController: entitlementController,
@@ -211,6 +238,7 @@ final class ChetiwaDependencies {
     AlertPreferencesController? alertPreferencesController,
     NotificationPermissionGateway? notificationPermissionGateway,
     RainNotificationScheduler? rainNotificationScheduler,
+    RemoteRainAlertGateway? remoteRainAlertGateway,
     AdsRepository? adsRepository,
     ConsentRepository? consentRepository,
     EntitlementController? entitlementController,
@@ -242,6 +270,7 @@ final class ChetiwaDependencies {
           FixtureNotificationPermissionGateway(),
       rainNotificationScheduler:
           rainNotificationScheduler ?? FixtureRainNotificationScheduler(),
+      remoteRainAlertGateway: remoteRainAlertGateway,
       adsRepository: adsRepository ?? const DisabledAdsRepository(),
       consentRepository: consentRepository ?? const DisabledConsentRepository(),
       entitlementController: entitlement,
@@ -263,6 +292,8 @@ final class ChetiwaDependencies {
   final AlertPreferencesController alertPreferencesController;
   final NotificationPermissionGateway notificationPermissionGateway;
   final RainNotificationScheduler rainNotificationScheduler;
+  final RainAlertNavigationController rainAlertNavigationController;
+  final RemoteRainAlertGateway? remoteRainAlertGateway;
   final AdsRepository adsRepository;
   final ConsentRepository consentRepository;
   final EntitlementController entitlementController;
@@ -270,13 +301,14 @@ final class ChetiwaDependencies {
   final UsageQuotaController usageQuotaController;
   final http.Client? _client;
 
-  LocalRainAlertCoordinator get localRainAlertCoordinator =>
+  late final LocalRainAlertCoordinator localRainAlertCoordinator =
       LocalRainAlertCoordinator(
         forecastRepository: forecastRepository,
         locationRepository: locationRepository,
         preferences: alertPreferencesController,
         scheduler: rainNotificationScheduler,
         clock: weatherClock,
+        remoteGateway: remoteRainAlertGateway,
       );
 
   void dispose() {
@@ -287,5 +319,7 @@ final class ChetiwaDependencies {
     savedPlacesController.dispose();
     usageQuotaController.dispose();
     activeLocationController.dispose();
+    rainAlertNavigationController.dispose();
+    unawaited(localRainAlertCoordinator.dispose());
   }
 }

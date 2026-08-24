@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:http/http.dart' as http;
 
@@ -69,16 +69,37 @@ final class RadarTileMetrics {
 final class RadarTileCache {
   static const _cacheSchemaVersion = 'v3';
   static const _maxProviderZoom = 10;
+  static const _smokeTestEnabled = bool.fromEnvironment(
+    'CHETIWA_RADAR_SMOKE_TEST',
+  );
+
+  /// Removes only Chetiwa's regenerable Radar tile cache before a smoke run.
+  /// Normal builds cannot invoke the deletion because the compile-time gate is
+  /// false.
+  static Future<bool> clearDiskCacheForSmokeTest() async {
+    if (!_smokeTestEnabled) return false;
+    final directory = Directory(
+      '${Directory.systemTemp.path}/chetiwa-radar-tiles-$_cacheSchemaVersion',
+    );
+    if (await directory.exists()) await directory.delete(recursive: true);
+    return true;
+  }
 
   RadarTileCache._({http.Client? client})
+    : this._withClient(
+        client ?? http.Client(),
+        _RadarSmokeController(enabled: _smokeTestEnabled),
+      );
+
+  RadarTileCache._withClient(http.Client delegate, this._smokeController)
     : metrics = RadarTileMetrics(),
-      _client = client ?? http.Client(),
+      _client = _RadarSmokeClient(delegate, _smokeController),
       _disk = BuiltInMapCachingProvider.getOrCreateInstance(
         // A versioned, app-specific directory prevents old responses (such
         // as an HTML error body cached as a tile) from surviving an upgrade.
         cacheDirectory:
             '${Directory.systemTemp.path}/chetiwa-radar-tiles-$_cacheSchemaVersion',
-        maxCacheSize: 64 * 1024 * 1024,
+        maxCacheSize: 128 * 1024 * 1024,
         overrideFreshAge: const Duration(hours: 6),
       ) {
     tileProvider = NetworkTileProvider(
@@ -96,24 +117,62 @@ final class RadarTileCache {
 
   final http.Client _client;
   final BuiltInMapCachingProvider _disk;
+  final _RadarSmokeController _smokeController;
   final RadarTileMetrics metrics;
+  final ValueNotifier<int> readyTileCount = ValueNotifier<int>(0);
+  ValueListenable<int> get simulatedFailureCount =>
+      _smokeController.failureCount;
   late final NetworkTileProvider tileProvider;
   late final MapCachingProvider _instrumentedDisk = _MetricsCachingProvider(
     delegate: _disk,
     metrics: metrics,
+    onValidTile: () => readyTileCount.value++,
+    smokeController: _smokeController,
   );
-  final Map<String, Future<void>> _prefetches = <String, Future<void>>{};
+  final Map<String, Future<bool>> _prefetches = <String, Future<bool>>{};
+  var _prefetchGeneration = 0;
 
-  void beginSession() => metrics.beginSession();
+  void beginSession() {
+    metrics.beginSession();
+    readyTileCount.value = 0;
+    _smokeController.resetFailures();
+  }
 
-  Future<void> prefetchNextFrames({
+  /// Arms one HTTP 502 for the physical-device smoke test. It is a no-op in
+  /// normal builds and therefore cannot alter production traffic accidentally.
+  bool simulateNext502ForSmokeTest() => _smokeController.arm();
+
+  /// Performs a smoke-only origin probe through the same guarded HTTP client
+  /// as visible tiles. This makes 502 recovery deterministic without treating
+  /// a legitimate pan-buffer cache hit as a failed network request.
+  Future<bool> fetchTileForSmokeTest(String url) async {
+    if (!_smokeTestEnabled) return false;
+    try {
+      final response = await _client
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 8));
+      return response.statusCode == 200 &&
+          isSupportedImageBytes(response.bodyBytes);
+    } on Object {
+      return false;
+    }
+  }
+
+  /// Invalidates speculative work for a viewport that is no longer visible.
+  /// HTTP package requests cannot be interrupted after they are sent, so the
+  /// bounded in-flight batch may finish; no later batch is started.
+  void cancelPrefetch() => _prefetchGeneration++;
+
+  Future<int> prefetchNextFrames({
     required MapCamera camera,
     required Iterable<String> frameTemplates,
-    int maxFrames = 2,
-    int maxTiles = 24,
+    int maxFrames = 1,
+    int maxTiles = 8,
+    bool completeOnFirstReady = false,
   }) async {
+    final generation = ++_prefetchGeneration;
     final templates = frameTemplates.take(maxFrames).toList(growable: false);
-    if (templates.isEmpty) return;
+    if (templates.isEmpty) return 0;
     final urls = TileViewport.visibleTileUrls(
       camera,
       templates,
@@ -121,10 +180,48 @@ final class RadarTileCache {
       maxTiles: maxTiles,
       maxZoom: _maxProviderZoom,
     );
-    await Future.wait(urls.map(_prefetchOne), eagerError: false);
+    // Two speculative requests are enough to make animation responsive while
+    // leaving connection/origin capacity for the current visible TileLayer.
+    var readyTiles = 0;
+    for (var index = 0; index < urls.length; index += 2) {
+      if (generation != _prefetchGeneration) return 0;
+      final end = math.min(index + 2, urls.length);
+      final operations = urls.sublist(index, end).map(_prefetchOne).toList();
+      if (completeOnFirstReady && await firstReady(operations)) {
+        return generation == _prefetchGeneration ? 1 : 0;
+      }
+      final results = completeOnFirstReady
+          ? const <bool>[]
+          : await Future.wait(operations, eagerError: false);
+      readyTiles += results.where((ready) => ready).length;
+    }
+    return generation == _prefetchGeneration ? readyTiles : 0;
   }
 
-  Future<void> _prefetchOne(String url) {
+  /// Resolves as soon as one operation succeeds. Slow siblings deliberately
+  /// continue warming the disk cache without delaying the visible repaint.
+  @visibleForTesting
+  static Future<bool> firstReady(Iterable<Future<bool>> operations) {
+    final pending = operations.toList(growable: false);
+    if (pending.isEmpty) return Future<bool>.value(false);
+    final completer = Completer<bool>();
+    var remaining = pending.length;
+    for (final operation in pending) {
+      operation
+          .then((ready) {
+            if (ready && !completer.isCompleted) completer.complete(true);
+          }, onError: (_, _) {})
+          .whenComplete(() {
+            remaining--;
+            if (remaining == 0 && !completer.isCompleted) {
+              completer.complete(false);
+            }
+          });
+    }
+    return completer.future;
+  }
+
+  Future<bool> _prefetchOne(String url) {
     final existing = _prefetches[url];
     if (existing != null) return existing;
     final operation = _downloadAndCache(url);
@@ -133,20 +230,22 @@ final class RadarTileCache {
     return operation;
   }
 
-  Future<void> _downloadAndCache(String url) async {
+  Future<bool> _downloadAndCache(String url) async {
     final cached = await _disk.getTile(url);
     if (cached != null &&
         !cached.metadata.isStale &&
         isSupportedImageBytes(cached.bytes)) {
       metrics.recordCacheLookup(url, hit: true);
-      return;
+      return true;
     }
     metrics.recordCacheLookup(url, hit: false);
     try {
-      final response = await _client.get(Uri.parse(url));
+      final response = await _client
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 8));
       if (response.statusCode != 200 ||
           !isSupportedImageBytes(response.bodyBytes)) {
-        return;
+        return false;
       }
       final bytes = Uint8List.fromList(response.bodyBytes);
       await _disk.putTile(
@@ -159,8 +258,10 @@ final class RadarTileCache {
         bytes: bytes,
       );
       metrics.recordDownload(url, bytes.length);
+      return true;
     } on Object {
       // The visible TileLayer remains the source of truth if prefetch fails.
+      return false;
     }
   }
 
@@ -195,16 +296,21 @@ final class _MetricsCachingProvider implements MapCachingProvider {
   const _MetricsCachingProvider({
     required this.delegate,
     required this.metrics,
+    required this.onValidTile,
+    required this.smokeController,
   });
 
   final MapCachingProvider delegate;
   final RadarTileMetrics metrics;
+  final VoidCallback onValidTile;
+  final _RadarSmokeController smokeController;
 
   @override
   bool get isSupported => delegate.isSupported;
 
   @override
   Future<CachedMapTile?> getTile(String url) async {
+    if (smokeController.shouldBypassCache) return null;
     final value = await delegate.getTile(url);
     if (value != null && !RadarTileCache.isSupportedImageBytes(value.bytes)) {
       metrics.recordCacheLookup(url, hit: false);
@@ -214,6 +320,7 @@ final class _MetricsCachingProvider implements MapCachingProvider {
       url,
       hit: value != null && !value.metadata.isStale,
     );
+    if (value != null) onValidTile();
     return value;
   }
 
@@ -225,8 +332,65 @@ final class _MetricsCachingProvider implements MapCachingProvider {
   }) async {
     if (bytes != null && !RadarTileCache.isSupportedImageBytes(bytes)) return;
     await delegate.putTile(url: url, metadata: metadata, bytes: bytes);
-    if (bytes != null) metrics.recordDownload(url, bytes.length);
+    if (bytes != null) {
+      metrics.recordDownload(url, bytes.length);
+      onValidTile();
+    }
   }
+}
+
+final class _RadarSmokeController {
+  _RadarSmokeController({required this.enabled});
+
+  final bool enabled;
+  final ValueNotifier<int> failureCount = ValueNotifier<int>(0);
+  bool _armed = false;
+
+  bool get shouldBypassCache => enabled && _armed;
+
+  bool arm() {
+    if (!enabled) return false;
+    _armed = true;
+    return true;
+  }
+
+  bool consumeFailure() {
+    if (!_armed) return false;
+    _armed = false;
+    failureCount.value++;
+    return true;
+  }
+
+  void resetFailures() {
+    _armed = false;
+    failureCount.value = 0;
+  }
+}
+
+final class _RadarSmokeClient extends http.BaseClient {
+  _RadarSmokeClient(this._delegate, this._controller);
+
+  final http.Client _delegate;
+  final _RadarSmokeController _controller;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    if (_controller.consumeFailure()) {
+      return Future<http.StreamedResponse>.value(
+        http.StreamedResponse(
+          const Stream<List<int>>.empty(),
+          502,
+          request: request,
+          headers: const <String, String>{'content-type': 'text/plain'},
+          reasonPhrase: 'Radar smoke-test failure',
+        ),
+      );
+    }
+    return _delegate.send(request);
+  }
+
+  @override
+  void close() => _delegate.close();
 }
 
 final class TileViewport {
@@ -252,18 +416,35 @@ final class TileViewport {
     final maxX = east.ceil() + margin;
     final minY = (north.floor() - margin).clamp(0, world - 1);
     final maxY = (south.ceil() + margin).clamp(0, world - 1);
+    final centerX = _longitudeToX(camera.center.longitude, world);
+    final centerY = _latitudeToY(camera.center.latitude, world);
+    final coordinates = <({int x, int y})>[];
+    for (var y = minY; y <= maxY; y++) {
+      for (var x = minX; x <= maxX; x++) {
+        coordinates.add((x: x, y: y));
+      }
+    }
+    // Load the tile under the crosshair first, then expand outwards. The old
+    // top-left scan could spend the complete first batch on pan-buffer tiles
+    // that were not actually visible to the user.
+    coordinates.sort((a, b) {
+      final aDistance =
+          math.pow(a.x + 0.5 - centerX, 2) + math.pow(a.y + 0.5 - centerY, 2);
+      final bDistance =
+          math.pow(b.x + 0.5 - centerX, 2) + math.pow(b.y + 0.5 - centerY, 2);
+      return aDistance.compareTo(bDistance);
+    });
     final tiles = <String>[];
     for (final template in templates) {
-      for (var y = minY; y <= maxY && tiles.length < maxTiles; y++) {
-        for (var x = minX; x <= maxX && tiles.length < maxTiles; x++) {
-          final wrappedX = ((x % world) + world) % world;
-          tiles.add(
-            template
-                .replaceAll('{z}', '$zoom')
-                .replaceAll('{x}', '$wrappedX')
-                .replaceAll('{y}', '$y'),
-          );
-        }
+      for (final coordinate in coordinates) {
+        if (tiles.length >= maxTiles) break;
+        final wrappedX = ((coordinate.x % world) + world) % world;
+        tiles.add(
+          template
+              .replaceAll('{z}', '$zoom')
+              .replaceAll('{x}', '$wrappedX')
+              .replaceAll('{y}', '${coordinate.y}'),
+        );
       }
       if (tiles.length >= maxTiles) break;
     }

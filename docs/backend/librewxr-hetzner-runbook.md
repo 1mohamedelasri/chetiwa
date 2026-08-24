@@ -49,9 +49,47 @@ radar terrestre là où LibreWXR ne dispose pas de composite radar natif.
    cd /opt/chetiwa/librewxr
    docker compose up --build -d
    curl --fail http://127.0.0.1:8080/health
+   curl --fail https://radar.ezplatforms.com/public/weather-maps.json
    ```
 
-7. Changer seulement ces variables dans le runtime du backend Chetiwa :
+   Les deux sondes sont obligatoires : une origine locale saine accompagnée
+   d'un `502` public identifie une panne du tunnel, pas de LibreWXR.
+
+7. Installer le watchdog seulement après réussite des deux sondes :
+
+   ```sh
+   sudo deploy/librewxr/install-health-watchdog.sh
+   systemctl list-timers chetiwa-radar-watchdog.timer
+   journalctl -u chetiwa-radar-watchdog.service -n 50 --no-pager
+   ```
+
+   Il attend trois échecs consécutifs. Si l'origine locale tombe, il redémarre
+   LibreWXR ; si seule l'URL publique tombe, il redémarre `cloudflared`. Un
+   cooldown de quinze minutes empêche toute boucle de redémarrage. Utiliser
+   [`cloudflared-config.yml.example`](../../deploy/librewxr/cloudflared-config.yml.example)
+   comme base du tunnel nommé, sans committer le fichier de credentials.
+   Le service `cloudflared` doit conserver `Restart=on-failure` et
+   `RestartSec=5s`. Une vraie haute disponibilité demandera ensuite une
+   seconde réplique `cloudflared` sur un autre hôte ; deux services sur la même
+   VM ne protègent pas contre la panne de cette VM.
+
+   La sonde automatique utilise le petit document
+   `/public/weather-maps.json`, pas `/health` : ce dernier calcule des
+   statistiques de cache volumineuses et peut dépasser plusieurs secondes sur
+   le worker unique sans que l'origine soit réellement en panne.
+
+   Pour mettre à niveau une installation existante vers le profil versionné
+   (6 Go, cache tuiles 256 Mo et watchdog corrigé), lancer depuis le Mac :
+
+   ```sh
+   deploy/librewxr/deploy-production-profile.sh root@116.203.124.254
+   ```
+
+   Le script recrée uniquement le conteneur LibreWXR avec son `.env`, réinstalle
+   le timer et vérifie les métadonnées locales/publiques. Il ne modifie ni les
+   credentials Cloudflare, ni le DNS, ni le pare-feu.
+
+8. Changer seulement ces variables dans le runtime du backend Chetiwa :
 
    ```text
    RADAR_METADATA_URL=https://radar.ezplatforms.com/public/weather-maps.json

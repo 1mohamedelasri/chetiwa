@@ -21,7 +21,6 @@ String localizedBriefDetail(
   ChetiwaLocalizations strings,
   WeatherBrief brief,
   DateTime nowUtc,
-  String timeZone,
 ) {
   if (strings.isFrench) return brief.detail;
   final intensity = switch (brief.intensity) {
@@ -37,7 +36,7 @@ String localizedBriefDetail(
     WeatherBriefType.raining =>
       brief.rainEnd == null
           ? '$intensity · uncertain duration'
-          : '$intensity · ending near ${WeatherTimeZone.hourMinute(brief.rainEnd!, timeZone)}',
+          : '$intensity · ending near ${WeatherTimeZone.displayHourMinute(brief.rainEnd!)}',
     WeatherBriefType.imminent => intensity,
   };
 }

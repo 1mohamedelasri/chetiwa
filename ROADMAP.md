@@ -1,734 +1,121 @@
-# Chetiwa — Roadmap vers une application prête pour la production
-
-> Objectif : publier une application météo fiable, conforme et économiquement
-> contrôlable sur l’App Store et Google Play, puis l’exploiter sans que les coûts
-> fournisseurs augmentent plus vite que les revenus.
-
-Cette roadmap transforme la [spécification produit](Chetiwa%20%E2%80%94%20Product%2C%20UX%2C%20Flutter%20Architecture%20%26%20Monetization%20Specification%20v2.md)
-en plan d’exécution. La [stratégie des fournisseurs](docs/data-provider-strategy.md)
-reste la référence technique détaillée pour les données météo.
-
-## Légende
-
-- ✅ Socle déjà présent et à conserver.
-- 🟡 Présent partiellement, à terminer ou durcir.
-- ⬜ À réaliser.
-- **Gate** : condition obligatoire avant de passer à la phase suivante.
-
-## Périmètre actif à compter du 2026-08-20
-
-Le travail actif porte sur la bêta locale-first : météo, Radar, recherche,
-choix sur carte, GPS à la demande, cache, qualité et conformité minimale. Les
-achats, la publicité, le satellite commercial et la synchronisation de compte
-restent **hors périmètre de la bêta**. Après validation des revenus, la seule
-intégration Firebase autorisée est **Firebase Analytics** (sans base de données,
-Functions, Storage, Remote Config, Crashlytics ni push). Les publicités passent
-directement par **AdMob / Google Mobile Ads**, qui ne requiert pas Firebase.
-
-## Principes non négociables
-
-1. Une ouverture doit donner rapidement une réponse météo compréhensible.
-2. Graph, Radar et Prévisions utilisent toujours le même lieu, le même fuseau
-   horaire et une chronologie cohérente.
-3. Une donnée observée, une prévision et une probabilité ne sont jamais
-   présentées comme si elles représentaient la même chose.
-4. La publicité ne recouvre jamais la météo ni un contrôle interactif.
-5. La localisation, les notifications, le tracking et la publicité personnalisée
-   sont demandés uniquement au moment où l’utilisateur en comprend la valeur.
-6. Aucune clé fournisseur secrète ne doit être embarquée dans l’application.
-7. Une fonctionnalité payante ou coûteuse doit pouvoir être désactivée à distance.
-8. Aucun lancement monétisé n’a lieu sans licence commerciale et attribution pour
-   chaque fournisseur utilisé.
-9. Aucune brique cloud ou fournisseur payant n'est un prérequis de la bêta : elle
-   est activée uniquement après le gate défini dans
-   [`ADR-0008`](docs/decisions/0008-lean-mvp-cost-gates.md).
-10. Firebase Analytics est facultatif, gratuit et ne doit jamais entraîner
-    l'activation implicite de produits Firebase facturables.
-
-## Cible fournisseurs : mode MVP frugal
-
-| Besoin | Développement actuel | Cible production | Règle de coût |
-| --- | --- | --- | --- |
-| Prévisions, Graph et Weather Brief | Open-Meteo | Fournisseur dont les droits correspondent au lancement choisi | Ne rien payer avant d'avoir validé le droit de bêta/public/monétisation et le coût maximal |
-| Radar animé | RainViewer | Contrat écrit seulement si une distribution publique l'exige | Limiter frames, zoom et sessions ; ne pas supposer que le prototype est commercial |
-| Fond de carte standard | CARTO/Esri | OpenFreeMap + MapLibre | Gratuit, attribution obligatoire, prévoir un repli car pas de SLA |
-| Fond satellite | Esri | Hors MVP | Ne l’activer qu’avec quota, budget et revenu Premium établi |
-| Recherche mondiale | Open-Meteo Geocoding | Proxy Chetiwa vers le fournisseur retenu | Cache, limitation et possibilité de remplacement |
-
-La cible est une décision de lancement, pas un couplage du domaine. Tous les
-fournisseurs restent derrière des repositories remplaçables. Le détail du mode
-sans coût fixe est dans [`docs/business/lean-mvp-cost-plan.md`](docs/business/lean-mvp-cost-plan.md).
-
----
-
-# Phase 0 — Gouvernance du produit et décisions
-
-**Statut : terminée le 2026-08-20.** Les décisions sont enregistrées dans
-[`docs/decisions`](docs/decisions/README.md) et restent révisables par un nouvel
-ADR explicite.
-
-## Livrables
-
-- ✅ Spécification produit/UX/architecture v2.
-- ✅ Stratégie initiale des fournisseurs de données.
-- ✅ Registre des décisions (`docs/decisions/`) créé pour :
-  - fournisseur météo ;
-  - fournisseur radar ;
-  - fond de carte ;
-  - backend/hébergement ;
-  - achats et gestion des droits Premium ;
-  - publicité et CMP ;
-  - analytics, crash reporting et notifications.
-- ✅ Matrice Chetiwa Free / Chetiwa+ définie dans
-  [`docs/product/free-premium-matrix.md`](docs/product/free-premium-matrix.md).
-- ✅ Pays, langues et périmètre initial fixés dans
-  [`docs/product/launch-scope.md`](docs/product/launch-scope.md).
-- ✅ KPI et budgets maximums définis dans
-  [`docs/business/kpi-budget-guardrails.md`](docs/business/kpi-budget-guardrails.md) : coût par utilisateur actif, coût radar,
-  coût carte, revenu publicitaire et revenu Premium net.
-- ✅ Registre fournisseur créé dans
-  [`docs/compliance/provider-register.md`](docs/compliance/provider-register.md)
-  avec licence, attribution, DPA, sous-traitants,
-  politique de rétention, prix et date de dernière vérification.
-
-## Gate 0
-
-- ✅ Le MVP est figé et les fonctionnalités hors MVP sont identifiées.
-- ✅ Chaque service externe possède un propriétaire, un budget et une solution de
-  repli documentée.
-
----
-
-# Phase 1 — Stabiliser le cœur météo existant
-
-## État actuel
-
-- ✅ Architecture Flutter par fonctionnalités, BLoC, repositories et injection.
-- ✅ Weather Brief, Graph 2 h/24 h, Radar et Prévisions.
-- ✅ Recherche mondiale, position courante, lieux récents et villes suggérées.
-- ✅ Cache disque stale-while-revalidate pour prévisions et métadonnées radar.
-- ✅ États fixtures et premiers tests unitaires/widgets.
-- 🟡 Expérience Android/iOS réelle, précision et résilience à finaliser.
-
-## Travaux
-
-- ✅ Unifier toutes les horloges à partir d’un `WeatherClock` testable :
-  - UTC pour stockage et échanges ;
-  - fuseau du lieu pour affichage ;
-  - gestion du changement d’heure et du passage à minuit.
-- ✅ Garantir une seule source de vérité pour la pluie entre Weather Brief, Graph,
-  Radar et Prévisions.
-- ✅ Distinguer explicitement : observation radar passée, estimation actuelle,
-  nowcast et prévision de modèle.
-- ✅ Finaliser les états chargement, cache, hors-ligne, données périmées, couverture
-  radar absente et fournisseur indisponible.
-- ✅ Ajouter une bannière non bloquante « données mises à jour il y a… » lorsque le
-  cache est ancien.
-- ✅ Vérifier Graph/Radar pour pluie nulle, faible, modérée, forte et épisodes
-  multiples avec les [scénarios météo de référence](docs/quality/weather-reference-scenarios.md).
-  La neige/mixte reste explicitement hors validation tant que le flux de tuiles
-  radar utilisé ne fournit pas un type d’hydrométéore distinct.
-- ✅ Tester plusieurs villes et fuseaux dans le monde avec la
-  [matrice mondiale des heures locales](docs/quality/world-time-zone-matrix.md),
-  y compris changement de date, décalage de 45 minutes et heure d’été dans les
-  deux hémisphères.
-- ✅ Vérifier le comportement réseau lent, coupé, intermittent et reprise après
-  mise en arrière-plan. Le protocole et les preuves sont consignés dans la
-  [matrice de préparation](docs/quality/app-readiness-matrix.md).
-- ✅ Finaliser thème clair/sombre, orientation, tailles d’écran et text scaling.
-  Les profils automatisés couvrent petit téléphone à 200 %, téléphone standard,
-  paysage compact et tablette.
-- ✅ Auditer toutes les chaînes et terminer l’internationalisation FR/EN, y
-  compris les textes dessinés dans les Graph/Radar et les erreurs de localisation.
-
-## Gate 1
-
-- ✅ `flutter analyze` et tous les tests passent.
-- ✅ Aucun écran météo principal ne devient vide après une première synchronisation.
-- ✅ Graph, Radar et Prévisions affichent le même lieu et des heures cohérentes.
-- ✅ Les cinq scénarios météo de référence sont validés visuellement sur iOS
-  Simulator et Android Emulator, sur Graph, Radar et Prévisions. Les 30
-  captures reproductibles sont archivées dans
-  [`docs/quality/screenshots`](docs/quality/screenshots), sans remplacer le
-  smoke test final sur appareils physiques avant publication.
-
----
-
-# Phase 2 — Backend Chetiwa optionnel et maîtrise des fournisseurs
-
-Le backend modulaire existe déjà mais n'est déployé que si un fournisseur de
-production impose un proxy ou un cache partagé. Il ne faut pas provisionner une
-base cloud, un moteur push ou Remote Config pour la bêta frugale.
-
-## API et infrastructure
-
-- 🟡 Créer les environnements local, staging et production :
-  - ✅ socle API conteneurisé, profil local exécutable et profils de
-    configuration staging/production sans secrets ;
-  - ⬜ **Après Gate coût** : provisionner seulement Cloud Run staging/production,
-    budget et compte de service ; garder `min-instances=0` et `max-instances=1`.
-    Firestore et Secret Manager ne sont ajoutés que lorsqu'ils deviennent requis.
-- 🟡 Implémenter une API versionnée :
-  - ✅ `GET /v1/forecast` ;
-  - ✅ `GET /v1/locations/search` ;
-  - ✅ `GET /v1/locations/reverse` ;
-  - ✅ `GET /v1/radar/frames` ;
-  - 🟡 `POST /v1/devices` et suppression du device : fondation terminée ;
-    volontairement non déployée tant que les alertes distantes ne franchissent pas
-    leur Gate ;
-  - 🟡 CRUD des règles d’alerte : fondation typée terminée ; persistance cloud et
-    moteur restent reportés après validation de l'utilité des alertes ;
-  - ⬜ validation/synchronisation des droits Premium.
-- ⬜ Stocker les secrets dans le gestionnaire de secrets de l’hébergeur.
-- ✅ Ajouter cache serveur, ETag, compression et stale-if-error : cache JSON
-  mémoire et cache binaire des tuiles avec `ETag`/`304`, gzip et repli stale-if-error.
-- 🟡 Cache CDN partagé et compteur distribué sont optionnels derrière
-  `SHARED_COUNTER_URL` ; le mode bêta reste sans Redis/Firestore/Cloud CDN,
-  avec une instance et un cache local. Le provisionnement ne se fait qu'après
-  mesure du trafic et validation du budget.
-- 🟡 Ajouter rate limiting par appareil/IP, protection anti-abus et quotas :
-  - ✅ limite locale par instance et par identifiant d'installation, avec repli
-    IP, réponse `429` et `Retry-After` ;
-  - 🟡 limite distribuée via compteur partagé, quotas par environnement et kill
-    switch pilotable livrés ; attestation d'application reste à ajouter.
-- 🟡 Ne jamais journaliser des coordonnées précises inutilement : les quatre
-  routes publiques actuelles n'en journalisent aucune et leurs clés de cache
-  arrondissent les coordonnées à trois décimales ; appliquer la même règle aux
-  futures routes devices/alertes et aux métriques.
-- ⬜ **Après activation d'une base** : migrations, sauvegardes et restauration.
-- ⬜ **Après Gate cloud** : feature flags distants ; avant cela, conserver des
-  limites locales et variables de déploiement documentées.
-
-## Migration fournisseurs
-
-- ✅ Basculer les prévisions mobiles vers le proxy Chetiwa avec contrats
-  normalisés, identifiant privé d'installation, `ETag` et cache disque SWR.
-- ✅ Basculer la recherche mondiale et le reverse geocoding vers le proxy
-  Chetiwa ; une position GPS brute reste utilisable si le libellé est indisponible.
-- 🟡 Basculer Radar vers le proxy Chetiwa : métadonnées et chronologie passent
-  par l'API ; les tuiles restent chargées depuis l'URL licenciée fournie par le
-  backend jusqu'à la décision proxy/CDN de production.
-- ✅ Interdire le fallback fournisseur direct en build production et imposer
-  une URL backend HTTPS ; le fallback reste opt-in en développement seulement.
-- ✅ Valider le parcours proxy sans fallback sur Android Emulator et iOS
-  Simulator pour Graph, Radar et Prévisions, puis compiler Android release et
-  iOS avec le profil production HTTPS. Protocole :
-  [`docs/backend/mobile-proxy-integration.md`](docs/backend/mobile-proxy-integration.md).
-- ⬜ Vérifier les droits exacts du fournisseur choisi avant chaque bêta publique,
-  publicité ou abonnement ; ne souscrire que si le gate est franchi.
-- ⬜ Remplacer RainViewer ou signer un contrat seulement si les droits de la
-  distribution publique l'imposent.
-- ⬜ Remplacer le fond principal par OpenFreeMap/MapLibre avec attribution.
-- ⬜ Garder Esri satellite désactivé par défaut et réservé à Chetiwa+.
-- 🟡 Limite locale de 24 frames par rafraîchissement, cache borné par lieu et
-  repli stale-if-error livrés. Restent les limites de zoom et préchargement de
-  tuiles après validation de la licence du fond de carte.
-- ✅ Écran « Sources et licences » accessible depuis Settings, avec attributions
-  et liens vers les conditions des sources actuellement visibles.
-- ✅ Gate de lancement public, registre fournisseur prudent et modèle d’archivage
-  des contrats/licences ajoutés dans `docs/compliance/`.
-
-## Observabilité et coûts
-
-- ✅ Monitoring des latences, erreurs, fraîcheur, cache hit rate, octets et tuiles
-  via `/internal/metrics`.
-- ✅ Alertes budget à 50 %, 75 % et 90 % et kill switch automatique au plafond.
-- 🟡 Tableau de bord externe coût/jour/utilisateur/session à raccorder aux métriques.
-- ✅ Budget mensuel, kill switch global et fallback stale-if-error implémentés.
-- ✅ Runbook de panne et bascule vers cache/fixture documentés.
-
-## Gate 2
-
-- Aucune clé payante n’est extractible de l’APK ou de l’IPA.
-- Le backend supporte une panne fournisseur sans rendre l’application inutilisable.
-- Les budgets et alertes de consommation sont testés en staging.
-- Les licences et attributions sont approuvées pour l’usage commercial prévu.
-
-## Phase 2A — Cache radar, quotas de tuiles et modèle gratuit/Premium
-
-**Statut : planifiée.** Cette phase décrit la stratégie frugale à mettre en
-place avant d'augmenter le trafic ou d'activer une monétisation publique. Le
-cache réduit les téléchargements et les coûts, mais ne remplace jamais la
-licence du fournisseur de données.
-
-### Cache et chargement des tuiles
-
-- ⬜ Conserver localement le dernier viewport par lieu : latitude, longitude,
-  zoom et date de dernière consultation.
-- 🟡 Le cache mémoire court des métadonnées est livré (2 minutes côté API) ; le
-  cache mémoire des tuiles reste à brancher.
-- ✅ Cache mémoire via l'ImageCache de `flutter_map` et cache disque natif borné
-  à 64 Mo, LRU, avec fraîcheur maximale de 6 heures.
-- ✅ Charger uniquement les tuiles visibles avec une marge `panBuffer/keepBuffer`
-  de 1 ; le zoom Radar est borné à 10 dans l'expérience actuelle.
-- ✅ Dédupliquer les requêtes concurrentes via l'ImageProvider et annuler les
-  chargements devenus invisibles avec `abortObsoleteRequests`.
-- 🟡 Politique mobile Free/Chetiwa+ livrée : 12/24 frames, zoom maximum 10/12,
-  et quotas backend configurables 20/200 sessions mensuelles avec kill switch.
-- ✅ Précharger au maximum 2 prochaines frames et 24 tuiles visibles par
-  événement de déplacement, sans précharger une région entière.
-- ✅ Mesurer `cache_hit_rate`, octets téléchargés, tuiles téléchargées et tuiles
-  uniques par session via `RadarTileMetrics`, sans coordonnées.
-
-### Cache partagé optionnel
-
-- ⬜ Après validation du volume, placer le proxy/CDN devant les tuiles et les
-  métadonnées radar avec des clés normalisées par fournisseur, frame, z/x/y.
-- ⬜ Ajouter `ETag`, `Cache-Control`, compression et `stale-if-error`.
-- ⬜ Commencer avec une instance à zéro et un budget mensuel plafonné ; ne pas
-  provisionner Firestore, Cloud Storage ou Functions sans besoin démontré.
-- 🟡 Kill switch radar et quotas par environnement livrés ; les alertes 50/75/90 %
-  et le compteur partagé multi-instance restent à réaliser.
-
-### Règles Free et Chetiwa+
-
-- ⬜ Free : une localisation principale, quelques villes favorites, zone locale
-  et zoom raisonnable, avec publicité.
-- ⬜ Chetiwa+ : villes et changements illimités, zoom régional/national,
-  historique radar étendu et suppression des publicités.
-- ⬜ Afficher la limite avant son application, avec compteur et heure de remise
-  à zéro ; ne jamais bloquer silencieusement le radar.
-- ⬜ Ne pas faire payer un zoom normal nécessaire à la compréhension de la
-  météo. Le Premium doit financer une valeur claire : plusieurs destinations,
-  historique ou couverture étendue.
-- ⬜ Ajouter les événements anonymes et opt-in : ouverture du radar, changement
-  de lieu, usage du cache et conversion Premium, sans coordonnées précises.
-
-### Conformité et lancement
-
-- ⬜ Vérifier par écrit que chaque fournisseur autorise tuiles, cache,
-  attribution, publicité et abonnement avant une bêta publique.
-- ⬜ Afficher les crédits et les liens de licence dans l'écran Sources.
-- ⬜ Tester 10 000, 30 000 et 40 000 utilisateurs actifs avec des seuils de
-  charge réalistes avant d'augmenter les quotas.
-- ⬜ Gate : aucun fournisseur payant ne doit être activé sans budget maximal,
-  estimation par utilisateur, métrique de cache et plan de repli.
-
-### Budget de planification (hors licence météo)
-
-Ces montants sont des ordres de grandeur pour cache/CDN/backend léger, pas un
-devis fournisseur :
-
-| Utilisateurs actifs | Requêtes origine après 90 % de cache* | Cache/CDN/backend estimé |
-| ---: | ---: | ---: |
-| 10 000 | 600 000/mois | 10–80 €/mois |
-| 30 000 | 1 800 000/mois | 30–180 €/mois |
-| 40 000 | 2 400 000/mois | 50–250 €/mois |
-
-\* Hypothèse : 20 sessions radar par mois et 30 tuiles visibles par session.
-La licence radar, le fond de carte commercial, les taxes et les commissions
-des stores sont exclus et doivent être ajoutés après vérification contractuelle.
-
----
-
-# Phase 3 — Localisation et choix direct sur la carte
-
-## Recherche et sélection
-
-- ✅ Recherche par ville/code postal, position actuelle et lieux récents.
-- ✅ Créer un écran plein écran « Choisir sur la carte ».
-- ✅ Afficher un repère fixe au centre ; la carte se déplace sous le repère.
-- ✅ Pendant le déplacement, afficher un libellé temporaire sans lancer des appels
-  réseau à chaque pixel.
-- 🟡 Au relâchement, effectuer un reverse geocoding avec debounce : le proxy
-  Chetiwa résout ville/région quand il est actif ; sans proxy, l'application
-  confirme le point et ses coordonnées sans ajouter de fournisseur.
-- ✅ Boutons : « Ma position », « Rechercher », « Confirmer ce lieu » et annuler.
-- ✅ Afficher ville, région, pays et coordonnées si aucune adresse n’est trouvée.
-- 🟡 Associer correctement fuseau horaire, locale et unité au lieu choisi : le
-  fuseau vient déjà du fournisseur, la langue est persistée et le choix
-  Celsius/Fahrenheit est désormais persistant et appliqué aux résumés, cartes
-  horaires et quotidiennes.
-- ✅ Mettre à jour Graph, Radar, Prévisions et alertes avec un objet `Location`
-  unique et immuable : le lieu actif est partagé en mémoire et le lieu principal
-  persiste localement ; les alertes locales affichent ce même lieu.
-
-## GPS et permissions
-
-- ✅ Demander uniquement la localisation « pendant l’utilisation » après action.
-- ✅ Gérer : refus temporaire, refus permanent, service GPS coupé, timeout,
-  précision faible et dernière position connue. Une position réduite ou la
-  dernière position connue est explicitement signalée à l'utilisateur.
-- ✅ Proposer l’ouverture des réglages système lorsque nécessaire.
-- ✅ Ne pas demander la localisation en arrière-plan pour le MVP.
-- ✅ Permettre de supprimer les lieux récents et désactiver la position courante :
-  les récents se suppriment par glissement ; la position GPS est ponctuelle,
-  n'est ni enregistrée ni suivie en arrière-plan.
-- ✅ Tests widget automatisés des cas permission bloquée, GPS désactivé,
-  localisation approximative et dernière position connue, y compris l’action de
-  récupération adaptée.
-
-## Lieux enregistrés
-
-- ✅ Free : un lieu principal, enregistré uniquement sur l'appareil et
-  remplaçable depuis Préférences par recherche mondiale, GPS ou choix sur la
-  carte. Le lieu consulté ponctuellement ne remplace plus ce lieu principal.
-- ⬜ Chetiwa+ : plusieurs lieux nommés (Maison, Travail, etc.).
-- ⬜ Réordonner, renommer, supprimer et choisir le lieu par défaut.
-- ⬜ Configurer les alertes séparément pour chaque lieu.
-
-## Gate 3
-
-- L’utilisateur peut obtenir une météo sans donner sa localisation.
-- Recherche, GPS et choix sur carte produisent exactement le même modèle de lieu.
-- Les parcours refus de permission et GPS désactivé sont testés sur iOS/Android.
-
-**Prochaine vérification manuelle (sans coût) :** exécuter cette matrice sur un
-iPhone et un Android physiques avant la bêta : permission refusée puis accordée,
-GPS désactivé, localisation approximative, timeout, dernière position connue,
-et sélection d'un lieu sans accorder l'accès GPS.
-
----
-
-# Phase 4 — Smart Rain Alerts et notifications (après validation produit)
-
-## Expérience utilisateur
-
-- ✅ Afficher un écran explicatif avant le popup système.
-- ✅ Demander l’autorisation uniquement quand l’utilisateur active une alerte.
-- 🟡 Proposer : délai avant pluie, intensité minimale, lieux, heures silencieuses et
-  activation/désactivation globale : délai, seuil, quiet hours, lieu principal
-  et interrupteur global sont terminés localement ; les alertes multi-lieux
-  restent réservées à Chetiwa+.
-- ⬜ Permettre d’ouvrir directement le bon lieu et la bonne timeline depuis la
-  notification.
-- 🟡 Afficher l’état exact : autorisée ou bloquée par le système est affiché ;
-  refus explicite et token invalide attendent APNs/FCM et le backend persistant.
-- ✅ Préparer le client Flutter typé pour enregistrer/supprimer un device et
-  créer, lire, modifier ou supprimer ses règles via l’API Chetiwa.
-
-## Décision MVP
-
-- ✅ Programmer réellement sur iOS et Android la prochaine alerte pluie locale
-  du lieu principal à partir de la prévision Open-Meteo, avec délai, seuil et
-  heures silencieuses. La programmation est resynchronisée à la modification
-  des réglages et quand l'application revient au premier plan ; une alerte déjà
-  programmée peut sonner lorsque l'application est fermée.
-- ✅ Conserver le MVP sans Firebase Messaging ni moteur serveur : si
-  l'application reste fermée et que la prévision change après la dernière
-  synchronisation, aucune nouvelle donnée ne peut être téléchargée en continu.
-  Cette limite doit rester explicite et ne pas être présentée comme une alerte
-  temps réel garantie.
-- ⬜ Débloquer cette phase seulement après quatre semaines de bêta, une mesure de
-  précision en mode silencieux et un plafond de coût par alerte validé.
-
-## Infrastructure push — reportée derrière Gate
-
-- ⬜ Configurer APNs, Firebase Cloud Messaging et environnements staging/prod.
-- 🟡 Enregistrer et renouveler les tokens sans les associer à plus de données que
-  nécessaire : contrat sécurisé et stockage local/test terminés ; APNs/FCM et
-  Firestore restent à brancher.
-- 🟡 Supprimer le token à la désactivation ou à la demande de suppression :
-  suppression API en cascade terminée ; persistance cloud à valider.
-- ⬜ Construire le moteur d’alertes serveur à partir du nowcast.
-- ⬜ Dédupliquer les alertes d’un même épisode de pluie.
-- ⬜ Ajouter cooldown, anti-spam, quiet hours et limites par appareil/lieu.
-- ⬜ Recalculer lorsque la prévision change significativement.
-- ⬜ Ne jamais dépendre d’un processus Flutter en arrière-plan pour garantir une
-  alerte.
-- ⬜ Instrumenter envoi, livraison lorsque disponible, ouverture et désactivation.
-
-## Qualité des alertes
-
-- ⬜ Constituer un jeu de cas réels et mesurer faux positifs, faux négatifs et écart
-  entre heure annoncée et pluie observée.
-- ⬜ Lancer d’abord en mode interne silencieux pour comparer sans notifier.
-- ⬜ Déployer par pays/zone de couverture radar avec feature flag.
-- ⬜ Afficher une formulation prudente lorsque la confiance est faible.
-
-## Gate 4
-
-- Aucune notification en double pendant les scénarios de charge et de retry.
-- Désactiver les alertes empêche tout nouvel envoi.
-- La suppression d’un appareil supprime token et règles associées.
-- Les seuils de qualité météo définis en Phase 0 sont atteints.
-
----
-
-# Phase 5 — Monétisation contrôlée (une seule voie au départ)
-
-## Offre et paywall
-
-- ⬜ Après validation de la rétention, choisir une seule première voie : Premium
-  **ou** publicité. Ne pas intégrer les deux SDK avant d'avoir la réponse.
-- ⬜ Finaliser Free/Chetiwa+ et les prix à tester si Premium est retenu.
-- ⬜ Chetiwa Free reste utile : Brief, Graph, Radar essentiel et un lieu.
-- ⬜ Chetiwa+ : pas de pub, Smart Alerts, multi-lieux, satellite et Radar étendu.
-- ⬜ Ne pas afficher le paywall au premier lancement.
-- ⬜ Présenter le Premium au moment d’une intention claire, par exemple « Me
-  prévenir avant cette pluie ».
-- ⬜ Afficher prix local, période, renouvellement, essai éventuel et conditions.
-- ⬜ Implémenter restaurer les achats et gérer pending, grace period, remboursement,
-  révocation, expiration et changement d’appareil.
-
-## Achats
-
-- ⬜ Conserver `SubscriptionRepository` indépendant de StoreKit/Google Billing.
-- ⬜ Choisir et documenter : service géré d’entitlements ou validation serveur
-  directe des reçus Apple/Google.
-- ⬜ Créer les produits dans App Store Connect et Play Console.
-- ⬜ Vérifier les droits côté serveur ; l’UI locale seule ne fait jamais foi.
-- ⬜ Recevoir les notifications serveur Apple/Google pour renouvellements,
-  remboursements et révocations.
-- ⬜ Tester tous les scénarios avec comptes sandbox.
-
-## Publicité
-
-- ✅ `google_mobile_ads` est intégré derrière `AdsRepository`, avec identifiants
-  vides par défaut et identifiants de test natifs pour éviter toute requête réelle
-  accidentelle.
-- ✅ UMP est intégré derrière `ConsentRepository` : mise à jour à chaque lancement,
-  formulaire si requis, `canRequestAds()` avant chaque bannière et fermeture
-  par défaut en cas d’erreur.
-- ✅ Le slot réservé entre contenu et navigation charge une bannière uniquement
-  après consentement ; aucun interstitiel ni rafraîchissement de scrub.
-- ✅ Le slot est supprimé avant initialisation AdMob pour Chetiwa+.
-- ✅ Settings expose la modification des préférences publicitaires.
-- ⬜ Configurer le compte AdMob, les messages UMP, les vrais App IDs et les
-  unités de production ; procédure : `docs/monetization/admob-setup.md`.
-- ⬜ Valider RGPD/ePrivacy, ATT iOS, App Privacy et Data Safety avant lancement.
-
-## Mesure produit — Firebase Analytics uniquement (facultatif)
-
-- 🟡 Firebase Core et Firebase Analytics sont configurés pour iOS/Android, avec
-  collecte désactivée par défaut et un choix local, explicite et réversible dans
-  Réglages. Après la bêta, limiter les événements aux usages essentiels et, si
-  AdMob est actif, rapprocher revenus publicitaires et parcours produit.
-- 🟡 Les événements anonymes MVP sont limités au changement d’onglet, lancement
-  d’une recherche de lieu, sélection de lieu (source seulement) et changement
-  d’alerte. Ne pas envoyer d’adresse, de coordonnées précises, de texte saisi,
-  de valeur météo ni d’identifiant publicitaire. Ajouter publicité et
-  achat/restauration seulement si ces produits sont réellement activés.
-- 🟡 Le choix Analytics est recueilli localement avant activation ; compléter la
-  politique de confidentialité et les déclarations App Store/Play avec le
-  comportement final avant une distribution externe.
-- ⬜ Rester sur les produits Analytics gratuits : ne pas activer Firestore, Realtime
-  Database, Cloud Functions, Cloud Storage, FCM, Remote Config, Crashlytics ou
-  tout produit Google Cloud sans nouvelle décision, budget et plafond de coût.
-
-## Protection économique
-
-- ⬜ Mesurer revenu et coût par utilisateur Free/Premium.
-- ⬜ Si Firebase Analytics est activé, lier AdMob à Firebase uniquement pour lire
-  les métriques agrégées ; cette liaison reste facultative et ne change pas
-  l'intégration publicitaire dans l'application.
-- ⬜ Fixer un plafond de frames Radar et requêtes par session Free.
-- ⬜ Rendre le satellite disponible uniquement lorsque les revenus couvrent son
-  coût avec marge de sécurité.
-- ⬜ Ne pas activer la voie retenue tant que les licences de données et les coûts
-  maximums sont compatibles avec la distribution envisagée.
-
-## Gate 5
-
-- Achats, restauration, expiration et remboursement fonctionnent sur les deux
-  stores en sandbox.
-- Un utilisateur Premium ne reçoit ni publicité ni tracking publicitaire.
-- Les coûts estimés restent sous les plafonds pour trois scénarios de croissance.
-
----
-
-# Phase 6 — Confidentialité, légal et sécurité
-
-## Confidentialité et conformité
-
-- 🟡 Rédiger et publier Politique de confidentialité et Conditions d’utilisation :
-  brouillons bêta et écrans in-app terminés ; URL publique, identité légale et
-  revue compétente restent obligatoires avant distribution externe.
-- ⬜ Expliquer clairement l’usage de : localisation, notifications, identifiants
-  publicitaires, analytics, crash logs, achats et lieux enregistrés.
-- 🟡 Inventaire MVP local-first rédigé dans
-  [`docs/compliance/data-inventory.md`](docs/compliance/data-inventory.md) :
-  finalité, stockage, rétention et suppression sont couverts. Restent les bases
-  légales, destinataires/pays et la mise à jour obligatoire avant tout SDK ou
-  service externe.
-- ⬜ Signer/archiver les DPA nécessaires avec les sous-traitants.
-- ⬜ Définir des durées de rétention courtes et une purge automatique.
-- 🟡 Le MVP sans compte propose maintenant l'effacement des lieux, caches et
-  préférences locales, alertes et identifiant d'installation depuis Réglages.
-  Export/suppression côté serveur seront requis uniquement si un compte ou
-  stockage cloud est ajouté.
-- ⬜ Fournir une adresse de contact confidentialité/support (à choisir par le
-  propriétaire avant publication).
-- ⬜ Remplir Apple Privacy Nutrition Labels et Google Play Data Safety à partir du
-  comportement réel de l’application.
-- ⬜ Vérifier RGPD/ePrivacy, consentement publicitaire, ATT iOS si tracking et règles
-  applicables aux pays de lancement avec un conseil juridique compétent.
-- ⬜ Choisir explicitement l’audience d’âge ; ne pas déclarer une application enfant
-  sans implémenter les obligations correspondantes.
-
-## Sécurité
-
-- 🟡 Modèle de menace MVP local-first documenté dans
-  [`docs/security/threat-model-mvp.md`](docs/security/threat-model-mvp.md) ; à
-  réviser obligatoirement avant ajout de compte, achat, publicité, push ou cloud.
-- ⬜ TLS partout, secrets hors mobile, rotation des clés et séparation staging/prod.
-- ⬜ Restreindre les tokens fournisseurs par service/origine lorsque possible.
-- ⬜ Valider toutes les entrées API et limiter tailles, fréquences et coordonnées.
-- ⬜ Chiffrer les données sensibles au repos et réduire la précision stockée.
-- 🟡 Analyse statique dans CI et mises à jour hebdomadaires via Dependabot ; un
-  scan des dépendances et une procédure de correction restent à formaliser avant
-  release candidate.
-- ⬜ Préparer réponse aux incidents, révocation de clés et notification de violation.
-- ⬜ Effectuer une revue sécurité avant release candidate.
-
-## Gate 6
-
-- Les déclarations stores correspondent exactement aux SDK et données réels.
-- Un parcours utilisateur permet de modifier les consentements et supprimer les
-  données concernées.
-- Aucun secret ou identifiant de test n’est présent dans les builds de production.
-
----
-
-# Phase 7 — Qualité industrielle et CI/CD
-
-## Tests automatisés
-
-- ✅ Premiers tests providers, cache, horloge, localisation et navigation.
-- ⬜ Atteindre une couverture utile des règles domaine et BLoCs critiques.
-- ✅ Tests contractuels et fixtures enregistrées pour Open-Meteo, RainViewer et
-  le contrat normalisé du backend Chetiwa.
-- 🟡 Goldens de référence : Graph en thème sombre et clair avec nom de lieu long,
-  Radar sans tuiles distantes, Prévisions et indisponibilité de données. Restent
-  les états carte distante, tous les formats écran et la revue humaine des images.
-- 🟡 Tests d’intégration : les parcours critiques sélection de ville ou sur carte
-  → Graph → Radar → Prévisions sont automatisés avec fixtures et validés sur
-  Android Emulator et iOS Simulator. Restent à couvrir onboarding, alertes,
-  achat, restauration et consentement lorsque ces dernières fonctions franchiront
-  leur gate produit.
-- ✅ Tests backend : device privé, validation, rate limits, cache/ETag,
-  stale-if-error et CRUD d'alertes local de développement. L'authentification
-  distribuée et les alertes distantes restent hors MVP.
-- ⬜ Tests end-to-end sur au moins deux appareils iOS et deux Android représentatifs.
-
-## Performance et robustesse
-
-- ⬜ Mesurer cold start, temps jusqu’au premier Brief, FPS carte/graph et mémoire.
-- ⬜ Profiler consommation batterie, données mobiles et stockage cache.
-- ✅ Cache local borné : les caches Forecast et Radar conservent au plus huit
-  lieux récemment utilisés chacun et évacuent le moins récent.
-- 🟡 Zones tactiles principales couvertes par les composants Material ; les
-  animations non essentielles respectent désormais « Réduire les animations ».
-  Une vérification tactile simple sur appareils physiques reste à réaliser.
-- 🟡 Résilience réseau automatisée (coupure, reprise, cache et panne fournisseur)
-  couverte ; les essais 3G, économie d’énergie et appareils bas de gamme restent
-  manuels avant bêta externe.
-
-## CI/CD
-
-- 🟡 Pipeline GitHub Actions ajouté : format, analyse et tests Flutter/Dart, tests
-  contractuels du backend et build Android debug sur chaque push/PR, avec APK de
-  revue conservé 7 jours. Le build iOS signé reste à brancher après création du
-  compte Apple et des certificats.
-- ⬜ Signature et secrets uniquement dans le système CI sécurisé.
-- 🟡 Génération reproductible des builds, numéros de version et changelog :
-  version visible depuis le package installé et métadonnées de release
-  documentées ; automatisation CI et distribution bêta restent à faire.
-- ⬜ Distribution automatique vers TestFlight et Play Internal Testing.
-- ⬜ Crash reporting et symboles/dSYM/proguard mappings correctement envoyés.
-
-## Gate 7
-
-- Zéro erreur bloquante connue, aucun crash reproductible critique.
-- Objectifs de performance et robustesse atteints.
-- Un release candidate peut être reconstruit et distribué depuis CI uniquement.
-
----
-
-# Phase 8 — Préparation App Store et Google Play
-
-## Identité et contenu
-
-- 🟡 Identifiant technique aligné sur `com.ezplatforms.chetiwa` pour iOS et
-  Android ; valider ce même identifiant dans App Store Connect, Play Console,
-  les domaines et les éléments de marque avant la première publication.
-- ⬜ Finaliser icône, splash, captures, vidéo éventuelle et textes localisés.
-- ⬜ Créer URL support, confidentialité, conditions et page marketing.
-- ⬜ Préparer FAQ : précision météo, radar, alertes, achats et suppression.
-
-## Configuration stores
-
-- ⬜ Comptes développeur, contrats, fiscalité et coordonnées bancaires.
-- ⬜ Certificats iOS, profils, clés APNs et signature Android protégés.
-- ⬜ App Privacy, Data Safety, content rating et déclarations publicitaires.
-- ⬜ Export compliance/chiffrement et permissions justifiées.
-- ⬜ Métadonnées et captures de chaque abonnement/in-app purchase.
-- ⬜ Comptes de review ou parcours sans compte, instructions Radar/Alerts/Premium.
-- ⬜ Vérifier suppression de compte dans l’app si un compte est ajouté plus tard.
-
-## Gate 8
-
-- TestFlight et Play Closed Testing installables depuis une installation propre.
-- Liens légaux publics et formulaires stores finalisés.
-- Les reviewers peuvent tester les achats, restaurer et comprendre les permissions.
-
----
-
-# Phase 9 — Bêta, validation météo et lancement
-
-## Bêta
-
-- ⬜ Alpha équipe sur plusieurs villes et événements de pluie réels.
-- ⬜ Bêta fermée avec utilisateurs externes et canal de feedback dans l’app.
-- ⬜ Comparer régulièrement Chetiwa à observations locales et sources de référence,
-  sans chercher à reproduire exactement la palette d’une autre application.
-- ⬜ Mesurer activation, D1/D7, ouverture Graph/Radar, qualité perçue et coûts.
-- ⬜ Corriger les cinq principaux motifs d’abandon/crash avant lancement.
-- ⬜ Tester le moteur d’alertes en mode silencieux puis sur petit groupe.
-
-## Lancement progressif
-
-- ⬜ Publier d’abord sur un nombre limité de pays.
-- ⬜ Déploiement progressif avec arrêt automatique si crashs, erreurs ou coûts
-  dépassent les seuils.
-- ⬜ Support et runbook disponibles le jour du lancement.
-- ⬜ Ne lancer les publicités qu’après validation du consentement en production.
-- ⬜ Ne lancer Chetiwa+ qu’après validation des achats et entitlements en production.
-
-## Gate 9 — Definition of Done v1
-
-- L’utilisateur obtient une réponse météo utile avec recherche, GPS ou choix carte.
-- Graph, Radar, Prévisions et notifications restent cohérents.
-- Le hors-ligne et une panne fournisseur ont un comportement compréhensible.
-- Les permissions sont contextuelles et révocables.
-- Les achats/restaurations fonctionnent et Premium ne contient aucune publicité.
-- Licences, attributions, confidentialité et déclarations stores sont à jour.
-- Les coûts sont monitorés, plafonnés et associés à des métriques de revenu.
-- Les équipes peuvent diagnostiquer, désactiver et restaurer chaque service critique.
-
----
-
-# Phase 10 — Exploitation après lancement
-
-- ⬜ Revue quotidienne crashs, erreurs fournisseurs, alertes push et dépenses la
-  première semaine ; hebdomadaire ensuite.
-- ⬜ Suivre installations, activation, D1/D7/D30, Weekly Weather Decisions,
-  conversion Premium, churn et revenu par utilisateur.
-- ⬜ Suivre la qualité météo par région et désactiver les zones insuffisantes.
-- ⬜ Répondre aux avis stores et tickets support avec SLA interne.
-- ⬜ Mettre à jour mensuellement dépendances et trimestriellement licences/DPA.
-- ⬜ Tester sauvegarde/restauration et procédure incident régulièrement.
-- ⬜ Ajuster prix et limites uniquement à partir des coûts et cohortes réelles.
-- ⬜ Ajouter ensuite widgets, synchronisation de compte et nouvelles couches météo
-  seulement si le cœur v1 est stable et rentable.
-
-## Ordre d’exécution immédiat
-
-1. Exécuter la matrice déjà préparée pour « Choisir sur la carte » et les
-   permissions GPS sur appareils physiques iOS/Android — sans nouveau
-   fournisseur payant.
-2. Réaliser une bêta fermée locale-first, sans publicité, achat, satellite ni
-   alerte distante, puis mesurer quatre semaines de rétention, fiabilité et
-   trafic radar.
-3. Vérifier les droits et chiffrer le coût réel du **seul** fournisseur nécessaire
-   au prochain niveau de distribution ; activer un proxy Cloud Run seulement si
-   cette licence l'impose.
-4. Décider une seule voie de revenus, la valider en sandbox, puis activer les
-   alertes serveur uniquement si son coût et sa précision sont justifiés.
-5. Terminer confidentialité, sécurité, CI/CD et dossiers stores selon les SDK
-   réellement activés.
-6. Lancer progressivement avec plafonds et kill switches, puis ajouter les
-   options coûteuses seulement si le revenu et l'usage les financent.
-
-La priorité reste toujours la même : une météo cohérente et utile avant la
-monétisation, puis une monétisation dont le revenu couvre les coûts variables.
+Verdict
+GO technique pour une bêta contrôlée après déploiement des profils versionnés. Les P0 applicatifs Graph/Radar sont corrigés et testés sur Android et iPhone. Un lancement public avec SLA reste NO-GO tant que le tunnel Cloudflare, le cache LibreWXR réellement déployé et les métriques de latence froide ne sont pas stabilisés.
+Le 23 août 2026, l’URL publique LibreWXR a renvoyé cinq `502` consécutifs alors que les fonds Esri répondaient en 70–120 ms, puis elle est revenue en `200`. Cette intermittence confirme le besoin du watchdog. Après récupération, Paris chaud répondait en 37–44 ms (`CF-Cache-Status: HIT`) ; une première tuile Sierra Leone froide a demandé 5,53 s (`MISS`), puis 40 ms (`HIT`).
+Le 24 août, cinq sondes métadonnées sur cinq répondaient en 61–144 ms, mais `/health` montrait toujours un seul worker, 64 Mo de cache, seulement 19 minutes d’uptime, 0 % de hit interne sur l’instance redémarrée et 6,23 s de latence moyenne par tuile. Le client est prêt ; l’exploitation ne l’est pas encore pour un SLA public.
+
+## Roadmap production — Smart Rain Alerts sans compte
+
+**Objectif :** prévenir avant la pluie sur Android et iPhone, même lorsque
+l’application est fermée, sans compte Chetiwa. Budget cible à 50 000 appareils :
+**25 €/mois**, arrêt automatique du moteur à **50 €/mois**. FCM/APNs reste à
+0 € par message ; les dépenses concernent uniquement calcul, stockage et données.
+
+### P0 — obligatoire avant la production
+
+| Ordre | Livrable minimal | Critère de fin |
+| --- | --- | --- |
+| **N0.1 — implémenté dans le code** | `firebase_messaging`, auto-init après opt-in seulement, renouvellement/suppression du token, présentation au premier plan, handler arrière-plan, canal Android, capability/entitlements APNs et permission iOS. | Builds Android/iOS réussis. Reste à téléverser la clé APNs dans Firebase et recevoir un vrai push en premier plan, arrière-plan et après fermeture normale sur les deux appareils. |
+| **N0.2 — implémenté** | Identifiant aléatoire par installation déjà partagé avec l’API ; envoi de `platform`, token, langue, fuseau du téléphone et version de l’app ; aucun compte/e-mail/identifiant publicitaire. Désactivation et suppression locale révoquent token et règles, avec retry persistant. | Tests d’enregistrement anonyme, fallback sans autorisation et suppression réussis ; token/hash absents des réponses. Validation réinstallation physique encore à effectuer. |
+| **N0.3 — implémenté dans le code** | Adaptateur Firestore par hash d’installation, sous-collection d’alertes, suppression atomique, TTL 180 jours, ADC Cloud Run, règles sans accès mobile et script IAM/TTL. Redis reste exclu. | Persistance après recréation du store, isolation et cascade testées. Reste à créer la base staging/production et exécuter `backend/deploy/firestore/provision-alert-store.sh`. |
+| **N0.4 — implémenté dans le code** | Binaire Cloud Run Job et Scheduler 5 minutes ; cellules stables de `0,05°`, concurrence bornée, une requête LibreWXR par cellule avec repli Open-Meteo ; lease Firestore de 10 minutes contre les exécutions concurrentes/at-least-once. | Mutualisation et second passage idempotent testés. Reste à déployer le job staging avec `RAIN_ALERTS_ENABLED=true` et mesurer sa p95 avec le nombre réel de cellules. |
+| **N0.5 — implémenté** | Passage `sec → pluie prévue`, seuil/délai choisis, identifiant déterministe appareil+règle+épisode, cooldown 120 minutes, réalerte uniquement lors du passage à forte, quiet hours dans le fuseau du téléphone et plafond 6/jour local. | Même épisode sans doublon et quiet hours testés. Reste le mode silencieux 48 h pour mesurer faux positifs et retard sur données réelles. |
+| **N0.6 — implémenté dans le code** | Outbox Firestore dédupliquée ; FCM HTTP v1 par ADC ; TTL/collapse 30 minutes ; retry exponentiel `429/5xx` ; token `UNREGISTERED` désactivé ; payload sans secret avec lieu, intensité, heure locale et `eventId`. Un toucher ouvre Radar au lieu du push, y compris après cold start. | Payload, retry, nettoyage du token et navigation mobile testés. Reste à activer FCM/APNs et valider un vrai push Android/iPhone en premier plan, arrière-plan et app fermée. |
+| **N0.7 — implémenté** | Tant que l’enregistrement distant n’a jamais réussi, conserver l’alerte locale. Après le premier succès, une panne temporaire conserve la propriété distante et annule le local ; retour local uniquement après désactivation distante explicite. | Scénarios avant/après inscription testés : panne initiale avec fallback local, panne de refresh sans doublon, désactivation persistante. |
+| **N0.8 — implémenté dans le code** | Shadow mode sans FCM, contrôle distant Firestore `engineEnabled/sendEnabled`, métriques agrégées avec TTL 30 jours et logs sans token/coordonnées ; dashboard Cloud Monitoring ; budget projet à 25 €/50 € via Cloud Billing Pub/Sub, endpoint privé et coupure persistante du moteur à 50 €. | Tests shadow, parsing du schéma Billing, messages dupliqués/hors ordre et hard cutoff réussis. Reste à exécuter les scripts cloud, vérifier l’e-mail à 25 €, le dashboard et une coupure staging à 50 € simulée. |
+
+### Validation et lancement rapide
+
+1. **Jours 1–2 :** N0.1 à N0.3, push manuel de bout en bout et persistance.
+2. **Jours 3–5 :** N0.4 à N0.7, moteur, déduplication et navigation depuis le push.
+3. **Jours 6–7 :** tests automatiques et appareils physiques : premier plan,
+   arrière-plan, fermeture normale, redémarrage, hors ligne, permission refusée,
+   token renouvelé et changement de fuseau. Documenter que « Forcer l’arrêt »
+   Android peut bloquer les push jusqu’à la réouverture.
+4. **Jours 8–10 :** mode silencieux sans envoi pendant au moins 48 h ; comparer
+   chaque alerte proposée avec Graph/Radar et corriger faux positifs, retard et
+   doublons.
+5. **Rollout :** équipe interne → 100 appareils → 1 000 → 10 % → 100 %.
+   Attendre 24 h sans régression entre les paliers ; retour immédiat au palier
+   précédent via kill switch.
+
+### Gate GO production
+
+- p95 du job inférieur à 60 s et push synthétique reçu en moins de 2 minutes ;
+- moins de 0,1 % de doublons et moins de 1 % d’échecs définitifs d’envoi ;
+- zéro token, identifiant brut ou coordonnée précise dans les logs ;
+- test fermé Android/iPhone validé avec l’app retirée des applications récentes ;
+- coût projeté à 50 000 appareils inférieur à 25 €/mois pour les alertes ;
+- contrat/licence fournisseur compatible avec une application publique.
+
+### Après le lancement seulement
+
+- plusieurs lieux et alertes Premium ;
+- Redis, plusieurs workers d’alertes et haute disponibilité ;
+- personnalisation avancée et historique de notifications ;
+- augmentation des fréquences ou des quotas au-delà des mesures réelles.
+
+## État d’implémentation — lots 1 à 3
+
+Mis à jour le 23 août 2026.
+
+- **P0.1 — implémenté** : Radar monté hors écran derrière Graph pour préchauffer le premier viewport ; autoplay déclenché automatiquement à l’ouverture de Radar, mais seulement après la première PNG décodable ; boucle continue à 1,5 s jusqu’à une Pause explicite de l’utilisateur ; frame courante prioritaire ; debounce après pan de 300 ms ; quatre tuiles centrales maximum avec deux requêtes simultanées ; rendu dès la première PNG valide sans attendre le lot.
+- **P0.2 — implémenté dans le code** : `RADAR_PROVIDER` explicite ; `PUBLIC_BASE_URL` public HTTPS obligatoire en production ; rejet des adresses loopback/privées ; le mode direct LibreWXR utilise l’origine configurée et jamais le `host` loopback des métadonnées.
+- **P0.3 — implémenté dans le code** : palette unifiée sur `13/1_0` dans le backend, staging et production ; conservation des placeholders bruts `{frame}/{z}/{x}/{y}` (ils étaient auparavant encodés en `%7B…%7D`) ; test du proxy vérifiant URL origine, HTTP 200, `image/png` et signature PNG ajouté.
+- **P0.4 — implémenté dans le code** : nouvelle route `GET /v1/radar/point-nowcast` reliée à l’outil LibreWXR `get_precip_nowcast` ; cache court par coordonnées (2 minutes, repli périmé 30 minutes) sans consommation du quota de sessions ; injection des six valeurs +60 min dans les frames `nowcast` du graphe ; budget mobile strict de 1,2 s et repli transparent sur Open-Meteo. Le point optionnel ne peut plus retarder l’affichage Radar jusqu’à 8 s.
+- **P0.5 — implémenté pour la bêta** : `GET /frames` et ses refresh ne consomment plus de session ; `POST /v1/radar/sessions` est déclenché uniquement lors d'une vraie entrée utilisateur dans Radar ; identifiants d'installation et de session obligatoires ; retries idempotents en mémoire et via compteur partagé ; plan Free/Premium envoyé ; compteur serveur resynchronisé dans l'app. `RADAR_QUOTA_ENFORCED=false` mesure sans bloquer jusqu'à la validation serveur des achats.
+- **P0.6 — implémenté sur Android** : cache de tuiles vidé par un gate de compilation réservé au test ; attente d'une image décodée ; maintien de la couche PNG pendant quatre déplacements ; zoom 7→10 ; cycle d'animation complet à 1,5 s ; sonde HTTP déterministe vérifiant 502 puis récupération immédiate. Le dernier APK a été installé et lancé sur le téléphone Android USB ; la sonde réelle a confirmé le retour 502→200 de l’origine.
+- **Graph continu — corrigé** : la ligne reste tracée pendant les périodes sèches, atteint exactement la borne 2 h/24 h par interpolation et reprend les données Open-Meteo après la fenêtre LibreWXR +60 min. Ce comportement est identique pour Free et Premium.
+- **Chronologie Radar réelle — corrigée** : la règle et le scrubber se terminent désormais à la dernière vraie frame LibreWXR (environ +60 min), au lieu d'afficher artificiellement `maintenant + 2 h`. La lecture boucle depuis cette borne réelle ; aucune image radar n'est inventée après la fin du nowcast fournisseur.
+- **Débit des tuiles — corrigé** : les tuiles Radar utilisent désormais un bucket séparé de 600 requêtes/minute ; elles ne peuvent plus épuiser la limite JSON générale de 120/minute et bloquer météo, recherche ou sessions pendant une animation avec pans/zooms.
+- **Déplacement Radar mondial — corrigé** : après un pan manuel, la frame courante précharge d’abord la tuile sous le centre puis trois voisines. La couche reste montée avec les anciennes images et recharge dès la première PNG valide. Un statut compact expose chargement, indisponibilité et relance ; sélectionner le nouveau lieu n’est plus nécessaire.
+- **Heure du téléphone — corrigée** : le fuseau du lieu ciblé sert uniquement à décoder correctement les données du fournisseur. Toutes les heures visibles dans Météo, Graph et Radar suivent le fuseau configuré sur le téléphone. Un téléphone réglé sur Paris conserve donc `20:24 · UTC+2` en passant de Paris à Sierra Leone ; les URLs et la frame des tuiles restent attachées au même instant UTC.
+- **Crash natif iOS découvert par P0.6 — corrigé** : les builds Profile/Release plantaient au lancement car `GADApplicationIdentifier` était vide. Les profils iOS utilisent maintenant l'identifiant d'application de test officiel Google tant que les publicités réelles restent désactivées.
+- **LibreWXR cache — implémenté dans le profil** : budget relevé de 64 à 256 Mo. Le déploiement de ce profil et la mesure `/health` restent à effectuer sur la VM.
+- **Tunnel LibreWXR — durci dans le dépôt** : configuration `cloudflared` avec connexions origine persistantes ; sondes locale et publique séparées chaque minute ; trois échecs consécutifs avant action ; redémarrage ciblé LibreWXR ou tunnel ; cooldown de 15 minutes. L’installation du timer sur la VM reste à exécuter.
+- **P0 applicatifs — terminés** : restent le déploiement et les contrôles d'exploitation de l'origine/CDN.
+
+P0 — À corriger avant la prochaine build
+Priorité	Problème confirmé	Correction minimale
+P0.1	Le radar démarre automatiquement, change d’image toutes les 1,1 s, puis lance jusqu’à 24 préchargements dès l’ouverture et après chaque mouvement avec seulement 120 ms de debounce. Les anciens préchargements ne sont pas annulés. Avec une origine lente, les tuiles visibles sont annulées avant d’arriver.	Désactiver l’autoplay initial. Charger d’abord l’image courante. Après 500–700 ms sans mouvement, précharger une seule frame avec 4–8 requêtes maximum et annuler la génération précédente. Ne démarrer l’animation qu’après disponibilité des tuiles. Voir [radar_pane.dart (line 101)](/Users/DEV/Documents/IDEAS/chetiwa/lib/features/radar/presentation/widgets/radar_pane.dart:101), [radar_tile_cache.dart (line 109)](/Users/DEV/Documents/IDEAS/chetiwa/lib/features/radar/data/cache/radar_tile_cache.dart:109) et [radar_bloc.dart (line 443)](/Users/DEV/Documents/IDEAS/chetiwa/lib/features/radar/application/radar_bloc.dart:443).
+P0.2	Le backend reconnaît LibreWXR uniquement si le domaine finit par librewxr.net. radar.ezplatforms.com est donc classé comme fournisseur générique. Sans PUBLIC_BASE_URL, il renvoie le host LibreWXR actuel, qui vaut http://127.0.0.1:8080 : URL inutilisable sur un téléphone.	Ajouter un type fournisseur explicite RADAR_PROVIDER=librewxr, rendre PUBLIC_BASE_URL obligatoire en production et refuser le démarrage si les URLs de tuiles sont privées/loopback. Voir [provider_gateway.dart (line 158)](/Users/DEV/Documents/IDEAS/chetiwa/backend/lib/src/provider_gateway.dart:158) et [production.env.example (line 13)](/Users/DEV/Documents/IDEAS/chetiwa/backend/deploy/environments/production.env.example:13).
+P0.3	La configuration de palette est contradictoire : production utilise 10/1_1, le runbook 13/1_0, l’app directe choisit 13/1_0.	Utiliser partout 13/1_0, puis ajouter un test HTTP vérifiant 200, image/png et une image décodable. Voir [librewxr-hetzner-runbook.md (line 54)](/Users/DEV/Documents/IDEAS/chetiwa/docs/backend/librewxr-hetzner-runbook.md:54).
+P0.4	Graph ↔ Radar n’était pas réellement aligné en production : le backend ne récupérait aucun échantillon MCP `pointRainRateMmPerHour`.	**Corrigé dans le code** : `/v1/radar/point-nowcast`, cache court par coordonnées et injection des six valeurs LibreWXR +60 min dans Graph, avec repli Open-Meteo. La validation finale sur appareil reste couverte par P0.6. Voir [radar_nowcast_alignment.dart (line 9)](/Users/DEV/Documents/IDEAS/chetiwa/lib/features/forecast/domain/services/radar_nowcast_alignment.dart:9).
+P0.5	Les quotas pouvaient couper le radar par erreur : chaque refresh était compté comme une session.	**Corrigé pour la bêta** : ouverture explicite et idempotente, refresh gratuits, plan transmis et blocage désactivé par configuration. L'activation future du blocage payant exige toujours une validation d'achat côté serveur ; un header client seul n'est pas une authentification. Voir [app.dart](/Users/DEV/Documents/IDEAS/chetiwa/backend/lib/src/app.dart) et [usage_quota_controller.dart](/Users/DEV/Documents/IDEAS/chetiwa/lib/features/monetization/application/usage_quota_controller.dart).
+P0.6	Le smoke test considérait auparavant le Radar fonctionnel dès que l’heure était affichée.	**Corrigé pour Android** : cache froid, tuile PNG réelle, couche conservée pendant quatre pans, zoom 7→10, animation et sonde 502→200. Le dernier passage physique doit être rejoué après autorisation d'installation sur le téléphone. Voir [backend_proxy_smoke_test.dart](/Users/DEV/Documents/IDEAS/chetiwa/integration_test/backend_proxy_smoke_test.dart).
+
+
+État LibreWXR observé
+Le 23 août 2026, l’endpoint de santé indiquait :
+- 1 seul worker ;
+- cache de 64 Mo presque saturé ;
+- taux de hit interne d’environ 5 % ;
+- latence moyenne historique d’environ 23,2 s par tuile ;
+- seulement 6 observations, soit environ 50 minutes d’historique ;
+- uptime d’environ 4 heures ;
+- limite conteneur observée de 3,5 Go, alors que le dépôt prévoit 6 Go.
+  Les tuiles déjà chaudes ont répondu entre 0,1 et 1 seconde et Cloudflare a bien renvoyé CF-Cache-Status: HIT. Le CDN fonctionne donc sur les URLs testées, mais les nouvelles zones et nouvelles frames restent dépendantes du tunnel et du worker unique. Une panne du tunnel ne rend pas toutes les tuiles immédiatement indisponibles, mais elle met bien la capacité des cold misses et métadonnées à zéro.
+  Avant lancement :
+- aligner la mémoire réellement déployée avec le profil versionné ;
+- augmenter le cache LibreWXR de 64 à au moins 256 Mo, puis mesurer ;
+- garantir une règle Cloudflare sur /v2/radar/* avec clé complète frame/z/x/y/palette ;
+- ajouter surveillance /health, redémarrage automatique et alerte 5xx ;
+- exiger p95 < 2 s sur une tuile froide et < 500 ms sur une tuile CDN avant validation.
+  La version LibreWXR épinglée supporte le mode multi, mais sa propre documentation le réserve aux machines de 8 cœurs ou plus. Ne pas activer ses 16 workers par défaut sur la VM actuelle : augmenter d’abord la VM et configurer explicitement 2–4 workers.
+  Ce qui peut attendre
+- Historique radar 24 h : non disponible. À 10 minutes par frame, il faut environ 144 observations, pas 24. Le serveur n’en conserve que 6. Ne pas le bloquer pour la bêta ; masquer toute promesse 24 h/6 h.
+- Redis peut attendre. Firestore reste inutile pour les quotas Radar de la bêta,
+  mais devient obligatoire pour la persistance des alertes distantes en N0.3.
+- Réplication haute disponibilité : recommandée avant SLA public, mais pas nécessaire pour une bêta contrôlée.
+- Cache mobile durable : les tuiles sont actuellement dans Directory.systemTemp, donc purgeables. Migrer vers le répertoire cache de l’application après les P0.
+- Historique/stockage persistant LibreWXR : nécessaire plus tard pour 24 h et continuité inter-redémarrage.
+Validation
+- `flutter analyze` : réussi.
+- Tests Flutter : 124/124 réussis.
+- Build Android debug : réussi (`build/app/outputs/flutter-apk/app-debug.apk`).
+- Tests backend : 49/49 réussis.
+- APK Android debug : installation directe USB et lancement réussis ; le smoke réseau complet reste dépendant du retour de `radar.ezplatforms.com` en 200.
+- `dart analyze` backend : réussi.
+- Smoke test proxy/Radar réel : réussi sur iPhone 16 Pro Max / iOS 26.6, build Profile, backend Chetiwa local joignable sur LAN, fallback direct désactivé, 1 min 03 s.
+- Build iOS Profile signée : réussie ; crash natif AdMob corrigé.
+- Les modifications des lots 1 à 3 sont présentes dans le worktree et ne sont pas encore déployées.
+  Conclusion : les P0 applicatifs sont terminés. Déployer les profils versionnés, mesurer l'origine froide et le CDN, puis limiter la première bêta ; Redis, historique 24 h et haute disponibilité peuvent attendre.

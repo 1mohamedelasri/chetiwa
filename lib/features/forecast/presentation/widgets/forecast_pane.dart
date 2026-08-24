@@ -24,8 +24,9 @@ final class ForecastPane extends StatelessWidget {
     return Semantics(
       key: const Key('forecast-local-time'),
       label:
-          'Prévisions locales · ${forecast.timeZone} · '
-          '${WeatherTimeZone.hourMinute(snapshot.nowUtc, forecast.timeZone)}',
+          '${context.l10n.isFrench ? 'Heure du téléphone' : 'Phone time'} · '
+          '${WeatherTimeZone.displayUtcOffsetLabel(snapshot.nowUtc)} · '
+          '${WeatherTimeZone.displayHourMinute(snapshot.nowUtc)}',
       child: CustomScrollView(
         key: const Key('forecast-pane'),
         physics: const BouncingScrollPhysics(),
@@ -213,7 +214,6 @@ final class _HourlyCard extends StatelessWidget {
                       context.l10n,
                       snapshot.brief,
                       snapshot.nowUtc,
-                      forecast.timeZone,
                     ),
                     style: const TextStyle(fontSize: 14, height: 1.4),
                   ),
@@ -229,8 +229,7 @@ final class _HourlyCard extends StatelessWidget {
                     scrollDirection: Axis.horizontal,
                     itemCount: hours.length,
                     separatorBuilder: (_, _) => const SizedBox(width: 8),
-                    itemBuilder: (context, index) =>
-                        _Hour(item: hours[index], timeZone: forecast.timeZone),
+                    itemBuilder: (context, index) => _Hour(item: hours[index]),
                   ),
                 ),
               ],
@@ -240,10 +239,9 @@ final class _HourlyCard extends StatelessWidget {
 }
 
 final class _Hour extends StatelessWidget {
-  const _Hour({required this.item, required this.timeZone});
+  const _Hour({required this.item});
 
   final HourlyForecast item;
-  final String timeZone;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -251,7 +249,7 @@ final class _Hour extends StatelessWidget {
     child: Column(
       children: [
         Text(
-          WeatherTimeZone.hour(item.time, timeZone),
+          WeatherTimeZone.displayHour(item.time),
           style: const TextStyle(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 9),

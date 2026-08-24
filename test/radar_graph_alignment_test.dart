@@ -55,4 +55,46 @@ void main() {
 
     expect(identical(aligned, forecast), isTrue);
   });
+
+  test('Graph resumes model data after the LibreWXR nowcast window', () {
+    final now = DateTime.utc(2026, 8, 23, 12);
+    final modelTailTime = now.add(const Duration(minutes: 90));
+    final forecast = Forecast(
+      locationName: 'Paris',
+      updatedAt: now,
+      temperatureCelsius: 20,
+      windKph: 5,
+      brief: const WeatherBrief(
+        type: WeatherBriefType.dry,
+        intensity: RainIntensity.none,
+        headline: 'Dry',
+        detail: 'Dry',
+      ),
+      points: [
+        RainPoint(
+          time: now.add(const Duration(minutes: 30)),
+          rateMmPerHour: 1,
+          intensity: RainIntensity.light,
+        ),
+        RainPoint(
+          time: modelTailTime,
+          rateMmPerHour: 3,
+          intensity: RainIntensity.moderate,
+        ),
+      ],
+      windows: const [],
+    );
+
+    final aligned = alignForecastWithRadarNowcast(forecast, [
+      RadarFrame(
+        time: now.add(const Duration(minutes: 60)),
+        progress: 1,
+        kind: WeatherDataKind.radarNowcast,
+        pointRainRateMmPerHour: 2,
+      ),
+    ], now);
+
+    expect(aligned.rainPointAt(modelTailTime)?.rateMmPerHour, 3);
+    expect(aligned.points.last.time, modelTailTime);
+  });
 }

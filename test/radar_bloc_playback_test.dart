@@ -9,6 +9,29 @@ import 'package:chetiwa/core/weather/weather_data_provenance.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('autoplay start is idempotent and never toggles playback off', () async {
+    final bloc = RadarBloc(const FixtureRadarRepository());
+    addTearDown(bloc.close);
+
+    bloc.add(const RadarRequested());
+    await bloc.stream
+        .where((state) => state is RadarReady)
+        .cast<RadarReady>()
+        .first
+        .timeout(const Duration(seconds: 2));
+
+    bloc.add(const RadarPlaybackStarted());
+    await bloc.stream
+        .where((state) => state is RadarReady)
+        .cast<RadarReady>()
+        .firstWhere((state) => state.isPlaying)
+        .timeout(const Duration(seconds: 2));
+    bloc.add(const RadarPlaybackStarted());
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect((bloc.state as RadarReady).isPlaying, isTrue);
+  });
+
   test(
     'playback loops and reset restart from the current observation',
     () async {
@@ -240,7 +263,9 @@ void main() {
         .firstWhere((state) => !state.isPlaying)
         .timeout(const Duration(seconds: 2));
 
-    bloc.add(const RadarRequested());
+    // Real devices normally emit inactive followed by paused for one sleep.
+    bloc.add(const RadarPlaybackSuspended());
+    bloc.add(const RadarPlaybackResumed());
     final resumed = await bloc.stream
         .where((state) => state is RadarReady)
         .cast<RadarReady>()
@@ -254,13 +279,10 @@ void main() {
         .cast<RadarReady>()
         .firstWhere((state) => !state.isPlaying)
         .timeout(const Duration(seconds: 2));
-    bloc.add(const RadarRequested());
-    final manuallyPaused = await bloc.stream
-        .where((state) => state is RadarReady)
-        .cast<RadarReady>()
-        .firstWhere((state) => !state.isRefreshing)
-        .timeout(const Duration(seconds: 2));
-    expect(manuallyPaused.isPlaying, isFalse);
+    bloc.add(const RadarPlaybackSuspended());
+    bloc.add(const RadarPlaybackResumed());
+    await Future<void>.delayed(Duration.zero);
+    expect((bloc.state as RadarReady).isPlaying, isFalse);
   });
 }
 

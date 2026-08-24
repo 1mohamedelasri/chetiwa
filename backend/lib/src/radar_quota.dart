@@ -52,6 +52,7 @@ final class RadarQuotaTracker {
 
   RadarQuotaDecision evaluate({
     required String ownerKey,
+    required String sessionId,
     required RadarPlan plan,
     required DateTime now,
   }) {
@@ -60,7 +61,7 @@ final class RadarQuotaTracker {
     final window = current == null || !instant.isBefore(current.resetAt)
         ? _RadarWindow(startedAt: instant, resetAt: instant.add(policy.window))
         : current;
-    window.used++;
+    if (window.sessionIds.add(sessionId)) window.used++;
     _windows[ownerKey] = window;
     final limit = policy.limitFor(plan);
     final allowed = window.used <= limit;
@@ -87,13 +88,22 @@ final class DistributedRadarQuotaGuard {
 
   Future<RadarQuotaDecision> evaluate({
     required String ownerKey,
+    required String sessionId,
     required RadarPlan plan,
     required DateTime now,
   }) async {
     final instant = now.toUtc();
     final month = '${instant.year}-${instant.month.toString().padLeft(2, '0')}';
     final key = 'radar-quota:$month:$plan:$ownerKey';
-    final used = await counter.increment(key, ttl: policy.window);
+    final occurrence = await counter.increment(
+      'radar-session:$month:$ownerKey:$sessionId',
+      ttl: policy.window,
+    );
+    final used = await counter.increment(
+      key,
+      ttl: policy.window,
+      amount: occurrence == 1 ? 1 : 0,
+    );
     final limit = policy.limitFor(plan);
     final allowed = used <= limit;
     return RadarQuotaDecision(
@@ -141,5 +151,6 @@ final class _RadarWindow {
 
   final DateTime startedAt;
   final DateTime resetAt;
+  final Set<String> sessionIds = <String>{};
   int used = 0;
 }

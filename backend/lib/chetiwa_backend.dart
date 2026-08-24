@@ -13,6 +13,7 @@ export 'src/device_alert_store.dart'
         InMemoryDeviceAlertStore,
         QuietHours,
         UnavailableDeviceAlertStore;
+export 'src/firestore_device_alert_store.dart' show FirestoreDeviceAlertStore;
 export 'src/json_response_cache.dart'
     show CachedJsonResponse, JsonResponseCache;
 export 'src/operational_control.dart'
@@ -30,9 +31,35 @@ export 'src/radar_quota.dart'
         RadarQuotaDecision,
         RadarQuotaPolicy,
         RadarQuotaTracker;
+export 'src/rain_alert_budget_guard.dart'
+    show BillingBudgetUpdate, createRainAlertBudgetGuard;
+export 'src/rain_alert_engine.dart'
+    show
+        ActiveRainAlert,
+        AlertDeliveryDraft,
+        AlertDeliveryStatus,
+        AlertRainIntensity,
+        LocalTimeResolver,
+        PendingAlertDelivery,
+        PushDispatchReport,
+        PushSendOutcome,
+        RainAlertCell,
+        RainAlertEngine,
+        RainAlertEngineStore,
+        RainAlertNowcastProvider,
+        RainAlertPushDispatcher,
+        RainAlertPushSender,
+        RainAlertRunReport,
+        RainAlertState,
+        RainNowcastSample;
+export 'src/rain_alert_operations.dart'
+    show RainAlertOperationsStore, RainAlertRunMetric, RainAlertRuntimeControl;
+export 'src/rain_alert_services.dart'
+    show FirebaseRainAlertPushSender, ProviderRainAlertNowcast;
 export 'src/request_rate_limiter.dart'
     show RateLimitDecision, RequestRateLimiter;
-export 'src/runtime_config.dart' show AppEnvironment, RuntimeConfig;
+export 'src/runtime_config.dart'
+    show AppEnvironment, RadarProvider, RuntimeConfig;
 export 'src/shared_counter.dart'
     show HttpSharedCounter, InMemorySharedCounter, SharedCounter;
 export 'src/tile_response_cache.dart'

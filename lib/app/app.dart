@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -11,6 +13,7 @@ import '../core/location/location_repository.dart';
 import '../core/location/active_location_controller.dart';
 import '../core/time/weather_clock.dart';
 import '../core/notifications/notification_permission_gateway.dart';
+import '../core/notifications/rain_alert_navigation_controller.dart';
 import '../features/alerts/application/local_rain_alert_coordinator.dart';
 import '../core/l10n/chetiwa_localizations.dart';
 import 'di/chetiwa_dependencies.dart';
@@ -46,6 +49,12 @@ final class _ChetiwaAppState extends State<ChetiwaApp> {
   late final AnalyticsConsentController _analyticsConsentController =
       AnalyticsConsentController(initiallyEnabled: widget.analyticsConsent);
   late final GoRouter _router = createAppRouter();
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_dependencies.localRainAlertCoordinator.initialize());
+  }
 
   @override
   void dispose() {
@@ -94,6 +103,9 @@ final class _ChetiwaAppState extends State<ChetiwaApp> {
         ],
         child: MultiProvider(
           providers: [
+            ChangeNotifierProvider<RainAlertNavigationController>.value(
+              value: _dependencies.rainAlertNavigationController,
+            ),
             ChangeNotifierProvider<AlertPreferencesController>.value(
               value: _dependencies.alertPreferencesController,
             ),

@@ -133,6 +133,7 @@ final class ChetiwaAlertApi {
     required String timeZone,
     required bool notificationsEnabled,
     String? pushToken,
+    String? appVersion,
   }) async {
     await _api.postData('/v1/devices', <String, Object?>{
       'platform': platform,
@@ -140,6 +141,7 @@ final class ChetiwaAlertApi {
       'timeZone': timeZone,
       'notificationsEnabled': notificationsEnabled,
       if (pushToken != null) 'pushToken': pushToken,
+      if (appVersion != null) 'appVersion': appVersion,
     });
   }
 

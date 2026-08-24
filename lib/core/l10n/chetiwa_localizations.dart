@@ -38,6 +38,16 @@ final class ChetiwaLocalizations {
   String get loadingWeather =>
       _fr ? 'Chargement de la météo…' : 'Loading weather…';
   String get loadingRadar => _fr ? 'Chargement du radar…' : 'Loading radar…';
+  String get preparingRadar =>
+      _fr ? 'Préparation du radar…' : 'Preparing radar…';
+  String get preparingRadarDetail => _fr
+      ? 'La carte se charge en arrière-plan. Le Graph reste disponible.'
+      : 'The map is loading in the background. Graph remains available.';
+  String get loadingRadarTiles =>
+      _fr ? 'Chargement des échos radar…' : 'Loading radar echoes…';
+  String get radarTilesUnavailable => _fr
+      ? 'Échos radar temporairement indisponibles'
+      : 'Radar echoes temporarily unavailable';
   String get retry => _fr ? 'Réessayer' : 'Retry';
   String get advertisement => _fr ? 'PUBLICITÉ' : 'ADVERTISEMENT';
   String get chooseCity => _fr ? 'Choisir une ville' : 'Choose a city';
@@ -225,7 +235,7 @@ final class ChetiwaLocalizations {
   String get now => _fr ? 'MAINT.' : 'NOW';
   String get rain => _fr ? 'PLUIE' : 'RAIN';
   String get wind => _fr ? 'VENT O' : 'WIND W';
-  String get currentEstimate => _fr ? 'EST. MAINT.' : 'EST. NOW';
+  String get currentEstimate => _fr ? 'HEURE TÉL.' : 'PHONE TIME';
   String get offlineCached => _fr
       ? 'Hors-ligne · dernières données enregistrées affichées'
       : 'Offline · showing the latest saved data';

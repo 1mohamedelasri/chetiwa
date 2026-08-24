@@ -9,13 +9,13 @@ import '../../../../core/time/weather_clock.dart';
 import '../../../../core/location/location_repository.dart';
 import '../../../../core/location/active_location_controller.dart';
 import '../../../../core/l10n/chetiwa_localizations.dart';
+import '../../../../core/notifications/rain_alert_navigation_controller.dart';
 import '../../../../core/widgets/weather_data_status.dart';
 import '../../../radar/application/radar_bloc.dart';
 import '../../../radar/domain/repositories/radar_repository.dart';
 import '../../../radar/presentation/widgets/radar_pane.dart';
 import '../../../analytics/application/analytics_tracker.dart';
 import '../../../alerts/application/local_rain_alert_coordinator.dart';
-import '../../../monetization/application/usage_quota_controller.dart';
 import '../../../monetization/domain/premium_entitlement.dart';
 import '../../../monetization/domain/premium_limits.dart';
 import '../../application/forecast_bloc.dart';
@@ -52,8 +52,7 @@ final class WeatherScreen extends StatelessWidget {
           historyHours: PremiumLimits.forEntitlement(
             context.read<EntitlementController>(),
           ).radarHistoryHours,
-          usageQuota: context.read<UsageQuotaController>(),
-        )..add(const RadarRequested()),
+        ),
       ),
     ],
     child: const _WeatherView(),
@@ -70,24 +69,52 @@ final class _WeatherView extends StatefulWidget {
 final class _WeatherViewState extends State<_WeatherView>
     with WidgetsBindingObserver {
   late final ActiveLocationController _activeLocationController;
+  late final RainAlertNavigationController _alertNavigationController;
   Coordinates? _radarCoordinates;
+  Timer? _resumeForecastTimer;
+  Timer? _resumeRadarTimer;
+  Timer? _resumeAlertTimer;
+  Timer? _initialRadarTimer;
+  DateTime? _lastResumeRefreshAt;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _activeLocationController = context.read<ActiveLocationController>();
+    _alertNavigationController = context.read<RainAlertNavigationController>();
     _activeLocationController.addListener(_syncRadarLocation);
+    _alertNavigationController.addListener(_openRainAlert);
     // Both the forecast and the active-location controller restore the saved
     // main place asynchronously. Radar used to keep its independent Paris
     // default, so the header could say Lyon while the map pin stayed in Paris.
     // Defer the first sync until every provider above this view is mounted.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _syncRadarLocation());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncRadarLocation();
+      _openRainAlert();
+      if (_radarCoordinates == null) {
+        // Give the small local saved-place read one short window to complete.
+        // Previously Radar fetched Paris immediately and then fetched the
+        // restored place again, causing duplicate startup work and jank.
+        _initialRadarTimer = Timer(const Duration(milliseconds: 250), () {
+          if (!mounted || _radarCoordinates != null) return;
+          _syncRadarLocation();
+          if (_radarCoordinates == null) {
+            context.read<RadarBloc>().add(const RadarRequested());
+          }
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _resumeForecastTimer?.cancel();
+    _resumeRadarTimer?.cancel();
+    _resumeAlertTimer?.cancel();
+    _initialRadarTimer?.cancel();
     _activeLocationController.removeListener(_syncRadarLocation);
+    _alertNavigationController.removeListener(_openRainAlert);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -100,13 +127,56 @@ final class _WeatherViewState extends State<_WeatherView>
     context.read<RadarBloc>().add(RadarLocationChanged(coordinates));
   }
 
+  void _openRainAlert() {
+    if (!mounted) return;
+    final intent = _alertNavigationController.take();
+    if (intent == null) return;
+    final location = ChetiwaLocation(
+      city: intent.locationLabel,
+      country: '',
+      coordinates: intent.coordinates,
+    );
+    unawaited(_activeLocationController.setActive(location));
+    context.read<ForecastBloc>().add(ForecastLocationChanged(location));
+    context.read<WeatherSectionCubit>().select(
+      intent.section == 'graph' ? WeatherSection.graph : WeatherSection.radar,
+    );
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!mounted) return;
     if (state == AppLifecycleState.resumed) {
-      context.read<ForecastBloc>().add(const ForecastRefreshed());
-      context.read<RadarBloc>().add(const RadarRequested());
-      unawaited(context.read<LocalRainAlertCoordinator>().sync());
+      // Resume the already-buffered animation immediately. Network, decoding
+      // and alert work are then staggered after the first responsive frame.
+      context.read<RadarBloc>().add(const RadarPlaybackResumed());
+      final now = DateTime.timestamp();
+      final lastRefresh = _lastResumeRefreshAt;
+      if (lastRefresh != null &&
+          now.difference(lastRefresh) < const Duration(seconds: 20)) {
+        return;
+      }
+      _lastResumeRefreshAt = now;
+      _resumeForecastTimer?.cancel();
+      _resumeRadarTimer?.cancel();
+      _resumeAlertTimer?.cancel();
+      _resumeForecastTimer = Timer(const Duration(milliseconds: 150), () {
+        if (mounted) {
+          context.read<ForecastBloc>().add(const ForecastRefreshed());
+        }
+      });
+      _resumeRadarTimer = Timer(const Duration(milliseconds: 450), () {
+        if (mounted) {
+          // A silent refresh preserves the visible frames and avoids a second
+          // disk-cache read that RadarRequested performed on every resume.
+          context.read<RadarBloc>().add(const RadarRefreshed());
+        }
+      });
+      _resumeAlertTimer = Timer(const Duration(milliseconds: 900), () {
+        if (mounted) {
+          unawaited(context.read<LocalRainAlertCoordinator>().sync());
+        }
+      });
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
@@ -196,35 +266,35 @@ final class _WeatherViewState extends State<_WeatherView>
               ],
               Expanded(
                 child: BlocBuilder<WeatherSectionCubit, WeatherSection>(
-                  builder: (context, section) => AnimatedSwitcher(
-                    duration: ChetiwaMotion.accessible(
-                      context,
-                      ChetiwaMotion.standard,
-                    ),
-                    switchInCurve: Curves.easeOutCubic,
-                    child: switch (section) {
-                      WeatherSection.graph =>
-                        BlocBuilder<RadarBloc, RadarState>(
-                          builder: (context, radarState) => GraphPane(
-                            key: const ValueKey('graph'),
-                            forecast: forecast,
-                            snapshot: state.snapshot,
-                            radarFrames: radarState is RadarReady
-                                ? radarState.frames
-                                : const [],
-                          ),
+                  builder: (context, section) => IndexedStack(
+                    // Radar is a primary surface. Keep it laid out behind
+                    // Graph so flutter_map can load the current viewport while
+                    // the user reads the forecast instead of starting every
+                    // network request only after the first Radar tap.
+                    index: section.index,
+                    children: [
+                      BlocBuilder<RadarBloc, RadarState>(
+                        builder: (context, radarState) => GraphPane(
+                          key: const ValueKey('graph'),
+                          forecast: forecast,
+                          snapshot: state.snapshot,
+                          radarFrames: radarState is RadarReady
+                              ? radarState.frames
+                              : const [],
                         ),
-                      WeatherSection.radar => RadarPane(
+                      ),
+                      RadarPane(
                         key: const ValueKey('radar'),
                         forecast: forecast,
                         snapshot: state.snapshot,
+                        isActive: section == WeatherSection.radar,
                       ),
-                      WeatherSection.forecast => ForecastPane(
+                      ForecastPane(
                         key: const ValueKey('forecast'),
                         forecast: forecast,
                         snapshot: state.snapshot,
                       ),
-                    },
+                    ],
                   ),
                 ),
               ),

@@ -1,0 +1,11 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Mobile clients never access Firestore directly. Cloud Run uses its
+    // service account and is the only owner of device/token/alert documents.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

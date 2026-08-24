@@ -96,6 +96,22 @@ final class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _clearLocalData() async {
     await context.read<AnalyticsConsentController>().clear();
     if (!mounted) return;
+    // Delete the server-side token and alert rules while the current private
+    // installation id is still available to authenticate that deletion.
+    final remoteDeleted = await context
+        .read<LocalRainAlertCoordinator>()
+        .deleteRemoteRegistration();
+    if (!mounted) return;
+    if (!remoteDeleted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Connexion requise pour supprimer les alertes distantes. Réessayez.',
+          ),
+        ),
+      );
+      return;
+    }
     final preferences = await SharedPreferences.getInstance();
     final keys = preferences.getKeys().where(
       (key) =>

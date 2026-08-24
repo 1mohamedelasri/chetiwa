@@ -17,6 +17,7 @@ import '../../../../core/l10n/chetiwa_localizations.dart';
 import '../../../../core/time/weather_clock.dart';
 import '../../../../core/weather/temperature_formatter.dart';
 import '../../../analytics/application/analytics_tracker.dart';
+import '../../../monetization/application/usage_quota_controller.dart';
 import 'map_location_picker_screen.dart';
 import '../../application/weather_section_cubit.dart';
 import '../../domain/entities/forecast.dart';
@@ -230,17 +231,20 @@ final class LiveMetrics extends StatelessWidget {
         children: [
           _Metric(
             key: const Key('current-local-time'),
+            semanticKey: const Key('current-local-time-semantics'),
             label: context.l10n.currentEstimate,
-            value: WeatherTimeZone.hourMinute(
-              snapshot.nowUtc,
-              forecast.timeZone,
-            ),
+            value: WeatherTimeZone.displayHourMinute(snapshot.nowUtc),
+            semanticValue:
+                '${WeatherTimeZone.displayHourMinute(snapshot.nowUtc)} · '
+                '${WeatherTimeZone.displayUtcOffsetLabel(snapshot.nowUtc)}',
           ),
+          const SizedBox(width: 6),
           _Metric(
             label: context.l10n.rain,
             value:
                 '${currentRain.toStringAsFixed(currentRain == 0 ? 0 : 1)} mm/h',
           ),
+          const SizedBox(width: 6),
           _Metric(
             label: 'TEMP.',
             value: formatTemperature(
@@ -249,6 +253,7 @@ final class LiveMetrics extends StatelessWidget {
               unit: true,
             ),
           ),
+          const SizedBox(width: 6),
           _Metric(
             label: context.l10n.wind,
             value: '${forecast.windKph.round()} km/h',
@@ -260,41 +265,53 @@ final class LiveMetrics extends StatelessWidget {
 }
 
 final class _Metric extends StatelessWidget {
-  const _Metric({required this.label, required this.value, super.key});
+  const _Metric({
+    required this.label,
+    required this.value,
+    this.semanticValue,
+    this.semanticKey,
+    super.key,
+  });
 
   final String label;
   final String value;
+  final String? semanticValue;
+  final Key? semanticKey;
 
   @override
   Widget build(BuildContext context) => Expanded(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          label,
-          maxLines: 1,
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-            fontSize: 8,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 5),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(
-            value,
+    child: Semantics(
+      key: semanticKey,
+      label: '$label · ${semanticValue ?? value}',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            label,
             maxLines: 1,
             style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurface,
-              fontSize: 14,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 8,
               fontWeight: FontWeight.w700,
             ),
           ),
-        ),
-      ],
+          const SizedBox(height: 5),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
     ),
   );
 }
@@ -331,7 +348,9 @@ final class WeatherBottomNavigation extends StatelessWidget {
             icon: Icons.radar_rounded,
             selected: section == WeatherSection.radar,
             onTap: () {
+              if (section == WeatherSection.radar) return;
               context.read<WeatherSectionCubit>().select(WeatherSection.radar);
+              unawaited(_recordRadarOpening(context));
               unawaited(context.read<AnalyticsTracker>().tabSelected('radar'));
             },
           ),
@@ -356,6 +375,19 @@ final class WeatherBottomNavigation extends StatelessWidget {
             onTap: () => context.push('/settings'),
           ),
         ],
+      ),
+    ),
+  );
+}
+
+Future<void> _recordRadarOpening(BuildContext context) async {
+  final allowed = await context.read<UsageQuotaController>().openRadarSession();
+  if (allowed || !context.mounted) return;
+  context.read<WeatherSectionCubit>().select(WeatherSection.graph);
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text(
+        'Limite Radar atteinte pour ce mois. Les autres prévisions restent disponibles.',
       ),
     ),
   );

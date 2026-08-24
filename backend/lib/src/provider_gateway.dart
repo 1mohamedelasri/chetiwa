@@ -159,10 +159,8 @@ final class ProviderGateway {
     required double latitude,
     required double longitude,
   }) async {
-    final usesRainViewer = _config.radarMetadataUri.host.contains(
-      'rainviewer.com',
-    );
-    final usesLibreWxr = _config.radarMetadataUri.host.endsWith('librewxr.net');
+    final usesRainViewer = _config.radarProvider == RadarProvider.rainViewer;
+    final usesLibreWxr = _config.radarProvider == RadarProvider.librewxr;
     if (_config.isProduction && usesRainViewer) {
       throw const ApiException(
         statusCode: 503,
@@ -188,8 +186,11 @@ final class ProviderGateway {
         final timestamp = item['time'];
         if (path is! String || timestamp is! num) continue;
         final frameId = base64Url.encode(utf8.encode(path)).replaceAll('=', '');
+        final directHost = usesLibreWxr
+            ? _config.radarMetadataUri.origin
+            : host;
         final tileUrlTemplate = _config.publicBaseUrl == null
-            ? '$host$path/256/{z}/{x}/{y}/${usesLibreWxr ? '10/1_1' : '2/1_0'}.png'
+            ? '$directHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '13/1_0' : '2/1_0'}.png'
             : '${_config.publicBaseUrl}/v1/radar/tiles/$frameId/{z}/{x}/{y}';
         frames.add(<String, Object?>{
           'time': _isoFromEpoch(timestamp),
@@ -223,6 +224,127 @@ final class ProviderGateway {
             ? 'librewxr'
             : 'configured-radar',
         'kind': 'radar',
+      },
+    };
+  }
+
+  /// Samples LibreWXR's short nowcast at the exact location used by Graph.
+  /// This stays separate from provider-wide frame metadata so coordinate data
+  /// can use its own small cache without destroying the shared timeline hit
+  /// rate.
+  Future<Map<String, Object?>> radarPointNowcast({
+    required double latitude,
+    required double longitude,
+  }) async {
+    if (_config.radarProvider != RadarProvider.librewxr) {
+      return <String, Object?>{
+        'location': <String, Object?>{
+          'latitude': latitude,
+          'longitude': longitude,
+        },
+        'samples': const <Object>[],
+        'provider': const <String, Object?>{
+          'id': 'radar-point-nowcast-unavailable',
+          'kind': 'radar-nowcast-point',
+        },
+      };
+    }
+
+    final uri = _config.radarMetadataUri.replace(path: '/mcp/', query: null);
+    late final http.Response response;
+    try {
+      response = await _client
+          .post(
+            uri,
+            headers: const <String, String>{
+              'accept': 'application/json, text/event-stream',
+              'content-type': 'application/json',
+            },
+            body: jsonEncode(<String, Object?>{
+              'jsonrpc': '2.0',
+              'id': 1,
+              'method': 'tools/call',
+              'params': <String, Object?>{
+                'name': 'get_precip_nowcast',
+                'arguments': <String, Object?>{
+                  'lat': latitude,
+                  'lon': longitude,
+                  'minutes': 60,
+                },
+              },
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+    } on TimeoutException {
+      throw const ApiException(
+        statusCode: 503,
+        code: 'radar_point_nowcast_unavailable',
+        message: 'LibreWXR point nowcast timed out',
+      );
+    } on http.ClientException {
+      throw const ApiException(
+        statusCode: 503,
+        code: 'radar_point_nowcast_unavailable',
+        message: 'LibreWXR point nowcast is unreachable',
+      );
+    }
+    if (response.statusCode != 200) {
+      throw ApiException(
+        statusCode: 503,
+        code: 'radar_point_nowcast_unavailable',
+        message: 'LibreWXR point nowcast returned HTTP ${response.statusCode}',
+      );
+    }
+
+    final decoded = _decodeMcpResponse(response.body);
+    final result = decoded['result'];
+    final structured = result is Map<String, dynamic>
+        ? result['structuredContent']
+        : null;
+    final rawSamples = structured is Map<String, dynamic>
+        ? structured['result']
+        : null;
+    if (rawSamples is! List) {
+      throw const ApiException(
+        statusCode: 502,
+        code: 'invalid_radar_point_nowcast_response',
+        message: 'LibreWXR point nowcast returned an invalid response',
+      );
+    }
+
+    final samples = rawSamples
+        .whereType<Map<String, dynamic>>()
+        .map((sample) {
+          final timestamp = sample['time'];
+          final rate = sample['rate_mmh'];
+          final source = sample['source'];
+          final coverage = sample['coverage'];
+          if (timestamp is! num ||
+              rate is! num ||
+              source is! String ||
+              coverage is! String ||
+              rate.isNegative) {
+            return null;
+          }
+          return <String, Object?>{
+            'time': _isoFromEpoch(timestamp),
+            'rainRateMmPerHour': rate.toDouble(),
+            'source': source,
+            'coverage': coverage,
+          };
+        })
+        .whereType<Map<String, Object?>>()
+        .toList(growable: false);
+
+    return <String, Object?>{
+      'location': <String, Object?>{
+        'latitude': latitude,
+        'longitude': longitude,
+      },
+      'samples': samples,
+      'provider': const <String, Object?>{
+        'id': 'librewxr-point-nowcast',
+        'kind': 'radar-nowcast-point',
       },
     };
   }
@@ -325,6 +447,30 @@ final class ProviderGateway {
       statusCode: 503,
       code: 'provider_unavailable',
       message: 'Provider unavailable after retries: $lastError',
+    );
+  }
+
+  Map<String, dynamic> _decodeMcpResponse(String body) {
+    final payload = body
+        .split('\n')
+        .map((line) => line.trim())
+        .firstWhere(
+          (line) => line.startsWith('data:'),
+          orElse: () => body.trim(),
+        );
+    final jsonText = payload.startsWith('data:')
+        ? payload.substring(5).trim()
+        : payload;
+    try {
+      final decoded = jsonDecode(jsonText);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } on FormatException {
+      // Converted to a stable provider error below.
+    }
+    throw const ApiException(
+      statusCode: 502,
+      code: 'invalid_radar_point_nowcast_response',
+      message: 'LibreWXR point nowcast returned invalid JSON',
     );
   }
 }

@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -7,7 +5,7 @@ import '../data/chetiwa_alert_api.dart';
 
 final class AlertPreferencesController extends ChangeNotifier {
   AlertPreferencesController({bool persist = true}) : _persist = persist {
-    if (persist) unawaited(_restore());
+    _ready = persist ? _restore() : Future<void>.value();
   }
 
   static const _enabledKey = 'alerts.enabled';
@@ -18,6 +16,7 @@ final class AlertPreferencesController extends ChangeNotifier {
   static const _quietHoursEndKey = 'alerts.quiet_hours_end';
 
   final bool _persist;
+  late final Future<void> _ready;
   bool _enabled = false;
   int _leadMinutes = 15;
   RainAlertIntensity _minimumIntensity = RainAlertIntensity.moderate;
@@ -31,6 +30,7 @@ final class AlertPreferencesController extends ChangeNotifier {
   bool get quietHoursEnabled => _quietHoursEnabled;
   String get quietHoursStart => _quietHoursStart;
   String get quietHoursEnd => _quietHoursEnd;
+  Future<void> get ready => _ready;
 
   Future<void> setEnabled(bool value) => _update(enabled: value);
   Future<void> setLeadMinutes(int value) => _update(leadMinutes: value);

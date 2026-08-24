@@ -1,10 +1,8 @@
 # Device et règles d’alerte — API v1
 
-Ce contrat prépare Smart Rain Alerts sans prétendre que l’envoi push est déjà
-opérationnel. Le stockage mémoire est réservé au profil `local` et aux tests.
-En `staging` et `production`, les routes répondent `503
-persistent_store_not_configured` tant qu’un adaptateur persistant, sauvegardé et
-testé n’est pas injecté.
+Ce contrat alimente le moteur Smart Rain Alerts N0.4–N0.6. Le stockage mémoire
+est réservé au profil `local` et aux tests. En `staging` et `production`, le
+serveur et le Cloud Run Job connectent Firestore avec leur identité de service.
 
 ## Identité et confidentialité
 
@@ -29,13 +27,15 @@ une action explicite d’activation des alertes.
   "locale": "fr",
   "timeZone": "Europe/Paris",
   "notificationsEnabled": true,
-  "pushToken": "token-fourni-par-apns-ou-fcm"
+  "pushToken": "token-fourni-par-apns-ou-fcm",
+  "appVersion": "1.0.0+7"
 }
 ```
 
 `platform` accepte `ios` ou `android`. `locale` accepte `fr` ou `en`. Le token
 est obligatoire lorsque `notificationsEnabled` vaut `true`. Réenregistrer le
-même appareil renouvelle son token sans créer de doublon.
+même appareil renouvelle son token sans créer de doublon. `appVersion` est
+optionnel et sert uniquement aux migrations et au diagnostic de compatibilité.
 
 ### Supprimer l’appareil courant
 
@@ -75,8 +75,8 @@ Contraintes MVP :
 - cinq règles maximum par installation ;
 - délai de 5 à 120 minutes ;
 - intensité `light`, `moderate` ou `heavy` ;
-- heures silencieuses au format local `HH:mm`, interprétées dans le fuseau du
-  lieu ;
+- heures silencieuses au format local `HH:mm` ; le moteur les interprétera dans
+  le fuseau du téléphone enregistré sur l’appareil ;
 - un appareil ne peut ni lire ni modifier les règles d’une autre installation.
 
 `PATCH` accepte tout sous-ensemble non vide des champs de création. Les réponses
@@ -84,11 +84,11 @@ utilisent l’enveloppe `{data, meta}` commune et `Cache-Control: no-store`.
 
 ## Ce qui reste avant production
 
-1. Implémenter l’adaptateur Firestore avec index, TTL d’inactivité, migrations,
-   sauvegarde et restauration testée.
-2. Ajouter App Check/attestation et une limite distribuée.
-3. Configurer APNs/FCM par environnement et renouveler les tokens invalides.
-4. Construire le moteur nowcast avec déduplication, cooldown et quiet hours.
+1. Provisionner Firestore et son TTL dans les projets staging/production, puis
+   tester sauvegarde et restauration.
+2. Téléverser la clé APNs dans Firebase et valider un push réel Android/iPhone.
+3. Déployer le Cloud Run Job/Scheduler décrit dans
+   `smart-rain-alerts-runbook.md`, puis mesurer sa durée et son coût.
+4. Ajouter App Check/attestation avant une ouverture publique importante.
 5. Tester silencieusement les faux positifs/faux négatifs avant toute alerte
    utilisateur.
-

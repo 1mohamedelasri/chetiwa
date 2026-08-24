@@ -41,6 +41,24 @@ backend/.env.*
 !backend/**/*.env.example
 backend/coverage/
 
+# Local environment files and release credentials
+.env
+.env.*
+!**/*.env.example
+*.p8
+*.p12
+*.pem
+*.cer
+*.mobileprovision
+*.jks
+*.keystore
+**/key.properties
+**/service-account*.json
+**/*serviceAccount*.json
+**/firebase-admin*.json
+secrets/
+.secrets/
+
 # Symbolication related
 app.*.symbols
 

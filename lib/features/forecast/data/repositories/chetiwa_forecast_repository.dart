@@ -74,7 +74,7 @@ final class ChetiwaForecastRepository implements ForecastRepository {
     final summary = WeatherBriefBuilder.build(
       now: updatedAt,
       points: decisionPoints,
-      formatTime: (instant) => WeatherTimeZone.hourMinute(instant, timeZone),
+      formatTime: WeatherTimeZone.displayHourMinute,
     );
     final provider = data['provider'] as Map<String, dynamic>?;
     return Forecast(

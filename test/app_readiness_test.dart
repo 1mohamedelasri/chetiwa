@@ -6,9 +6,11 @@ import 'package:chetiwa/core/location/fixture_location_repository.dart';
 import 'package:chetiwa/features/forecast/domain/entities/forecast.dart';
 import 'package:chetiwa/features/forecast/domain/repositories/forecast_repository.dart';
 import 'package:chetiwa/features/radar/data/repositories/fixture_radar_repository.dart';
+import 'package:chetiwa/features/radar/application/radar_bloc.dart';
 import 'package:chetiwa/features/radar/domain/entities/radar_frame.dart';
 import 'package:chetiwa/features/radar/domain/repositories/radar_repository.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -31,6 +33,8 @@ void main() {
       expect(forecast.networkCalls, 1);
       expect(radar.networkCalls, 1);
 
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       await tester.pump();
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
@@ -39,6 +43,41 @@ void main() {
       expect(forecast.networkCalls, 2);
       expect(radar.networkCalls, 2);
     });
+
+    testWidgets(
+      'inactive puis paused reprend automatiquement une animation active',
+      (tester) async {
+        final dependencies = ChetiwaDependencies.testing(
+          forecastRepository: const _StaticForecastRepository(),
+          radarRepository: const FixtureRadarRepository(),
+          locationRepository: const FixtureLocationRepository(),
+        );
+
+        await tester.pumpWidget(ChetiwaApp(dependencies: dependencies));
+        await _settleFixture(tester);
+        await tester.tap(find.text('Radar'));
+        await tester.pump();
+        final radarBloc = tester
+            .element(find.byKey(const ValueKey('radar'), skipOffstage: false))
+            .read<RadarBloc>();
+        await tester.pump(const Duration(milliseconds: 100));
+        expect((radarBloc.state as RadarReady).isPlaying, isTrue);
+
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.inactive,
+        );
+        await tester.pump();
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await tester.pump();
+        expect((radarBloc.state as RadarReady).isPlaying, isFalse);
+
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await tester.pump();
+        expect((radarBloc.state as RadarReady).isPlaying, isTrue);
+      },
+    );
   });
 
   group('apparence, langue et écrans adaptatifs', () {

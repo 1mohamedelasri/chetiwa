@@ -1,4 +1,5 @@
 import 'package:firebase_analytics/firebase_analytics.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/widgets.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,9 +8,13 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'app/app.dart';
 import 'firebase_options.dart';
 import 'features/analytics/application/analytics_consent_controller.dart';
+import 'core/notifications/firebase_push_messaging.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  FirebaseMessaging.onBackgroundMessage(
+    chetiwaFirebaseMessagingBackgroundHandler,
+  );
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   final preferences = await SharedPreferences.getInstance();
   final analyticsConsent =

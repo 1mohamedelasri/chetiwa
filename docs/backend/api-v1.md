@@ -67,6 +67,33 @@ repli maximal 30 minutes. RainViewer est accepté uniquement en développement ;
 le profil production le refuse tant qu’un fournisseur licencié n’est pas
 configuré.
 
+### `GET /v1/radar/point-nowcast`
+
+Paramètres requis : `latitude`, `longitude`.
+
+Retourne les six échantillons de pluie au point LibreWXR pour les 60 prochaines
+minutes, avec `time`, `rainRateMmPerHour`, `source` et `coverage`. Le mobile les
+fusionne uniquement avec les frames `nowcast` du graphe. Une panne ou un timeout
+de cette route ne bloque ni la carte ni le graphe, qui conserve alors les valeurs
+Open-Meteo. Politique : fraîche 2 minutes, repli maximal 30 minutes, avec une clé
+arrondie à environ 100 m. Cette lecture technique ne consomme pas le quota de
+sessions Radar.
+
+### `POST /v1/radar/sessions`
+
+Enregistre une ouverture réellement déclenchée par l'utilisateur. Les en-têtes
+`X-Chetiwa-Device-Id` et `X-Chetiwa-Radar-Session-Id` sont obligatoires ; le
+second rend les retries idempotents. `X-Chetiwa-Plan: free|premium` sélectionne
+la limite annoncée par le client. La réponse contient `allowed`, `enforced`,
+`overLimit`, `used`, `limit`, `remaining` et `resetAt`.
+
+En bêta, `RADAR_QUOTA_ENFORCED=false` compte les ouvertures mais conserve
+`allowed=true`, même au-delà de la limite. Le plan client ne constitue pas une
+preuve d'achat : avant d'activer le blocage, il faut valider les achats côté
+serveur et utiliser un compteur partagé. Les rafraîchissements de
+`GET /v1/radar/frames`, le point-nowcast et les tuiles ne consomment jamais une
+session.
+
 ### `GET /v1/radar/tiles/{frame}/{z}/{x}/{y}`
 
 Proxy binaire pour une tuile Radar. `frame` est un identifiant opaque validé par
@@ -93,11 +120,9 @@ quotas pilotables par environnement.
 
 ## Quota Radar et kill switch
 
-`GET /v1/radar/frames` applique un quota mensuel par installation : 20 sessions
-Free et 200 sessions Chetiwa+ par défaut. Le plan est transmis par
-`X-Chetiwa-Plan: free|premium` et l'installation par `X-Chetiwa-Device-Id`.
-Un dépassement renvoie `429` avec `Retry-After`; `RADAR_ENABLED=false` renvoie
-`503 radar_disabled`. Ces compteurs restent en mémoire tant qu'une seule
+`POST /v1/radar/sessions` applique le compteur mensuel par installation : 20
+ouvertures Free et 200 Chetiwa+ par défaut. `RADAR_ENABLED=false` renvoie
+`503 radar_disabled`. Les compteurs restent en mémoire tant qu'une seule
 instance est utilisée. Avant plusieurs instances Cloud Run, ils doivent être
 remplacés par un compteur partagé et reliés aux alertes 50/75/90 %.
 
@@ -119,7 +144,8 @@ immédiatement les routes Radar.
 Le client utilise le cache mémoire d'images de `flutter_map` et son cache disque
 natifs, configuré à 64 Mo avec une fraîcheur maximale de 6 heures et réduction
 LRU. Les requêtes concurrentes sont consolidées par `ImageProvider` et les
-requêtes devenues obsolètes sont annulées. La couche Radar ne charge que les
-tuiles visibles avec une marge d'un carreau, limite le zoom à 10 et précharge au
-maximum deux frames et 24 tuiles. Les métriques locales sont anonymes : taux de
-hit, octets, tuiles téléchargées et tuiles uniques par session.
+requêtes devenues obsolètes sont annulées. Après 600 ms sans mouvement, la couche
+Radar précharge au maximum une frame, huit tuiles et deux requêtes simultanées,
+avec un timeout de 8 secondes. L'autoplay est désactivé au démarrage et le zoom
+est limité à 10. Les métriques locales sont anonymes : taux de hit, octets,
+tuiles téléchargées et tuiles uniques par session.
