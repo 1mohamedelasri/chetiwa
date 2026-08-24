@@ -1,19 +1,21 @@
 # Environnements backend Chetiwa
 
-Le backend suit l’ADR-0004 : un monolithe modulaire conteneurisé, exécutable en
-local et destiné à trois projets strictement séparés.
+Le backend suit l’ADR-0004 : un monolithe modulaire conteneurisé. La première
+production frugale peut fonctionner sur la VM Hetzner existante ; Cloud Run
+reste une cible d'évolution lorsque Firestore et l'autoscaling seront activés.
 
 | Environnement | État | Projet cloud | Données et fournisseurs |
 |---|---|---|---|
 | Local | Exécutable | Aucun | Fixtures, émulateurs et fournisseurs de développement |
 | Staging | Profil prêt, projet à provisionner | Projet GCP dédié | Sandbox, clés staging et budgets très bas |
-| Production | Profil prêt, projet à provisionner | Projet GCP dédié | Clés commerciales, consentement et quotas de production |
+| Production frugale | Profil Hetzner prêt | VM existante | API, Radar et flags sûrs ; alertes distantes désactivées |
+| Production avec alertes | Profil Cloud Run prêt, projet à provisionner | Projet GCP dédié | Firestore, FCM, consentement et budgets |
 
 ## Règles obligatoires
 
 1. Aucun secret dans Git, l’image Docker ou l’application mobile.
-2. `GOOGLE_CLOUD_PROJECT` est obligatoire hors local pour empêcher un déploiement
-   accidentel dans le mauvais projet.
+2. `GOOGLE_CLOUD_PROJECT` reste un identifiant explicite hors local. Sur Hetzner,
+   il n'entraîne aucun appel Google tant que les deux flags d'alertes sont faux.
 3. Staging et production utilisent des comptes de service, budgets et clés
    distincts. Firestore est activé uniquement pour les appareils et alertes ;
    Redis et Cloud CDN restent désactivés par défaut.
@@ -43,6 +45,29 @@ facturation, des budgets et de Secret Manager nécessite l’accès propriétair
 compte Google Cloud. Redis et le CDN restent derrière leurs gates de coût.
 
 ## Déploiement API et surveillance
+
+### Production frugale sur Hetzner
+
+Le profil `backend/deploy/hetzner` écoute uniquement sur
+`127.0.0.1:8081`. Le tunnel Cloudflare publie
+`https://api.ezplatforms.com` vers `http://127.0.0.1:8081`.
+
+Copier `production.env.example` vers `production.env`, générer
+`INTERNAL_METRICS_TOKEN`, puis lancer :
+
+```sh
+docker compose -f backend/deploy/hetzner/docker-compose.yml up --build -d
+curl --fail http://127.0.0.1:8081/healthz
+```
+
+Les routes d'alertes distantes échouent volontairement tant que Firestore n'est
+pas activé. Graph, météo, recherche, Radar et feature flags restent disponibles.
+Le mode `production` exige en plus une clé commerciale Open-Meteo. Tant que
+cette clé n'est pas disponible, le conteneur public peut servir uniquement les
+tests fermés avec `CHETIWA_ENV=staging` ; il ne constitue pas encore le backend
+d'une publication commerciale.
+
+### Production Cloud Run avec alertes
 
 Après avoir créé les secrets `open-meteo-api-key` et
 `chetiwa-internal-metrics-token` dans Secret Manager, l'API peut être déployée

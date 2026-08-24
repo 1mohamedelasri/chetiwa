@@ -4,9 +4,34 @@ import 'dart:io';
 import 'package:chetiwa_backend/chetiwa_backend.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 
-Future<void> main() async {
+Future<void> main(List<String> arguments) async {
+  if (arguments.contains('--healthcheck')) {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
+    try {
+      final request = await client.getUrl(
+        Uri.parse('http://127.0.0.1:8080/healthz'),
+      );
+      final response = await request.close().timeout(
+        const Duration(seconds: 3),
+      );
+      await response.drain<void>();
+      exitCode = response.statusCode == HttpStatus.ok ? 0 : 1;
+    } on Object {
+      exitCode = 1;
+    } finally {
+      client.close(force: true);
+    }
+    return;
+  }
+
   final config = RuntimeConfig.fromEnvironment();
-  final persistentAlerts = config.environment == AppEnvironment.local
+  // Forecast, location and Radar must remain deployable without enabling a
+  // billable Firestore project. Alert routes already fail closed through
+  // UnavailableDeviceAlertStore when no store is supplied. Connect Firestore
+  // only when the remote alert engine is explicitly enabled.
+  final persistentAlerts =
+      config.environment == AppEnvironment.local ||
+          (!config.rainAlertsEnabled && !config.rainAlertsSendEnabled)
       ? null
       : await FirestoreDeviceAlertStore.connect(
           projectId: config.googleCloudProject!,
