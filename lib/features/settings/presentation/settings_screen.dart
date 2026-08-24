@@ -15,6 +15,8 @@ import '../../alerts/application/local_rain_alert_coordinator.dart';
 import '../../analytics/application/analytics_consent_controller.dart';
 import '../../forecast/presentation/widgets/weather_chrome.dart';
 import '../../monetization/domain/consent_repository.dart';
+import '../../monetization/domain/premium_entitlement.dart';
+import '../../monetization/application/app_feature_flag_controller.dart';
 
 final class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -169,6 +171,8 @@ final class _SettingsScreenState extends State<SettingsScreen> {
     final strings = context.l10n;
     final preferences = context.read<AppPreferencesController>();
     final colors = Theme.of(context).colorScheme;
+    final featureFlags = context.watch<AppFeatureFlagController>();
+    final entitlement = context.watch<EntitlementController>();
     return ListenableBuilder(
       listenable: preferences,
       builder: (context, _) => Scaffold(
@@ -176,46 +180,48 @@ final class _SettingsScreenState extends State<SettingsScreen> {
         body: ListView(
           padding: const EdgeInsets.all(ChetiwaSpacing.x6),
           children: [
-            Container(
-              padding: const EdgeInsets.all(ChetiwaSpacing.x5),
-              decoration: BoxDecoration(
-                color: colors.surface,
-                borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
-                border: Border.all(color: colors.outline),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: () => context.push('/subscription'),
-                child: Row(
-                  children: [
-                    const CircleAvatar(
-                      radius: 28,
-                      backgroundColor: ChetiwaColors.surfaceSecondary,
-                      child: Icon(Icons.workspace_premium_outlined),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Chetiwa+',
-                            style: TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            strings.premiumSubtitle,
-                            style: TextStyle(color: colors.onSurfaceVariant),
-                          ),
-                        ],
+            if (featureFlags.premiumAvailable || entitlement.isPremium)
+              Container(
+                padding: const EdgeInsets.all(ChetiwaSpacing.x5),
+                decoration: BoxDecoration(
+                  color: colors.surface,
+                  borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
+                  border: Border.all(color: colors.outline),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => context.push('/subscription'),
+                  child: Row(
+                    children: [
+                      const CircleAvatar(
+                        radius: 28,
+                        backgroundColor: ChetiwaColors.surfaceSecondary,
+                        child: Icon(Icons.workspace_premium_outlined),
                       ),
-                    ),
-                    const Icon(Icons.chevron_right),
-                  ],
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Chetiwa+',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              strings.premiumSubtitle,
+                              style: TextStyle(color: colors.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: ChetiwaSpacing.x8),
+            if (featureFlags.premiumAvailable || entitlement.isPremium)
+              const SizedBox(height: ChetiwaSpacing.x8),
             _SectionTitle(strings.preferences),
             const SizedBox(height: ChetiwaSpacing.x3),
             _SettingsCard(
@@ -244,14 +250,15 @@ final class _SettingsScreenState extends State<SettingsScreen> {
                     );
                   },
                 ),
-                ListTile(
-                  key: const Key('saved-places-settings'),
-                  leading: const Icon(Icons.bookmark_outline),
-                  title: const Text('Mes lieux'),
-                  subtitle: const Text('Maison, travail et destinations'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => context.push('/saved-places'),
-                ),
+                if (featureFlags.premiumAvailable || entitlement.isPremium)
+                  ListTile(
+                    key: const Key('saved-places-settings'),
+                    leading: const Icon(Icons.bookmark_outline),
+                    title: const Text('Mes lieux'),
+                    subtitle: const Text('Maison, travail et destinations'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => context.push('/saved-places'),
+                  ),
                 ListTile(
                   key: const Key('open-smart-alerts-settings'),
                   leading: const Icon(Icons.notifications_outlined),
@@ -341,15 +348,18 @@ final class _SettingsScreenState extends State<SettingsScreen> {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => context.push('/privacy'),
                 ),
-                ListTile(
-                  key: const Key('ad-privacy-options'),
-                  leading: const Icon(Icons.tune_outlined),
-                  title: const Text('Préférences publicitaires'),
-                  subtitle: const Text('Modifier le consentement publicitaire'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () =>
-                      context.read<ConsentRepository>().showPrivacyOptions(),
-                ),
+                if (featureFlags.adsEnabled)
+                  ListTile(
+                    key: const Key('ad-privacy-options'),
+                    leading: const Icon(Icons.tune_outlined),
+                    title: const Text('Préférences publicitaires'),
+                    subtitle: const Text(
+                      'Modifier le consentement publicitaire',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () =>
+                        context.read<ConsentRepository>().showPrivacyOptions(),
+                  ),
                 ListTile(
                   title: Text(strings.terms),
                   trailing: const Icon(Icons.chevron_right),

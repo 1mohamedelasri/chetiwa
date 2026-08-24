@@ -1,0 +1,69 @@
+name: Deploy backend production
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: Google Cloud production project ID
+        required: true
+      region:
+        description: Cloud Run and Artifact Registry region
+        required: true
+        default: europe-west1
+      runtime_service_account:
+        description: Cloud Run runtime service-account email
+        required: true
+      public_base_url:
+        description: Public API URL, for example https://api.chetiwa.app
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: chetiwa-backend-production
+  cancel-in-progress: false
+
+jobs:
+  verify-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - name: Verify backend
+        working-directory: backend
+        run: |
+          dart pub get
+          dart format --output=none --set-exit-if-changed .
+          dart analyze
+          dart test
+      - name: Authenticate without a long-lived JSON key
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ inputs.project_id }}
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Ensure container repository
+        run: |
+          gcloud services enable artifactregistry.googleapis.com cloudbuild.googleapis.com --project="${{ inputs.project_id }}"
+          gcloud artifacts repositories describe chetiwa --project="${{ inputs.project_id }}" --location="${{ inputs.region }}" >/dev/null 2>&1 || \
+            gcloud artifacts repositories create chetiwa --project="${{ inputs.project_id }}" --location="${{ inputs.region }}" --repository-format=docker
+      - name: Build immutable backend image
+        id: image
+        env:
+          IMAGE: ${{ inputs.region }}-docker.pkg.dev/${{ inputs.project_id }}/chetiwa/chetiwa-backend:${{ github.sha }}
+        run: |
+          gcloud builds submit backend --project="${{ inputs.project_id }}" --tag="$IMAGE"
+          echo "uri=$IMAGE" >> "$GITHUB_OUTPUT"
+      - name: Deploy with safe launch flags and smoke-test health
+        run: >-
+          backend/deploy/cloud-run/deploy-api.sh
+          "${{ inputs.project_id }}"
+          "${{ inputs.region }}"
+          "${{ steps.image.outputs.uri }}"
+          "${{ inputs.runtime_service_account }}"
+          "${{ inputs.public_base_url }}"

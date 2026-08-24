@@ -25,12 +25,14 @@ final class FixtureForecastDataSource {
     this.clock = const SystemWeatherClock(),
     this.timeZone = 'Europe/Paris',
     this.locationName,
+    this.providerName = 'Fixture Open-Meteo',
   });
 
   final String fixtureName;
   final WeatherClock clock;
   final String timeZone;
   final String? locationName;
+  final String providerName;
 
   Future<Forecast> load() async {
     final source = await rootBundle.loadString(
@@ -133,7 +135,7 @@ final class FixtureForecastDataSource {
         timeZone,
       ).timeZoneOffset.inSeconds,
       timeZone: timeZone,
-      providerName: 'Fixture Open-Meteo',
+      providerName: providerName,
       currentWeatherCode: points.first.rateMmPerHour > 0 ? 61 : 1,
       brief: summary.brief,
       points: points,

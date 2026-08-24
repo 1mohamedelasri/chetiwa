@@ -19,7 +19,6 @@ import '../../../forecast/domain/services/forecast_snapshot_builder.dart';
 import '../../../forecast/domain/services/radar_nowcast_alignment.dart';
 import '../../../forecast/domain/services/rain_rate_scale.dart';
 import '../../../analytics/application/analytics_tracker.dart';
-import '../../../monetization/application/usage_quota_controller.dart';
 import '../../application/radar_bloc.dart';
 import '../../data/cache/radar_tile_cache.dart';
 import '../../domain/entities/radar_frame.dart';
@@ -331,7 +330,6 @@ final class _RadarMapState extends State<_RadarMap> {
           });
         }
         _lastCenter = center;
-        final quota = context.watch<UsageQuotaController?>();
         return ClipRRect(
           borderRadius: BorderRadius.circular(ChetiwaRadius.large),
           child: Stack(
@@ -386,40 +384,35 @@ final class _RadarMapState extends State<_RadarMap> {
                       maxZoom: 20,
                     ),
                     if (_radarVisible)
-                      TileLayer(
-                        key: const ValueKey('radar-tiles'),
-                        // Keep one TileLayer alive across frames. flutter_map
-                        // detects the URL change and reloads its images while
-                        // retaining the previous tiles until the next ones are
-                        // ready; recreating the layer here made playback look
-                        // frozen on physical devices with normal network lag.
-                        urlTemplate: tileUrl,
-                        // Changing an unused option asks flutter_map to reload
-                        // failed lookups without destroying its TileLayer. Old
-                        // tiles remain painted until replacements are decoded.
-                        additionalOptions: {
-                          'viewportRevision': '$_radarViewportRevision',
-                        },
-                        userAgentPackageName: 'com.chetiwa.chetiwa',
-                        maxNativeZoom: _maxNativeRadarZoom,
-                        // Keep the last native radar tiles visible throughout
-                        // pinch overscroll instead of temporarily removing the
-                        // whole layer when the rounded zoom exceeds its source.
-                        maxZoom: 22,
-                        panBuffer: 1,
-                        keepBuffer: 2,
-                        tileProvider: _tileCache.tileProvider,
-                        tileDisplay: const TileDisplay.fadeIn(
-                          duration: Duration(milliseconds: 120),
-                          // A new animation frame replaces an already visible
-                          // tile. Starting a reload at 25% made rain fade into a
-                          // ghost even when the new PNG was fully available.
-                          reloadStartOpacity: 1,
+                      Opacity(
+                        key: const Key('chetiwa-radar-precipitation-tile'),
+                        opacity: _radarOpacity,
+                        // One opacity layer for the complete radar is much
+                        // cheaper than wrapping every individual map tile.
+                        child: TileLayer(
+                          key: const ValueKey('radar-tiles'),
+                          // Keep one TileLayer alive across frames. flutter_map
+                          // detects the URL change and retains previous tiles
+                          // until replacements are decoded.
+                          urlTemplate: tileUrl,
+                          additionalOptions: {
+                            'viewportRevision': '$_radarViewportRevision',
+                          },
+                          userAgentPackageName: 'com.chetiwa.chetiwa',
+                          maxNativeZoom: _maxNativeRadarZoom,
+                          maxZoom: 22,
+                          // One retained ring is enough for short pans; centre
+                          // prefetch below handles long moves.
+                          panBuffer: 0,
+                          keepBuffer: 1,
+                          tileProvider: _tileCache.tileProvider,
+                          tileDisplay: const TileDisplay.fadeIn(
+                            duration: Duration(milliseconds: 120),
+                            reloadStartOpacity: 1,
+                          ),
+                          evictErrorTileStrategy:
+                              EvictErrorTileStrategy.notVisible,
                         ),
-                        evictErrorTileStrategy:
-                            EvictErrorTileStrategy.notVisible,
-                        tileBuilder: (context, tileWidget, tile) =>
-                            _buildRadarTile(tileWidget),
                       ),
                     if (_baseMap.isSatellite)
                       TileLayer(
@@ -526,12 +519,6 @@ final class _RadarMapState extends State<_RadarMap> {
                   ],
                 ),
               ),
-              if (quota != null)
-                Positioned(
-                  right: 16,
-                  top: 68,
-                  child: _RadarQuotaBadge(snapshot: quota.radarSessions),
-                ),
               if (_radarTilesUnavailable)
                 Positioned(
                   left: 60,
@@ -684,19 +671,6 @@ final class _RadarMapState extends State<_RadarMap> {
       final template = state.frames[index].tileUrlTemplate;
       if (template != null) yield template;
     }
-  }
-
-  Widget _buildRadarTile(Widget tileWidget) {
-    return Opacity(
-      key: const Key('chetiwa-radar-precipitation-tile'),
-      opacity: _radarOpacity,
-      // Never recolour raw scheme 255 in the client. The previous fallback
-      // matrix derived alpha from the red channel, making blue/green and weak
-      // echoes fully transparent. The server's scheme 13 supplies the grey /
-      // red Chetiwa palette once deployed; until then native pixels remain
-      // visible and functional.
-      child: tileWidget,
-    );
   }
 
   Future<void> _showLayers() async {
@@ -2021,31 +1995,6 @@ final class _RadarTimelineColors {
   final Color foreground;
   final Color muted;
   final Color outline;
-}
-
-final class _RadarQuotaBadge extends StatelessWidget {
-  const _RadarQuotaBadge({required this.snapshot});
-
-  final UsageQuotaSnapshot snapshot;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.surface.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: colors.outline),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        child: Text(
-          'Radar ${snapshot.used}/${snapshot.limit}',
-          style: Theme.of(context).textTheme.labelSmall,
-        ),
-      ),
-    );
-  }
 }
 
 /// Provider-independent fallback used when live radar tiles are unavailable.

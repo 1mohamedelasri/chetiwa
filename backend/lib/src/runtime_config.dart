@@ -51,6 +51,9 @@ final class RuntimeConfig {
     required this.monthlyBudgetCents,
     required this.radarTileCostCents,
     required this.globalKillSwitch,
+    required this.premiumEnabled,
+    required this.premiumRolloutPercent,
+    required this.adsEnabled,
     required this.publicBaseUrl,
     required this.internalMetricsToken,
     required this.rainAlertsEnabled,
@@ -190,6 +193,12 @@ final class RuntimeConfig {
         fallback: 0,
       ),
       globalKillSwitch: _boolean(source['GLOBAL_KILL_SWITCH'], fallback: false),
+      premiumEnabled: _boolean(source['PREMIUM_ENABLED'], fallback: false),
+      premiumRolloutPercent: _percentage(
+        source['PREMIUM_ROLLOUT_PERCENT'],
+        fallback: 0,
+      ),
+      adsEnabled: _boolean(source['ADS_ENABLED'], fallback: false),
       publicBaseUrl: publicBaseUrl,
       internalMetricsToken: _optional(source['INTERNAL_METRICS_TOKEN']),
       rainAlertsEnabled: _boolean(
@@ -237,6 +246,9 @@ final class RuntimeConfig {
   final int monthlyBudgetCents;
   final int radarTileCostCents;
   final bool globalKillSwitch;
+  final bool premiumEnabled;
+  final int premiumRolloutPercent;
+  final bool adsEnabled;
   final Uri? publicBaseUrl;
   final String? internalMetricsToken;
   final bool rainAlertsEnabled;
@@ -343,6 +355,15 @@ final class RuntimeConfig {
     final parsed = int.tryParse(value?.trim() ?? '');
     if (parsed == null) return fallback;
     if (parsed < 0) throw FormatException('Value must not be negative: $value');
+    return parsed;
+  }
+
+  static int _percentage(String? value, {required int fallback}) {
+    final parsed = int.tryParse(value?.trim() ?? '');
+    if (parsed == null) return fallback;
+    if (parsed < 0 || parsed > 100) {
+      throw FormatException('Value must be between 0 and 100: $value');
+    }
     return parsed;
   }
 }

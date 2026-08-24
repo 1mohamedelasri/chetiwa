@@ -24,14 +24,14 @@ final class _PrivacyText extends StatelessWidget {
   Widget build(BuildContext context) => const Text(
     'Chetiwa utilise votre localisation uniquement lorsque vous choisissez « Ma position ». '
     'Elle n’est pas suivie en arrière-plan.\n\n'
-    'Vos lieux enregistrés, préférences, alertes locales, caches météo et identifiant '
-    'technique restent sur votre appareil. Dans Réglages, « Effacer les données locales » '
-    'les supprime et rétablit les réglages par défaut.\n\n'
-    'Pour afficher la météo, le radar et la carte, les coordonnées du lieu consulté peuvent '
-    'être envoyées aux fournisseurs de données indiqués dans les attributions.\n\n'
-    'Cette bêta n’utilise ni compte, ni publicité, ni achat, ni push distant. Les statistiques '
-    'd’utilisation Firebase restent désactivées par défaut et ne peuvent être activées que dans '
-    'Réglages, avec un choix réversible. '
+    'Vos lieux et préférences restent sur votre appareil. Si vous activez les alertes, un '
+    'identifiant d’installation, le token push, le lieu choisi et la règle d’alerte sont '
+    'enregistrés afin d’envoyer la notification demandée.\n\n'
+    'Pour afficher la météo, le radar et la carte, les coordonnées du lieu consulté transitent '
+    'par Chetiwa et les fournisseurs indiqués dans les attributions.\n\n'
+    'Les statistiques d’utilisation et diagnostics Firebase restent désactivés par défaut et '
+    'ne peuvent être activés que dans Réglages, avec un choix réversible. « Effacer les données '
+    'locales » demande aussi la suppression de l’enregistrement push distant. '
     'La politique complète doit être publiée par l’éditeur avant une distribution externe.',
   );
 }
@@ -45,6 +45,7 @@ final class _TermsText extends StatelessWidget {
     'pas les alertes officielles ni les décisions de sécurité.\n\n'
     'Pendant la bêta, le service peut évoluer ou être interrompu. Les données peuvent être '
     'indisponibles, différées ou imprécises selon leur couverture et votre connexion.\n\n'
-    'La version bêta actuelle ne propose ni publicité, ni abonnement, ni achat intégré.',
+    'La première version garde publicité et Chetiwa+ désactivés. Si ces fonctions sont '
+    'activées ultérieurement, leur prix et leurs conditions seront présentés avant achat.',
   );
 }

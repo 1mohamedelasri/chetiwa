@@ -17,6 +17,7 @@ import '../../../../core/l10n/chetiwa_localizations.dart';
 import '../../../../core/time/weather_clock.dart';
 import '../../../../core/weather/temperature_formatter.dart';
 import '../../../analytics/application/analytics_tracker.dart';
+import '../../../monetization/application/app_feature_flag_controller.dart';
 import '../../../monetization/application/usage_quota_controller.dart';
 import 'map_location_picker_screen.dart';
 import '../../application/weather_section_cubit.dart';
@@ -381,16 +382,9 @@ final class WeatherBottomNavigation extends StatelessWidget {
 }
 
 Future<void> _recordRadarOpening(BuildContext context) async {
-  final allowed = await context.read<UsageQuotaController>().openRadarSession();
-  if (allowed || !context.mounted) return;
-  context.read<WeatherSectionCubit>().select(WeatherSection.graph);
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text(
-        'Limite Radar atteinte pour ce mois. Les autres prévisions restent disponibles.',
-      ),
-    ),
-  );
+  // Usage is telemetry only. Radar is a core weather feature and opening it
+  // must never be reverted because of a client-side counter.
+  await context.read<UsageQuotaController>().openRadarSession();
 }
 
 final class AdaptiveAdBannerSlot extends StatelessWidget {
@@ -398,7 +392,8 @@ final class AdaptiveAdBannerSlot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (context.watch<EntitlementController>().isPremium) {
+    if (context.watch<EntitlementController>().isPremium ||
+        !context.watch<AppFeatureFlagController>().adsEnabled) {
       return const SizedBox.shrink();
     }
     final ads = context.read<AdsRepository>();

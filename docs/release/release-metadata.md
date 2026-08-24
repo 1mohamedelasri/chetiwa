@@ -11,7 +11,18 @@ version et le numéro de build réellement intégrés dans l'application.
 | Numéro de build | `1` |
 | Android application ID | `com.ezplatforms.chetiwa` |
 | iOS bundle ID | `com.ezplatforms.chetiwa` |
-| Configuration Firebase | Analytics uniquement, désactivé par défaut |
+| Configuration Firebase | Analytics + Crashlytics opt-in, FCM opt-in |
+| Icône Store | `assets/brand/chetiwa_app_icon_master.png` |
+| Icône Google Play | `assets/store/google-play-icon-512.png` |
+| Feature graphic Play | `assets/store/google-play-feature-graphic.png` |
+| Captures iPhone 6,7 pouces | `assets/store/screenshots/ios-6.7/` |
+| Captures Android téléphone | `assets/store/screenshots/android-phone/` |
+
+Les captures déterministes utilisent `lib/main_store_screenshots.dart`; la
+capture Radar utilise `lib/main_store_live_radar.dart` pour montrer de vraies
+tuiles. Ces deux points d'entrée ne sont jamais référencés par les builds
+`lib/main.dart` de production et les dossiers Store ne sont pas embarqués dans
+le bundle Flutter.
 
 ## Avant chaque bêta
 

@@ -1,5 +1,8 @@
+import 'dart:ui';
+
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/widgets.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,6 +26,21 @@ Future<void> main() async {
   await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(
     analyticsConsent,
   );
+  await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(
+    analyticsConsent,
+  );
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    if (AnalyticsConsentController.runtimeCollectionEnabled) {
+      FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+    }
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    if (AnalyticsConsentController.runtimeCollectionEnabled) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+    }
+    return false;
+  };
   tz.initializeTimeZones();
   runApp(ChetiwaApp(analyticsConsent: analyticsConsent));
 }

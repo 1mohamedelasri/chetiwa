@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../application/usage_quota_controller.dart';
 import '../domain/premium_entitlement.dart';
+import '../application/app_feature_flag_controller.dart';
 
 final class SubscriptionScreen extends StatefulWidget {
   const SubscriptionScreen({super.key});
@@ -16,21 +16,34 @@ final class _SubscriptionScreenState extends State<SubscriptionScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<EntitlementController>().loadProducts();
+      if (mounted &&
+          context.read<AppFeatureFlagController>().premiumAvailable) {
+        context.read<EntitlementController>().loadProducts();
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final entitlement = context.watch<EntitlementController>();
-    final quota = context.watch<UsageQuotaController>().radarSessions;
-    final resetDate =
-        '${quota.resetAt.day.toString().padLeft(2, '0')}/'
-        '${quota.resetAt.month.toString().padLeft(2, '0')}';
     if (entitlement.isPremium) {
       return Scaffold(
         appBar: AppBar(title: const Text('Chetiwa+')),
         body: const Center(child: Text('Chetiwa+ est actif sur ce compte.')),
+      );
+    }
+    if (!context.watch<AppFeatureFlagController>().premiumAvailable) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Chetiwa+')),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Chetiwa+ sera proposé progressivement. Le Radar et la météo essentiels restent gratuits.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
       );
     }
     return Scaffold(
@@ -47,12 +60,7 @@ final class _SubscriptionScreenState extends State<SubscriptionScreen> {
           ),
           const SizedBox(height: 12),
           const Text(
-            'Chetiwa+ ajoute plusieurs lieux nommés, davantage d’historique Radar et supprime les publicités.',
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Radar ce mois-ci : ${quota.used}/${quota.limit} sessions · remise à zéro le $resetDate',
+            'Chetiwa+ ajoute plusieurs lieux nommés, davantage d’historique Radar et supprime les publicités. Le Radar essentiel reste accessible gratuitement.',
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),

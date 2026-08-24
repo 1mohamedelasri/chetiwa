@@ -5,9 +5,13 @@ import '../../domain/entities/radar_frame.dart';
 import '../../domain/repositories/radar_repository.dart';
 
 final class FixtureRadarRepository implements RadarRepository {
-  const FixtureRadarRepository({this.clock = const SystemWeatherClock()});
+  const FixtureRadarRepository({
+    this.clock = const SystemWeatherClock(),
+    this.providerName = 'Fixture Radar',
+  });
 
   final WeatherClock clock;
+  final String providerName;
 
   @override
   Future<CachedRadarFrames?> getCachedFrames(Coordinates coordinates) async =>
@@ -31,7 +35,7 @@ final class FixtureRadarRepository implements RadarRepository {
         kind: index <= 9
             ? WeatherDataKind.radarObservation
             : WeatherDataKind.radarNowcast,
-        providerName: 'Fixture Radar',
+        providerName: providerName,
       ),
       growable: false,
     );

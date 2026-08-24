@@ -41,3 +41,30 @@ job et de son Scheduler est détaillé dans `smart-rain-alerts-runbook.md`.
 La création effective du projet GCP, de la base Firestore, du compte de
 facturation, des budgets et de Secret Manager nécessite l’accès propriétaire au
 compte Google Cloud. Redis et le CDN restent derrière leurs gates de coût.
+
+## Déploiement API et surveillance
+
+Après avoir créé les secrets `open-meteo-api-key` et
+`chetiwa-internal-metrics-token` dans Secret Manager, l'API peut être déployée
+avec le workflow manuel GitHub **Deploy backend production** ou localement :
+
+```sh
+backend/deploy/cloud-run/deploy-api.sh \
+  PROJECT_ID europe-west1 IMAGE_URI \
+  chetiwa-api@PROJECT_ID.iam.gserviceaccount.com \
+  https://api.chetiwa.app
+```
+
+Le workflow utilise Workload Identity Federation, sans JSON de compte de
+service. Il doit être protégé par l'environnement GitHub `production` et un
+reviewer. Une fois le domaine public actif :
+
+```sh
+backend/deploy/cloud-run/provision-api-observability.sh \
+  PROJECT_ID api.chetiwa.app \
+  'projects/PROJECT_ID/notificationChannels/CHANNEL_ID'
+```
+
+La sonde interroge `/healthz` chaque minute depuis trois régions et ouvre une
+alerte après deux minutes d'échec. Omettre le troisième argument crée la
+politique sans destinataire ; ajouter le canal e-mail avant la bêta publique.

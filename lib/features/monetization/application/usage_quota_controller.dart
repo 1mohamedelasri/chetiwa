@@ -60,6 +60,7 @@ final class UsageQuotaController extends ChangeNotifier {
   String _month = _monthId(DateTime.now());
   int? _serverLimit;
   DateTime? _serverResetAt;
+  var _serverEnforced = false;
   Future<bool>? _openingRadarSession;
 
   PremiumLimits get limits => PremiumLimits.forEntitlement(_entitlement);
@@ -74,10 +75,12 @@ final class UsageQuotaController extends ChangeNotifier {
     );
   }
 
-  bool get canOpenRadar => radarSessions.remaining > 0;
+  /// Launch policy: Radar is a core feature and local storage is never an
+  /// authority for access control. Only a validated, explicitly enforced
+  /// server decision may deny an opening.
+  bool get canOpenRadar => !_serverEnforced || radarSessions.remaining > 0;
 
   Future<bool> consumeRadarSession() async {
-    if (!canOpenRadar) return false;
     _used++;
     notifyListeners();
     await _persistValue();
@@ -110,6 +113,7 @@ final class UsageQuotaController extends ChangeNotifier {
       _used = decision.used;
       _serverLimit = decision.limit;
       _serverResetAt = decision.resetAt;
+      _serverEnforced = decision.enforced;
       notifyListeners();
       await _persistValue();
       return !decision.enforced || decision.allowed;
@@ -135,6 +139,7 @@ final class UsageQuotaController extends ChangeNotifier {
     _used = 0;
     _serverLimit = null;
     _serverResetAt = null;
+    _serverEnforced = false;
     unawaited(_persistValue());
   }
 

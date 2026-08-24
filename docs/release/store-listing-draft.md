@@ -1,33 +1,66 @@
-# Fiche Store — brouillon bêta Chetiwa
+# Fiches App Store et Google Play — Chetiwa
 
-## Nom
+## Français
 
-Chetiwa — Pluie & Radar
+- **Nom** : `Chetiwa : pluie et radar`
+- **Sous-titre App Store** : `La pluie, avant qu'elle arrive`
+- **Description courte Play** : `Graphique de pluie, radar animé et alertes pour le lieu de votre choix.`
+- **Texte promotionnel** : `Voyez la pluie arriver, explorez le radar et gardez vos prévisions essentielles au même endroit.`
+- **Mots-clés App Store** : `météo,pluie,radar,prévision,alerte,orage,précipitation,carte,nowcast`
 
-## Sous-titre court
+### Description complète
 
-La pluie et le radar, simplement.
+Chetiwa vous aide à comprendre la pluie autour du lieu qui compte maintenant.
 
-## Description courte
+• Un graphique clair pour voir quand la pluie commence et son intensité.
+• Un radar animé qui démarre automatiquement et reste fluide pendant vos déplacements sur la carte.
+• Des prévisions horaires et sur plusieurs jours.
+• Des alertes pluie facultatives, configurées sans créer de compte.
+• Recherche, carte ou position actuelle : vous choisissez toujours le point affiché.
 
-Prévisions locales, graphique de pluie et radar animé pour le lieu de votre
-choix.
+La localisation est facultative et n'est utilisée qu'à votre demande. Chetiwa ne suit pas vos déplacements en arrière-plan. Les statistiques et diagnostics Firebase sont désactivés par défaut et restent sous votre contrôle dans Réglages.
 
-## Description bêta
+Les données météo et radar sont indicatives et ne remplacent pas les alertes officielles de sécurité.
 
-Chetiwa vous aide à voir la pluie à venir : choisissez une ville, votre position
-actuelle ou un point sur la carte, puis consultez le graphique, le radar et les
-prévisions. La localisation est toujours facultative et utilisée uniquement à
-votre demande.
+## English
 
-Cette version est une bêta privée. Les données météo et radar sont indicatives ;
-elles ne remplacent pas les alertes officielles de sécurité.
+- **Name**: `Chetiwa: Rain & Radar`
+- **App Store subtitle**: `See rain before it arrives`
+- **Play short description**: `Rain graph, animated radar and alerts for any place you choose.`
+- **Promotional text**: `See rain approaching, explore the radar and keep essential forecasts in one calm place.`
+- **App Store keywords**: `weather,rain,radar,forecast,alert,storm,precipitation,map,nowcast`
 
-## À fournir avant Store Connect / Play Console
+### Full description
 
-- [ ] Icône finale, captures par appareil et texte FR/EN relu.
-- [ ] URL support, politique de confidentialité et conditions publiées.
-- [ ] E-mail support et instructions de review (GPS, carte, radar, alertes).
-- [ ] Réponses App Privacy / Data Safety issues de la checklist bêta.
-- [ ] Classification d'âge et déclaration d'absence de publicité/achat pour ce
-  build.
+Chetiwa helps you understand the rain around the place that matters right now.
+
+• A clear graph showing when rain starts and how intense it may become.
+• An animated radar that starts automatically and stays responsive as you move around the map.
+• Hourly and multi-day forecasts.
+• Optional rain alerts, with no account required.
+• Search, map or current position: you always choose the displayed point.
+
+Location is optional and used only when you request it. Chetiwa does not track your movements in the background. Firebase usage statistics and diagnostics are off by default and remain under your control in Settings.
+
+Weather and radar information is indicative and does not replace official safety alerts.
+
+## Notes de review
+
+- Aucun compte requis.
+- Graph s'ouvre au lancement ; Radar démarre automatiquement.
+- La localisation peut être refusée : utiliser la recherche ou la carte.
+- Alertes : Réglages → Smart Rain Alerts. L'envoi distant n'est testable que si
+  Firestore/FCM sont activés pour l'environnement de review.
+- Publicité et Chetiwa+ sont masqués dans la première release (`flags=false`).
+
+## Captures requises
+
+1. Graph — début/intensité de pluie.
+2. Radar — animation et point sélectionné.
+3. Prévisions — horaire et plusieurs jours.
+4. Alertes — délai, intensité et heures calmes.
+5. Réglages — localisation facultative et confidentialité.
+
+Produire au minimum un jeu iPhone 6,7 pouces et un jeu Android téléphone. Ne pas
+utiliser une capture avec bande de debug, notifications personnelles, batterie
+faible ou données fournisseur périmées.

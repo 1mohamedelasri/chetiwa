@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../../core/config/api_config.dart';
 import '../../core/location/chetiwa_location_repository.dart';
+import '../../core/location/coordinates.dart';
 import '../../core/location/active_location_controller.dart';
 import '../../core/location/device_location_provider.dart';
 import '../../core/location/fixture_location_repository.dart';
@@ -36,6 +37,7 @@ import '../../features/monetization/domain/ads_repository.dart';
 import '../../features/monetization/domain/consent_repository.dart';
 import '../../features/monetization/application/saved_places_controller.dart';
 import '../../features/monetization/application/usage_quota_controller.dart';
+import '../../features/monetization/application/app_feature_flag_controller.dart';
 import '../../features/monetization/data/store_purchase_gateway.dart';
 import '../../features/monetization/data/chetiwa_radar_session_gateway.dart';
 import '../../features/monetization/data/google_ads_repository.dart';
@@ -62,6 +64,7 @@ final class ChetiwaDependencies {
     required this.entitlementController,
     required this.savedPlacesController,
     required this.usageQuotaController,
+    required this.appFeatureFlagController,
     http.Client? client,
   }) : rainAlertNavigationController =
            rainAlertNavigationController ?? RainAlertNavigationController(),
@@ -86,6 +89,9 @@ final class ChetiwaDependencies {
     final usageQuotaController = UsageQuotaController(
       entitlement: entitlementController,
       radarSessionGateway: api == null ? null : ChetiwaRadarSessionGateway(api),
+    );
+    final appFeatureFlagController = AppFeatureFlagController(
+      gateway: api == null ? null : ChetiwaAppFeatureFlagGateway(api),
     );
     final rainAlertNavigationController = RainAlertNavigationController();
     final remoteRainAlertGateway = api == null
@@ -141,6 +147,7 @@ final class ChetiwaDependencies {
         entitlementController: entitlementController,
         savedPlacesController: savedPlacesController,
         usageQuotaController: usageQuotaController,
+        appFeatureFlagController: appFeatureFlagController,
         forecastRepository: ApiConfig.usesNotificationTestForecast
             ? notificationTestForecast
             : directForecast,
@@ -178,6 +185,7 @@ final class ChetiwaDependencies {
       entitlementController: entitlementController,
       savedPlacesController: savedPlacesController,
       usageQuotaController: usageQuotaController,
+      appFeatureFlagController: appFeatureFlagController,
       forecastRepository: ApiConfig.usesNotificationTestForecast
           ? notificationTestForecast
           : fallback
@@ -194,11 +202,20 @@ final class ChetiwaDependencies {
     );
   }
 
-  factory ChetiwaDependencies.fixture() {
+  factory ChetiwaDependencies.fixture({
+    AppFeatureFlags featureFlags = const AppFeatureFlags(
+      premiumAvailable: true,
+      adsEnabled: true,
+    ),
+    bool storeScreenshot = false,
+  }) {
     final entitlementController = EntitlementController(
       gateway: FixturePremiumPurchaseGateway(),
       persist: false,
       autoSync: false,
+    );
+    final fixtureLocation = FixtureLocationRepository(
+      mainLocation: storeScreenshot ? LocationCatalog.locations.first : null,
     );
     return ChetiwaDependencies._(
       weatherClock: const SystemWeatherClock(),
@@ -217,14 +234,22 @@ final class ChetiwaDependencies {
         entitlement: entitlementController,
         persist: false,
       ),
-      forecastRepository: const FixtureForecastRepository(
-        FixtureForecastDataSource(),
+      appFeatureFlagController: AppFeatureFlagController(
+        initial: featureFlags,
+        persist: false,
       ),
-      radarRepository: const FixtureRadarRepository(),
-      locationRepository: const FixtureLocationRepository(),
-      activeLocationController: ActiveLocationController(
-        const FixtureLocationRepository(),
+      forecastRepository: FixtureForecastRepository(
+        FixtureForecastDataSource(
+          providerName: storeScreenshot
+              ? 'Météo-France AROME via Open-Meteo'
+              : 'Fixture Open-Meteo',
+        ),
       ),
+      radarRepository: FixtureRadarRepository(
+        providerName: storeScreenshot ? 'LibreWXR' : 'Fixture Radar',
+      ),
+      locationRepository: fixtureLocation,
+      activeLocationController: ActiveLocationController(fixtureLocation),
     );
   }
 
@@ -244,6 +269,7 @@ final class ChetiwaDependencies {
     EntitlementController? entitlementController,
     SavedPlacesController? savedPlacesController,
     UsageQuotaController? usageQuotaController,
+    AppFeatureFlagController? appFeatureFlagController,
   }) {
     final entitlement =
         entitlementController ??
@@ -280,6 +306,15 @@ final class ChetiwaDependencies {
       usageQuotaController:
           usageQuotaController ??
           UsageQuotaController(entitlement: entitlement, persist: false),
+      appFeatureFlagController:
+          appFeatureFlagController ??
+          AppFeatureFlagController(
+            initial: const AppFeatureFlags(
+              premiumAvailable: true,
+              adsEnabled: true,
+            ),
+            persist: false,
+          ),
     );
   }
 
@@ -299,6 +334,7 @@ final class ChetiwaDependencies {
   final EntitlementController entitlementController;
   final SavedPlacesController savedPlacesController;
   final UsageQuotaController usageQuotaController;
+  final AppFeatureFlagController appFeatureFlagController;
   final http.Client? _client;
 
   late final LocalRainAlertCoordinator localRainAlertCoordinator =
@@ -318,6 +354,7 @@ final class ChetiwaDependencies {
     entitlementController.dispose();
     savedPlacesController.dispose();
     usageQuotaController.dispose();
+    appFeatureFlagController.dispose();
     activeLocationController.dispose();
     rainAlertNavigationController.dispose();
     unawaited(localRainAlertCoordinator.dispose());

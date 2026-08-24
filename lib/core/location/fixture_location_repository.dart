@@ -2,7 +2,9 @@ import 'coordinates.dart';
 import 'location_repository.dart';
 
 final class FixtureLocationRepository implements LocationRepository {
-  const FixtureLocationRepository();
+  const FixtureLocationRepository({this.mainLocation});
+
+  final ChetiwaLocation? mainLocation;
 
   @override
   Future<ChetiwaLocation> getCurrentLocation() async =>
@@ -19,7 +21,7 @@ final class FixtureLocationRepository implements LocationRepository {
   Future<void> remember(ChetiwaLocation location) async {}
 
   @override
-  Future<ChetiwaLocation?> getMainLocation() async => null;
+  Future<ChetiwaLocation?> getMainLocation() async => mainLocation;
 
   @override
   Future<void> setMainLocation(ChetiwaLocation location) async {}

@@ -1,36 +1,26 @@
-# Inventaire minimal des données — MVP bêta locale
+# Inventaire des données — Chetiwa préproduction
 
-Ce document décrit le comportement réellement embarqué dans le MVP. Il devra être
-relu avec les textes Privacy Policy/Terms et par un conseil compétent avant toute
-distribution externe. Les éléments backend/push/achats sont reportés. Firebase
-Analytics est configuré techniquement, mais sa collecte est désactivée par
-défaut. Elle ne peut être activée qu'après un choix explicite et réversible dans
-Réglages ; la déclaration stores doit refléter le comportement effectivement
-publié.
+Dernière mise à jour : 24 août 2026. Cet inventaire doit rester aligné avec la
+politique, le code et les formulaires Store.
 
-| Donnée | Finalité | Stockage prévu | Rétention cible | Suppression |
-| --- | --- | --- | --- | --- |
-| Lieu principal et récents | Afficher la météo du lieu choisi | Appareil de l'utilisateur | Jusqu’à remplacement/suppression | Réglages et geste de suppression |
-| Préférences d’alerte locales | Délai, seuil, quiet hours, état actif | Appareil de l'utilisateur | Jusqu’à désinstallation ou effacement local | Désactivation/effacement app |
-| Position actuelle | Afficher la météo après action explicite | Mémoire pendant le parcours | Non persistée comme position GPS | Fin du parcours / changement de lieu |
-| Coordonnées du lieu consulté | Appeler météo, radar et carte | Requête aux fournisseurs concernés | Selon leurs conditions, à vérifier avant bêta externe | Choisir un autre lieu / arrêter d'utiliser le service |
-| Événements Analytics autorisés | Usage essentiel et disponibilité Radar après consentement | Firebase Analytics, sans lieu/coordonnées/URL/valeur météo | Selon la configuration Firebase publiée | Désactivation dans Réglages et procédure Firebase applicable |
+| Donnée | Finalité | Stockage | Rétention/suppression |
+| --- | --- | --- | --- |
+| Lieu principal, récents et lieux nommés | Afficher la météo choisie | Appareil | Jusqu'à suppression locale |
+| Préférences, quiet hours et caches | Personnaliser/résilient hors ligne | Appareil | Jusqu'à effacement/désinstallation |
+| Position GPS | Choisir ponctuellement un point | Mémoire et requête météo | Pas d'historique de déplacements |
+| Recherche et coordonnées consultées | Forecast, radar, carte, géocodage | API/fournisseurs ; caches mutualisés et arrondis | Selon cache et contrats fournisseurs |
+| Identifiant aléatoire d'installation | Sécurité, télémétrie d'usage, rollout | Brut sur appareil/requête ; SHA-256 côté backend | Compteur 30 jours ; renouvelé après effacement complet |
+| Token APNs/FCM et règle d'alerte | Envoyer l'alerte demandée | Firestore | Suppression à la désactivation ; TTL appareil 180 jours |
+| Événements allow-listés | Usage produit après consentement | Firebase Analytics | Selon configuration Firebase publiée |
+| Crash/stack trace | Fiabilité après consentement | Firebase Crashlytics | Selon configuration Firebase publiée |
+| Métriques backend agrégées | Disponibilité, coût, erreurs | Backend/Firestore | Métriques alertes 30 jours ; aucun token/coordonnée dans les logs |
 
-## Hors MVP — ne pas activer sans mise à jour de cet inventaire
+## Interdictions d'implémentation
 
-- hash d'identifiant d'installation, token APNs/FCM, alertes distantes ;
-- compte, sauvegarde cloud, achats ou droits Premium ;
-- crash reporting, publicité ou identifiant publicitaire ;
-- analytics Firebase tant que l'utilisateur n'a pas activé le choix dédié.
-
-Règles d’implémentation :
-
-- ne jamais journaliser le token push, l’identifiant brut ou les coordonnées
+- ne jamais journaliser token push, identifiant brut, recherche ou coordonnées
   précises ;
-- ne pas partager le lieu météo avec le profil publicitaire ;
-- ne demander localisation et notifications qu’au moment où la fonction les
-  nécessite ;
-- permettre une météo par recherche manuelle sans permission GPS ;
-- documenter chaque nouveau champ avant de le persister ;
-- vérifier sous-traitants, DPA, région, transferts et sous-processeurs avant
-  d’activer un service en production.
+- ne jamais envoyer un lieu météo à un profil publicitaire ;
+- ne demander une permission qu'au moment de la fonction correspondante ;
+- maintenir la recherche manuelle sans permission GPS ;
+- documenter tout nouveau champ avant persistance ;
+- ne pas activer pubs ou Premium avant mise à jour privacy/consent/stores.

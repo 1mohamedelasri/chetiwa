@@ -30,6 +30,57 @@ void main() {
         radarQuota: radarQuota,
       );
 
+  test(
+    'public app config fails closed and requires an installation id',
+    () async {
+      final app = appWith(MockClient((_) async => http.Response('{}', 200)));
+      final uri = Uri.parse('http://localhost/v1/app-config');
+
+      final unauthorized = await app(Request('GET', uri));
+      expect(unauthorized.statusCode, 401);
+
+      final response = await app(
+        Request(
+          'GET',
+          uri,
+          headers: const <String, String>{
+            'x-chetiwa-device-id': 'test-installation-1234',
+          },
+        ),
+      );
+      final body =
+          jsonDecode(await response.readAsString()) as Map<String, Object?>;
+      final data = body['data'] as Map<String, Object?>;
+      expect(data['features'], <String, Object?>{
+        'premium': false,
+        'ads': false,
+      });
+    },
+  );
+
+  test('premium rollout is stable per installation', () async {
+    config = RuntimeConfig.fromEnvironment(const <String, String>{
+      'PREMIUM_ENABLED': 'true',
+      'PREMIUM_ROLLOUT_PERCENT': '100',
+      'ADS_ENABLED': 'true',
+      'ARCGIS_API_KEY': 'test-key',
+    });
+    final app = appWith(MockClient((_) async => http.Response('{}', 200)));
+    final response = await app(
+      Request(
+        'GET',
+        Uri.parse('http://localhost/v1/app-config'),
+        headers: const <String, String>{
+          'x-chetiwa-device-id': 'stable-installation-1234',
+        },
+      ),
+    );
+    final body =
+        jsonDecode(await response.readAsString()) as Map<String, Object?>;
+    final data = body['data'] as Map<String, Object?>;
+    expect(data['features'], <String, Object?>{'premium': true, 'ads': true});
+  });
+
   test('forecast normalizes provider data and supports ETag caching', () async {
     var calls = 0;
     final app = appWith(

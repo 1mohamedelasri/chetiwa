@@ -45,7 +45,7 @@ void main() {
     },
   );
 
-  test('quota exposes usage and blocks sessions at the Free limit', () async {
+  test('local Radar usage remains telemetry and never blocks access', () async {
     final entitlement = EntitlementController(
       gateway: FixturePremiumPurchaseGateway(),
       persist: false,
@@ -56,11 +56,11 @@ void main() {
       persist: false,
     );
 
-    for (var index = 0; index < 20; index++) {
+    for (var index = 0; index < 25; index++) {
       expect(await quota.consumeRadarSession(), isTrue);
     }
-    expect(await quota.consumeRadarSession(), isFalse);
-    expect(quota.radarSessions.used, 20);
+    expect(quota.canOpenRadar, isTrue);
+    expect(quota.radarSessions.used, 25);
     expect(quota.radarSessions.remaining, 0);
 
     quota.dispose();
@@ -130,6 +130,51 @@ void main() {
     entitlement.dispose();
   });
 
+  test('only an explicitly enforced server decision can block Radar', () async {
+    final entitlement = EntitlementController(
+      gateway: FixturePremiumPurchaseGateway(),
+      persist: false,
+      autoSync: false,
+    );
+    final telemetryOnly = UsageQuotaController(
+      entitlement: entitlement,
+      persist: false,
+      radarSessionGateway: _FixedRadarSessionGateway(
+        RadarSessionDecision(
+          allowed: true,
+          enforced: false,
+          used: 21,
+          limit: 20,
+          resetAt: _resetAt,
+        ),
+      ),
+    );
+
+    expect(await telemetryOnly.openRadarSession(), isTrue);
+    expect(telemetryOnly.canOpenRadar, isTrue);
+    telemetryOnly.dispose();
+
+    final enforced = UsageQuotaController(
+      entitlement: entitlement,
+      persist: false,
+      radarSessionGateway: _FixedRadarSessionGateway(
+        RadarSessionDecision(
+          allowed: false,
+          enforced: true,
+          used: 21,
+          limit: 20,
+          resetAt: _resetAt,
+        ),
+      ),
+    );
+
+    expect(await enforced.openRadarSession(), isFalse);
+    expect(enforced.canOpenRadar, isFalse);
+
+    enforced.dispose();
+    entitlement.dispose();
+  });
+
   test(
     'fixture purchase activates Premium and exposes store products',
     () async {
@@ -147,4 +192,15 @@ void main() {
       entitlement.dispose();
     },
   );
+}
+
+final _resetAt = DateTime.utc(2026, 9);
+
+final class _FixedRadarSessionGateway implements RadarSessionGateway {
+  const _FixedRadarSessionGateway(this.decision);
+
+  final RadarSessionDecision decision;
+
+  @override
+  Future<RadarSessionDecision> open({required bool premium}) async => decision;
 }

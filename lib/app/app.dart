@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../features/forecast/domain/repositories/forecast_repository.dart';
+import '../features/forecast/application/weather_section_cubit.dart';
 import '../features/radar/domain/repositories/radar_repository.dart';
 import '../core/location/location_repository.dart';
 import '../core/location/active_location_controller.dart';
@@ -26,6 +27,7 @@ import '../features/monetization/domain/ads_repository.dart';
 import '../features/monetization/domain/consent_repository.dart';
 import '../features/monetization/application/saved_places_controller.dart';
 import '../features/monetization/application/usage_quota_controller.dart';
+import '../features/monetization/application/app_feature_flag_controller.dart';
 import '../features/monetization/domain/premium_entitlement.dart';
 import 'theme/chetiwa_theme.dart';
 
@@ -33,11 +35,15 @@ final class ChetiwaApp extends StatefulWidget {
   const ChetiwaApp({
     this.dependencies,
     this.analyticsConsent = false,
+    this.initialLocation = '/weather',
+    this.initialWeatherSection = WeatherSection.graph,
     super.key,
   });
 
   final ChetiwaDependencies? dependencies;
   final bool analyticsConsent;
+  final String initialLocation;
+  final WeatherSection initialWeatherSection;
 
   @override
   State<ChetiwaApp> createState() => _ChetiwaAppState();
@@ -48,12 +54,16 @@ final class _ChetiwaAppState extends State<ChetiwaApp> {
       widget.dependencies ?? ChetiwaDependencies.live();
   late final AnalyticsConsentController _analyticsConsentController =
       AnalyticsConsentController(initiallyEnabled: widget.analyticsConsent);
-  late final GoRouter _router = createAppRouter();
+  late final GoRouter _router = createAppRouter(
+    initialLocation: widget.initialLocation,
+    initialWeatherSection: widget.initialWeatherSection,
+  );
 
   @override
   void initState() {
     super.initState();
     unawaited(_dependencies.localRainAlertCoordinator.initialize());
+    unawaited(_dependencies.appFeatureFlagController.initialize());
   }
 
   @override
@@ -120,6 +130,9 @@ final class _ChetiwaAppState extends State<ChetiwaApp> {
             ),
             ChangeNotifierProvider<UsageQuotaController>.value(
               value: _dependencies.usageQuotaController,
+            ),
+            ChangeNotifierProvider<AppFeatureFlagController>.value(
+              value: _dependencies.appFeatureFlagController,
             ),
           ],
           child: Consumer<AppPreferencesController>(

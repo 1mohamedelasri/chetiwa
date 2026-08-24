@@ -1,4 +1,5 @@
 import 'package:firebase_analytics/firebase_analytics.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -13,17 +14,25 @@ final class AnalyticsConsentController extends ChangeNotifier {
     required bool initiallyEnabled,
     AnalyticsCollectionUpdater? updateCollection,
   }) : _enabled = initiallyEnabled,
-       _updateCollection = updateCollection ?? _setFirebaseCollectionEnabled;
+       _updateCollection = updateCollection ?? _setFirebaseCollectionEnabled {
+    _runtimeCollectionEnabled = initiallyEnabled;
+  }
 
   static const storageKey = 'privacy:analytics-collection-enabled';
+  static bool _runtimeCollectionEnabled = false;
 
   final AnalyticsCollectionUpdater _updateCollection;
   bool _enabled;
 
   bool get isEnabled => _enabled;
+  static bool get runtimeCollectionEnabled => _runtimeCollectionEnabled;
 
-  static Future<void> _setFirebaseCollectionEnabled(bool enabled) =>
-      FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(enabled);
+  static Future<void> _setFirebaseCollectionEnabled(bool enabled) async {
+    await Future.wait(<Future<void>>[
+      FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(enabled),
+      FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(enabled),
+    ]);
+  }
 
   /// Returns false only when enabling the SDK itself failed.
   Future<bool> setEnabled(bool enabled) async {
@@ -46,6 +55,7 @@ final class AnalyticsConsentController extends ChangeNotifier {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setBool(storageKey, enabled);
     _enabled = enabled;
+    _runtimeCollectionEnabled = enabled;
     notifyListeners();
     return true;
   }
@@ -59,6 +69,7 @@ final class AnalyticsConsentController extends ChangeNotifier {
     await preferences.remove(storageKey);
     if (!_enabled) return;
     _enabled = false;
+    _runtimeCollectionEnabled = false;
     notifyListeners();
   }
 }

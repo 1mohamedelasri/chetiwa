@@ -1,0 +1,89 @@
+name: Build mobile release candidates
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (for example 1.0.0)
+        required: true
+      build_number:
+        description: Monotonic store build number
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Restore Android upload key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          test -n "$KEYSTORE_BASE64"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/upload-keystore.jks
+          {
+            printf 'storePassword=%s\n' "$STORE_PASSWORD"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'storeFile=../upload-keystore.jks\n'
+          } > android/key.properties
+      - run: flutter pub get
+      - name: Build signed Android App Bundle
+        env:
+          API_BASE_URL: ${{ secrets.CHETIWA_API_BASE_URL }}
+        run: >-
+          flutter build appbundle --release
+          --build-name=${{ inputs.version }}
+          --build-number=${{ inputs.build_number }}
+          --dart-define=CHETIWA_ENV=production
+          --dart-define=CHETIWA_API_BASE_URL=$API_BASE_URL
+          --dart-define=CHETIWA_ALLOW_DIRECT_PROVIDER_FALLBACK=false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chetiwa-android-${{ inputs.version }}-${{ inputs.build_number }}
+          path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14
+
+  ios-unsigned:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Build unsigned iOS archive candidate
+        env:
+          API_BASE_URL: ${{ secrets.CHETIWA_API_BASE_URL }}
+        run: >-
+          flutter build ios --release --no-codesign
+          --build-name=${{ inputs.version }}
+          --build-number=${{ inputs.build_number }}
+          --dart-define=CHETIWA_ENV=production
+          --dart-define=CHETIWA_API_BASE_URL=$API_BASE_URL
+          --dart-define=CHETIWA_ALLOW_DIRECT_PROVIDER_FALLBACK=false
+      - name: Package unsigned iOS candidate
+        run: >-
+          ditto -c -k --sequesterRsrc --keepParent
+          build/ios/iphoneos/Runner.app
+          build/chetiwa-ios-unsigned.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chetiwa-ios-unsigned-${{ inputs.version }}-${{ inputs.build_number }}
+          path: build/chetiwa-ios-unsigned.zip
+          if-no-files-found: error
+          retention-days: 14

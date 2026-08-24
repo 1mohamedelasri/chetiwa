@@ -63,6 +63,14 @@ décrits dans
 [`docs/backend/api-v1.md`](../docs/backend/api-v1.md).
 Voir aussi [`cdn-shared-backend-runbook.md`](../docs/backend/cdn-shared-backend-runbook.md).
 
+Le déploiement de l'API est reproductible avec
+`deploy/cloud-run/deploy-api.sh`. Il conserve une seule instance maximale tant
+qu'aucun compteur partagé n'est configuré, démarre Premium, publicités et
+alertes distantes désactivés, puis vérifie `/healthz`. La sonde publique et sa
+politique d'alerte sont provisionnées séparément par
+`deploy/cloud-run/provision-api-observability.sh` : le dépôt ne crée donc
+aucune ressource cloud automatiquement.
+
 Les routes device/alertes sont décrites dans
 [`docs/backend/device-alert-api.md`](../docs/backend/device-alert-api.md). Elles
 utilisent un store mémoire uniquement en profil `local`. Le serveur injecte
@@ -97,6 +105,9 @@ le moteur à 50 €. Leur activation est documentée dans
 | `MONTHLY_BUDGET_CENTS` | plafond mensuel des coûts origine |
 | `RADAR_TILE_COST_CENTS` | coût estimé par tuile origine (0 pour LibreWXR bêta) |
 | `GLOBAL_KILL_SWITCH` | désactivation immédiate du Radar, des tuiles et du worker d’alertes |
+| `PREMIUM_ENABLED` | rend l’offre Chetiwa+ visible pour les installations éligibles |
+| `PREMIUM_ROLLOUT_PERCENT` | déploiement stable de Chetiwa+ par installation, de `0` à `100` |
+| `ADS_ENABLED` | active les emplacements publicitaires pour les non-Premium |
 | `RAIN_ALERTS_ENABLED` | active explicitement le worker, `false` par défaut |
 | `RAIN_ALERTS_SEND_ENABLED` | autorise FCM ; `false` conserve le shadow mode par défaut |
 | `RAIN_ALERT_CELL_SIZE_DEGREES` | taille stable des cellules mutualisées, `0.05` par défaut |

@@ -27,7 +27,9 @@ import '../widgets/forecast_pane.dart';
 import '../widgets/weather_chrome.dart';
 
 final class WeatherScreen extends StatelessWidget {
-  const WeatherScreen({super.key});
+  const WeatherScreen({this.initialSection = WeatherSection.graph, super.key});
+
+  final WeatherSection initialSection;
 
   @override
   Widget build(BuildContext context) => MultiBlocProvider(
@@ -40,7 +42,9 @@ final class WeatherScreen extends StatelessWidget {
         )..add(const ForecastRequested()),
       ),
       BlocProvider(create: (_) => GraphHorizonCubit()),
-      BlocProvider(create: (_) => WeatherSectionCubit()),
+      BlocProvider(
+        create: (_) => WeatherSectionCubit(initialSection: initialSection),
+      ),
       BlocProvider(
         lazy: false,
         create: (context) => RadarBloc(

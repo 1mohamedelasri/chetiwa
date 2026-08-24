@@ -13,6 +13,9 @@ void main() {
     expect(config.radarQuotaEnforced, isFalse);
     expect(config.radarFreeSessions, 20);
     expect(config.radarPremiumSessions, 200);
+    expect(config.premiumEnabled, isFalse);
+    expect(config.premiumRolloutPercent, 0);
+    expect(config.adsEnabled, isFalse);
     expect(config.rainAlertsEnabled, isFalse);
     expect(config.rainAlertsSendEnabled, isFalse);
     expect(config.rainAlertSoftBudgetCents, 2500);
@@ -98,6 +101,24 @@ void main() {
     expect(config.rainAlertMaxConcurrentCells, 6);
     expect(config.rainAlertSoftBudgetCents, 3000);
     expect(config.rainAlertHardBudgetCents, 6000);
+  });
+
+  test('parses monetization feature flags and validates rollout', () {
+    final config = RuntimeConfig.fromEnvironment(const <String, String>{
+      'PREMIUM_ENABLED': 'true',
+      'PREMIUM_ROLLOUT_PERCENT': '25',
+      'ADS_ENABLED': 'true',
+    });
+
+    expect(config.premiumEnabled, isTrue);
+    expect(config.premiumRolloutPercent, 25);
+    expect(config.adsEnabled, isTrue);
+    expect(
+      () => RuntimeConfig.fromEnvironment(const <String, String>{
+        'PREMIUM_ROLLOUT_PERCENT': '101',
+      }),
+      throwsFormatException,
+    );
   });
 
   test('rejects an alert hard budget below its warning threshold', () {

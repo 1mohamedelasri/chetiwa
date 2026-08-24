@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'chetiwa_tokens.dart';
 
@@ -62,6 +63,17 @@ abstract final class ChetiwaTheme {
     appBarTheme: AppBarTheme(
       backgroundColor: Colors.transparent,
       foregroundColor: scheme.onSurface,
+      systemOverlayStyle: scheme.brightness == Brightness.light
+          ? SystemUiOverlayStyle.dark.copyWith(
+              statusBarColor: Colors.transparent,
+              systemNavigationBarColor: scheme.surface,
+              systemNavigationBarIconBrightness: Brightness.dark,
+            )
+          : SystemUiOverlayStyle.light.copyWith(
+              statusBarColor: Colors.transparent,
+              systemNavigationBarColor: scheme.surface,
+              systemNavigationBarIconBrightness: Brightness.light,
+            ),
     ),
   );
 }

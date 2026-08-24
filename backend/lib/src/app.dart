@@ -95,6 +95,22 @@ Handler createApp({
         'environment': config.environment.name,
       });
     })
+    ..get('/v1/app-config', (Request request) {
+      try {
+        final ownerHash = _installationOwnerHash(request);
+        final premiumEligible =
+            config.premiumEnabled &&
+            _rolloutBucket(ownerHash) < config.premiumRolloutPercent;
+        return _dataResponse(<String, Object?>{
+          'features': <String, Object?>{
+            'premium': premiumEligible,
+            'ads': config.adsEnabled,
+          },
+        }, now: clock);
+      } on ApiException catch (error) {
+        return _apiError(error);
+      }
+    })
     ..get('/internal/metrics', (Request request) {
       final token = config.internalMetricsToken;
       if (config.isProduction &&
@@ -661,6 +677,9 @@ String _installationOwnerHash(Request request) {
   }
   return sha256.convert(utf8.encode(installationId)).toString();
 }
+
+int _rolloutBucket(String ownerHash) =>
+    int.parse(ownerHash.substring(0, 8), radix: 16) % 100;
 
 String _radarSessionId(Request request) {
   final sessionId = request.headers['x-chetiwa-radar-session-id']?.trim();
