@@ -258,7 +258,7 @@ final class _Hour extends StatelessWidget {
           size: 28,
           color: weatherColor(
             item.weatherCode,
-            neutralColor: Theme.of(context).colorScheme.onSurface,
+            neutralColor: ChetiwaColors.textSecondary,
           ),
         ),
         const SizedBox(height: 6),
@@ -341,7 +341,7 @@ final class _Day extends StatelessWidget {
                   weatherIcon(item.weatherCode),
                   color: weatherColor(
                     item.weatherCode,
-                    neutralColor: Theme.of(context).colorScheme.onSurface,
+                    neutralColor: ChetiwaColors.textSecondary,
                   ),
                   size: 25,
                 ),
@@ -376,7 +376,7 @@ final class _Day extends StatelessWidget {
                     ChetiwaColors.rainLight,
                     weatherColor(
                       item.weatherCode,
-                      neutralColor: Theme.of(context).colorScheme.onSurface,
+                      neutralColor: ChetiwaColors.textSecondary,
                     ),
                     ChetiwaColors.warning,
                   ],
