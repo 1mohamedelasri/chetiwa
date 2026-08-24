@@ -78,6 +78,14 @@ radar terrestre là où LibreWXR ne dispose pas de composite radar natif.
    statistiques de cache volumineuses et peut dépasser plusieurs secondes sur
    le worker unique sans que l'origine soit réellement en panne.
 
+   La commande recommandée applique maintenant le profil complet, vérifie la
+   RAM, conserve une sauvegarde de `.env` et restaure automatiquement l'ancien
+   profil si les sondes échouent :
+
+   ```bash
+   deploy/librewxr/deploy-production-profile.sh root@116.203.124.254
+   ```
+
    Pour mettre à niveau une installation existante vers le profil versionné
    (6 Go, cache tuiles 256 Mo et watchdog corrigé), lancer depuis le Mac :
 
@@ -119,3 +127,7 @@ Le dimensionnement est volontairement contrôlé par des métriques. Il ne faut
 pas déclencher une VM plus grande uniquement selon le nombre d'installations :
 les tuiles effectivement servies, le taux de cache et les limites CPU/RAM sont
 les vrais signaux.
+
+Le calcul de capacité, la sonde de tuiles, le benchmark borné et la procédure
+de supervision multi-régions sont documentés dans
+[`librewxr-capacity-and-observability.md`](librewxr-capacity-and-observability.md).

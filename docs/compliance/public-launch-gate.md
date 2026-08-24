@@ -13,17 +13,17 @@ responsable identifié.
 | Composant | Utilisation actuelle | Décision de lancement | Preuve exigée |
 | --- | --- | --- | --- |
 | Prévisions/géocodage | Open-Meteo direct en dev, proxy en prod | Contrat/API commerciale avant pubs ou abonnements | Conditions acceptées, quota, attribution, DPA |
-| Radar | RainViewer | Prototype uniquement ; remplacer par Rainbow ou obtenir une autorisation commerciale écrite | Droit de distribution, tuiles, historique, cache, attribution, SLA/prix |
+| Radar | LibreWXR auto-hébergé derrière Cloudflare | Bêta après gate technique ; public après validation du code et de chaque donnée amont | Licences, droit de redistribution, cache/CDN, attribution, capacité et procédure incident |
 | Fond standard | CARTO dans le radar actuel | Remplacer par un fond explicitement autorisé ou signer l’offre adaptée | Licence mobile/commerciale, cache, attribution, quota |
-| Satellite | Esri | Désactivé par défaut ; Premium seulement après validation | Token, droits d’application, cache, attribution, budget |
+| Satellite | Esri, actuellement fond Radar par défaut | Désactiver comme défaut ou configurer compte/token/budget avant publication | Token, droits d’application, cache, attribution, budget |
 | Achats | Apple App Store / Google Play | Autoriser après validation des droits et textes store | Accords développeur, produits, commissions, fiscalité |
 | Publicité | Slot Free, aucune requête Premium | Activer uniquement avec CMP et contrat publicitaire validés | DPA, consentement, ATT/App Privacy/Data Safety, attribution |
 
 ## Checklist de release
 
 - [ ] Une personne responsable a signé la validation pour chaque fournisseur.
-- [ ] Le fournisseur Radar de production est choisi : RainViewer n’est pas
-  autorisé par défaut pour la distribution commerciale.
+- [ ] LibreWXR et chacune de ses données amont actives sont autorisés pour les
+  territoires, le cache et la redistribution de la build publiée.
 - [ ] Le droit d’usage commercial, les territoires et la durée sont écrits.
 - [ ] Le cache est expressément autorisé : durée, proxy/CDN, stockage disque,
   revalidation et préchargement.

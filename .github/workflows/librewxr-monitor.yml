@@ -1,0 +1,26 @@
+name: Monitor LibreWXR public radar
+
+on:
+  schedule:
+    # Keep private-repository Actions minutes bounded. Minute-level availability
+    # is handled by the VM watchdog and Google Cloud uptime checks.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: librewxr-public-monitor
+  cancel-in-progress: true
+
+jobs:
+  public-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe metadata, cold paths and immediate CDN hits
+        env:
+          CHETIWA_PROBE_REGION: github-hosted-runner
+        run: deploy/librewxr/probe-public-radar.sh

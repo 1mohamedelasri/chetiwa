@@ -17,6 +17,20 @@ scp \
   "$server:$staging_dir/"
 
 ssh "$server" "set -eu
+available_kb=\$(awk '/MemTotal:/ { print \$2 }' /proc/meminfo)
+if [ \"\${available_kb:-0}\" -lt 7000000 ]; then
+  echo 'Refusing the 6 GB LibreWXR profile: the host has less than 7 GB RAM.' >&2
+  exit 2
+fi
+backup_env='$remote_dir/.env.backup-'\$(date -u +%Y%m%dT%H%M%SZ)
+cp '$remote_dir/.env' \"\$backup_env\"
+rollback() {
+  echo 'Deployment failed; restoring the previous LibreWXR profile.' >&2
+  install -m 0600 \"\$backup_env\" '$remote_dir/.env'
+  docker compose --env-file '$remote_dir/.env' \
+    --project-directory '$remote_dir' up -d --force-recreate || true
+}
+trap rollback EXIT HUP INT TERM
 install -m 0600 '$staging_dir/hetzner-small.env' '$remote_dir/.env'
 install -m 0755 '$staging_dir/radar-watchdog.sh' /usr/local/sbin/chetiwa-radar-watchdog
 install -m 0644 '$staging_dir/chetiwa-radar-watchdog.service' /etc/systemd/system/chetiwa-radar-watchdog.service
@@ -32,6 +46,8 @@ CHETIWA_RADAR_PROBE_TIMEOUT_SECONDS=12
 EOF
 chmod 0600 /etc/chetiwa-radar-watchdog.env
 docker compose --env-file '$remote_dir/.env' \
+  --project-directory '$remote_dir' config --quiet
+docker compose --env-file '$remote_dir/.env' \
   --project-directory '$remote_dir' up -d --force-recreate
 systemctl daemon-reload
 systemctl enable --now chetiwa-radar-watchdog.timer
@@ -43,6 +59,9 @@ for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
     docker compose --env-file '$remote_dir/.env' \
       --project-directory '$remote_dir' ps
     curl --fail --silent --max-time 12 http://127.0.0.1:8080/health
+    trap - EXIT HUP INT TERM
+    rm -rf '$staging_dir'
+    echo \"Previous profile backup retained at \$backup_env\"
     exit 0
   fi
   sleep 5
