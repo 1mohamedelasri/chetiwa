@@ -60,7 +60,7 @@ final class _SubscriptionScreenState extends State<SubscriptionScreen> {
           ),
           const SizedBox(height: 12),
           const Text(
-            'Chetiwa+ ajoute le fond satellite, plusieurs lieux nommés, davantage d’historique Radar et supprime les publicités. Le fond standard et le Radar essentiel restent gratuits.',
+            'Chetiwa+ ajoute la prévision animée par modèle de 60 à 120 min, le fond satellite, plusieurs lieux nommés, davantage d’historique Radar et supprime les publicités. Le Radar réel et son nowcast jusqu’à 60 min restent gratuits.',
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),

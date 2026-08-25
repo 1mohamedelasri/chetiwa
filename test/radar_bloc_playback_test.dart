@@ -5,6 +5,7 @@ import 'package:chetiwa/features/radar/data/repositories/fixture_radar_repositor
 import 'package:chetiwa/features/radar/domain/entities/radar_frame.dart';
 import 'package:chetiwa/features/radar/domain/repositories/radar_repository.dart';
 import 'package:chetiwa/core/location/coordinates.dart';
+import 'package:chetiwa/core/time/weather_clock.dart';
 import 'package:chetiwa/core/weather/weather_data_provenance.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -284,6 +285,88 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect((bloc.state as RadarReady).isPlaying, isFalse);
   });
+
+  test(
+    'model frames are exposed only after premium access is enabled',
+    () async {
+      final bloc = RadarBloc(
+        const _PremiumRadarRepository(),
+        clock: FixedWeatherClock(DateTime.utc(2026, 8, 22, 12)),
+      );
+      addTearDown(bloc.close);
+
+      bloc.add(const RadarRequested());
+      final free = await bloc.stream
+          .where((state) => state is RadarReady)
+          .cast<RadarReady>()
+          .first
+          .timeout(const Duration(seconds: 2));
+      expect(free.frames.any((frame) => frame.isModelForecast), isFalse);
+      expect(free.hasForecast, isTrue);
+
+      bloc.add(
+        const RadarPremiumAccessChanged(
+          allowModelForecast: true,
+          maxFrames: 24,
+          historyHours: 6,
+        ),
+      );
+      final premium = await bloc.stream
+          .where((state) => state is RadarReady)
+          .cast<RadarReady>()
+          .firstWhere(
+            (state) => state.frames.any((frame) => frame.isModelForecast),
+          )
+          .timeout(const Duration(seconds: 2));
+      expect(premium.frames.last.isModelForecast, isTrue);
+
+      bloc.add(
+        const RadarPremiumAccessChanged(
+          allowModelForecast: false,
+          maxFrames: 12,
+          historyHours: 2,
+        ),
+      );
+      final downgraded = await bloc.stream
+          .where((state) => state is RadarReady)
+          .cast<RadarReady>()
+          .firstWhere(
+            (state) => !state.frames.any((frame) => frame.isModelForecast),
+          )
+          .timeout(const Duration(seconds: 2));
+      expect(downgraded.frames.any((frame) => frame.isModelForecast), isFalse);
+    },
+  );
+}
+
+final class _PremiumRadarRepository implements RadarRepository {
+  const _PremiumRadarRepository();
+
+  @override
+  Future<CachedRadarFrames?> getCachedFrames(Coordinates coordinates) async =>
+      null;
+
+  @override
+  Future<List<RadarFrame>> getFrames(Coordinates coordinates) async {
+    final observation = DateTime.utc(2026, 8, 22, 12);
+    return <RadarFrame>[
+      RadarFrame(
+        time: observation,
+        progress: 0,
+        kind: WeatherDataKind.radarObservation,
+      ),
+      RadarFrame(
+        time: observation.add(const Duration(minutes: 60)),
+        progress: 0.5,
+        kind: WeatherDataKind.radarNowcast,
+      ),
+      RadarFrame(
+        time: observation.add(const Duration(minutes: 70)),
+        progress: 1,
+        kind: WeatherDataKind.modelForecast,
+      ),
+    ];
+  }
 }
 
 final class _RefreshingRadarRepository implements RadarRepository {

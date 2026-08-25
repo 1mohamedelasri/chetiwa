@@ -179,12 +179,17 @@ final class ProviderGateway {
       );
     }
     final frames = <Map<String, Object?>>[];
+    var latestObservationEpoch = 0;
     void appendFrames(Object? values, String kind) {
       if (values is! List) return;
       for (final item in values.whereType<Map<String, dynamic>>()) {
         final path = item['path'];
         final timestamp = item['time'];
         if (path is! String || timestamp is! num) continue;
+        final epoch = timestamp.toInt();
+        if (kind == 'observation' && epoch > latestObservationEpoch) {
+          latestObservationEpoch = epoch;
+        }
         final frameId = base64Url.encode(utf8.encode(path)).replaceAll('=', '');
         final directHost = usesLibreWxr
             ? _config.radarMetadataUri.origin
@@ -193,7 +198,7 @@ final class ProviderGateway {
             ? '$directHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '13/1_0' : '2/1_0'}.png'
             : '${_config.publicBaseUrl}/v1/radar/tiles/$frameId/{z}/{x}/{y}';
         frames.add(<String, Object?>{
-          'time': _isoFromEpoch(timestamp),
+          'time': _isoFromEpoch(epoch),
           'kind': kind,
           'tileUrlTemplate': tileUrlTemplate,
         });
@@ -203,7 +208,19 @@ final class ProviderGateway {
     appendFrames(radar['past'], 'observation');
     // RainViewer stopped serving future frames in 2026. Keep the development
     // path truthful even if a legacy response happens to contain that field.
-    if (!usesRainViewer) appendFrames(radar['nowcast'], 'nowcast');
+    if (!usesRainViewer && radar['nowcast'] is List) {
+      for (final item
+          in (radar['nowcast'] as List).whereType<Map<String, dynamic>>()) {
+        final timestamp = item['time'];
+        if (timestamp is! num) continue;
+        final leadSeconds = timestamp.toInt() - latestObservationEpoch;
+        final isModel =
+            latestObservationEpoch > 0 &&
+            leadSeconds > const Duration(minutes: 60).inSeconds;
+        if (isModel && !_config.premiumRadarModelEnabled) continue;
+        appendFrames(<Object?>[item], isModel ? 'model' : 'nowcast');
+      }
+    }
     if (frames.isEmpty) {
       throw const ApiException(
         statusCode: 502,

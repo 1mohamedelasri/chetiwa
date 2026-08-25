@@ -7,12 +7,14 @@ void main() {
       'features': <String, dynamic>{
         'premium': false,
         'premiumSatellite': true,
+        'premiumRadarModel': true,
         'ads': false,
       },
     });
 
     expect(flags.premiumAvailable, isFalse);
     expect(flags.premiumSatelliteAvailable, isTrue);
+    expect(flags.premiumRadarModelAvailable, isTrue);
   });
 
   test('fails closed before the first valid server response', () {
@@ -22,6 +24,7 @@ void main() {
     expect(controller.premiumAvailable, isFalse);
     expect(controller.adsEnabled, isFalse);
     expect(controller.premiumSatelliteAvailable, isFalse);
+    expect(controller.premiumRadarModelAvailable, isFalse);
   });
 
   test('loads public rollout flags without granting an entitlement', () async {
@@ -31,6 +34,7 @@ void main() {
           premiumAvailable: true,
           adsEnabled: true,
           premiumSatelliteAvailable: true,
+          premiumRadarModelAvailable: true,
         ),
       ),
       persist: false,
@@ -42,6 +46,7 @@ void main() {
     expect(controller.premiumAvailable, isTrue);
     expect(controller.adsEnabled, isTrue);
     expect(controller.premiumSatelliteAvailable, isTrue);
+    expect(controller.premiumRadarModelAvailable, isTrue);
   });
 
   test('keeps the last valid flags when refresh fails', () async {

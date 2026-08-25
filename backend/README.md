@@ -106,6 +106,7 @@ le moteur à 50 €. Leur activation est documentée dans
 | `RADAR_TILE_COST_CENTS` | coût estimé par tuile origine (0 pour LibreWXR bêta) |
 | `GLOBAL_KILL_SWITCH` | désactivation immédiate du Radar, des tuiles et du worker d’alertes |
 | `PREMIUM_ENABLED` | rend l’offre Chetiwa+ visible pour les installations éligibles |
+| `PREMIUM_RADAR_MODEL_ENABLED` | expose les tuiles modèle LibreWXR de +60 à +120 min aux clients Chetiwa+ |
 | `PREMIUM_ROLLOUT_PERCENT` | déploiement stable de Chetiwa+ par installation, de `0` à `100` |
 | `ADS_ENABLED` | active les emplacements publicitaires pour les non-Premium |
 | `RAIN_ALERTS_ENABLED` | active explicitement le worker, `false` par défaut |

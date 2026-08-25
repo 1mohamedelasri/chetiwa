@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -31,6 +32,7 @@ final class RadarPane extends StatelessWidget {
     required this.snapshot,
     this.isActive = true,
     this.satelliteAvailable = false,
+    this.modelForecastLocked = false,
     super.key,
   });
 
@@ -38,6 +40,7 @@ final class RadarPane extends StatelessWidget {
   final ForecastSnapshot snapshot;
   final bool isActive;
   final bool satelliteAvailable;
+  final bool modelForecastLocked;
 
   @override
   Widget build(BuildContext context) => _RadarMap(
@@ -45,6 +48,7 @@ final class RadarPane extends StatelessWidget {
     snapshot: snapshot,
     isActive: isActive,
     satelliteAvailable: satelliteAvailable,
+    modelForecastLocked: modelForecastLocked,
   );
 }
 
@@ -73,12 +77,14 @@ final class _RadarMap extends StatefulWidget {
     required this.snapshot,
     required this.isActive,
     required this.satelliteAvailable,
+    required this.modelForecastLocked,
   });
 
   final Forecast forecast;
   final ForecastSnapshot snapshot;
   final bool isActive;
   final bool satelliteAvailable;
+  final bool modelForecastLocked;
 
   @override
   State<_RadarMap> createState() => _RadarMapState();
@@ -514,9 +520,8 @@ final class _RadarMapState extends State<_RadarMap> {
                     Expanded(
                       child: _CompactRadarStatus(
                         forecast: widget.forecast,
-                        snapshot: widget.snapshot,
                         selectedInstant: frame.time,
-                        isNowcast: frame.isNowcast,
+                        frame: frame,
                         pointRainRateMmPerHour: frame.pointRainRateMmPerHour,
                       ),
                     ),
@@ -580,6 +585,7 @@ final class _RadarMapState extends State<_RadarMap> {
                   state: state,
                   forecast: widget.forecast,
                   snapshot: widget.snapshot,
+                  modelForecastLocked: widget.modelForecastLocked,
                   onPlaybackToggled: _handleUserPlaybackToggle,
                   onPlaybackRestarted: _handleUserPlaybackRestart,
                 ),
@@ -1064,30 +1070,39 @@ final class _LayersButton extends StatelessWidget {
 final class _CompactRadarStatus extends StatelessWidget {
   const _CompactRadarStatus({
     required this.forecast,
-    required this.snapshot,
     required this.selectedInstant,
-    required this.isNowcast,
+    required this.frame,
     required this.pointRainRateMmPerHour,
   });
 
   final Forecast forecast;
-  final ForecastSnapshot snapshot;
   final DateTime selectedInstant;
-  final bool isNowcast;
+  final RadarFrame frame;
   final double? pointRainRateMmPerHour;
 
   @override
   Widget build(BuildContext context) {
     final location = forecast.locationName.split(',').first;
-    final pointRate = snapshot.currentRain.rateMmPerHour;
-    final modelAtPoint = pointRate < 0.05
+    final modelRate = forecast.rainPointAt(selectedInstant)?.rateMmPerHour;
+    final modelAtPoint = modelRate == null
         ? (context.l10n.isFrench
-              ? '$location · modèle sec maintenant'
-              : '$location · model dry now')
+              ? '$location · prévision au point indisponible'
+              : '$location · point forecast unavailable')
+        : modelRate < 0.05
+        ? (context.l10n.isFrench
+              ? '$location · modèle sec au point'
+              : '$location · model dry at point')
         : (context.l10n.isFrench
-              ? '$location · modèle ${pointRate.toStringAsFixed(1)} mm/h'
-              : '$location · model ${pointRate.toStringAsFixed(1)} mm/h');
-    final frameState = isNowcast
+              ? '$location · modèle ${modelRate.toStringAsFixed(1)} mm/h au point'
+              : '$location · model ${modelRate.toStringAsFixed(1)} mm/h at point');
+    final observationDetail = context.l10n.isFrench
+        ? '$location · image radar observée'
+        : '$location · observed radar image';
+    final frameState = frame.isModelForecast
+        ? (context.l10n.isFrench
+              ? 'prévision modèle · Chetiwa+'
+              : 'model forecast · Chetiwa+')
+        : frame.isNowcast
         ? (context.l10n.isFrench ? 'prévision radar' : 'radar forecast')
         : (context.l10n.isFrench
               ? 'précipitations observées'
@@ -1119,7 +1134,11 @@ final class _CompactRadarStatus extends StatelessWidget {
         child: Row(
           children: [
             Icon(
-              isNowcast ? Icons.auto_graph_rounded : Icons.radar_rounded,
+              frame.isModelForecast
+                  ? Icons.cloud_outlined
+                  : frame.isNowcast
+                  ? Icons.auto_graph_rounded
+                  : Icons.radar_rounded,
               size: 15,
               color: ChetiwaColors.accentPrimary,
             ),
@@ -1140,7 +1159,11 @@ final class _CompactRadarStatus extends StatelessWidget {
                   ),
                   const SizedBox(height: 1),
                   Text(
-                    isNowcast ? nowcastAtPoint : modelAtPoint,
+                    frame.isModelForecast
+                        ? modelAtPoint
+                        : frame.isNowcast
+                        ? nowcastAtPoint
+                        : observationDetail,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -1389,6 +1412,7 @@ final class RadarTimeline extends StatelessWidget {
     required this.state,
     required this.forecast,
     required this.snapshot,
+    this.modelForecastLocked = false,
     this.onPlaybackToggled,
     this.onPlaybackRestarted,
     super.key,
@@ -1397,6 +1421,7 @@ final class RadarTimeline extends StatelessWidget {
   final RadarReady state;
   final Forecast forecast;
   final ForecastSnapshot snapshot;
+  final bool modelForecastLocked;
   final VoidCallback? onPlaybackToggled;
   final VoidCallback? onPlaybackRestarted;
 
@@ -1409,10 +1434,15 @@ final class RadarTimeline extends StatelessWidget {
       state.frames,
       nowInstant,
     );
-    final graphEnd = RadarFramePolicy.timelineWindow(
+    final timelineWindow = RadarFramePolicy.timelineWindow(
       state.frames,
       nowInstant,
-    ).end;
+    );
+    final graphEnd = timelineWindow.end;
+    final premiumEnd = nowInstant.add(const Duration(hours: 2));
+    final displayEnd = modelForecastLocked && premiumEnd.isAfter(graphEnd)
+        ? premiumEnd
+        : graphEnd;
     final rainPoints = <RainPoint>[
       snapshot.currentRain,
       ...alignedForecast.points.where(
@@ -1421,7 +1451,16 @@ final class RadarTimeline extends StatelessWidget {
       ),
     ];
     final selectedPointRate = state.selectedFrame.pointRainRateMmPerHour;
-    final status = state.selectedFrame.isNowcast && selectedPointRate != null
+    final selectedModelRate = state.selectedFrame.isModelForecast
+        ? forecast.rainPointAt(state.selectedFrame.time)?.rateMmPerHour
+        : null;
+    final status = state.selectedFrame.isModelForecast
+        ? selectedModelRate == null
+              ? (context.l10n.isFrench
+                    ? 'prévision modèle · Chetiwa+'
+                    : 'model forecast · Chetiwa+')
+              : '${selectedModelRate.toStringAsFixed(1)} mm/h · ${context.l10n.isFrench ? 'modèle Chetiwa+' : 'Chetiwa+ model'}'
+        : state.selectedFrame.isNowcast && selectedPointRate != null
         ? RainRateScale.isRain(selectedPointRate)
               ? '${selectedPointRate.toStringAsFixed(1)} mm/h ${context.l10n.isFrench ? 'au point' : 'at point'}'
               : (context.l10n.isFrench ? 'sec au point' : 'dry at point')
@@ -1432,10 +1471,11 @@ final class RadarTimeline extends StatelessWidget {
               ? 'dernière observation'
               : 'latest observation')
         : (context.l10n.isFrench ? 'observation' : 'observation');
-    final statusColor =
-        state.selectedFrame.isNowcast &&
-            selectedPointRate != null &&
-            !RainRateScale.isRain(selectedPointRate)
+    final statusColor = state.selectedFrame.isModelForecast
+        ? const Color(0xFF7A5AF8)
+        : state.selectedFrame.isNowcast &&
+              selectedPointRate != null &&
+              !RainRateScale.isRain(selectedPointRate)
         ? timelineColors.muted
         : state.selectedFrame.isNowcast
         ? ChetiwaColors.warning
@@ -1576,35 +1616,61 @@ final class RadarTimeline extends StatelessWidget {
                     context,
                     details.localPosition.dx,
                     constraints.maxWidth,
+                    displayEnd,
                   ),
                   onHorizontalDragStart: (details) => _selectFrame(
                     context,
                     details.localPosition.dx,
                     constraints.maxWidth,
+                    displayEnd,
                   ),
                   onHorizontalDragUpdate: (details) => _selectFrame(
                     context,
                     details.localPosition.dx,
                     constraints.maxWidth,
+                    displayEnd,
                   ),
-                  child: CustomPaint(
-                    key: ValueKey(
-                      state.frames.any(
-                            (frame) =>
-                                frame.isNowcast &&
-                                frame.pointRainRateMmPerHour != null,
-                          )
-                          ? 'radar-point-profile-visible'
-                          : 'radar-point-profile-unavailable',
+                  child: Semantics(
+                    label: modelForecastLocked
+                        ? (context.l10n.isFrench
+                              ? 'Prévision modèle de 60 à 120 minutes réservée à Chetiwa+'
+                              : 'Model forecast from 60 to 120 minutes reserved for Chetiwa+')
+                        : null,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        CustomPaint(
+                          key: ValueKey(
+                            '${state.frames.any((frame) => frame.isNowcast && frame.pointRainRateMmPerHour != null) ? 'radar-point-profile-visible' : 'radar-point-profile-unavailable'}-${modelForecastLocked ? 'premium-locked' : 'premium-open'}',
+                          ),
+                          painter: _RadarTimeRulerPainter(
+                            frames: state.frames,
+                            rainPoints: rainPoints,
+                            selectedIndex: state.selectedIndex,
+                            now: nowInstant,
+                            displayEnd: displayEnd,
+                            modelForecastLocked: modelForecastLocked,
+                            colors: timelineColors,
+                          ),
+                          child: const SizedBox.expand(),
+                        ),
+                        if (modelForecastLocked)
+                          const Align(
+                            alignment: Alignment.topRight,
+                            child: Padding(
+                              padding: EdgeInsets.only(top: 6, right: 7),
+                              child: Text(
+                                'MODÈLE +60–120 MIN · CHETIWA+',
+                                style: TextStyle(
+                                  color: Color(0xFF7A5AF8),
+                                  fontSize: 7,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                    painter: _RadarTimeRulerPainter(
-                      frames: state.frames,
-                      rainPoints: rainPoints,
-                      selectedIndex: state.selectedIndex,
-                      now: nowInstant,
-                      colors: timelineColors,
-                    ),
-                    child: const SizedBox.expand(),
                   ),
                 ),
               ),
@@ -1615,11 +1681,16 @@ final class RadarTimeline extends StatelessWidget {
     );
   }
 
-  void _selectFrame(BuildContext context, double x, double width) {
+  void _selectFrame(
+    BuildContext context,
+    double x,
+    double width,
+    DateTime displayEnd,
+  ) {
     if (state.frames.length < 2 || width <= 0) return;
-    final hasNowcast = state.hasNowcast;
-    final startIndex = hasNowcast ? state.currentObservationIndex : 0;
-    final endIndex = hasNowcast
+    final hasForecast = state.hasForecast;
+    final startIndex = hasForecast ? state.currentObservationIndex : 0;
+    final endIndex = hasForecast
         ? state.frames.length - 1
         : state.currentObservationIndex;
     final window = RadarFramePolicy.timelineWindow(
@@ -1627,13 +1698,18 @@ final class RadarTimeline extends StatelessWidget {
       snapshot.nowUtc,
     );
     final start = window.start.millisecondsSinceEpoch;
-    final end = window.end.millisecondsSinceEpoch;
+    final end = displayEnd.millisecondsSinceEpoch;
     final selectedTime =
         start + ((end - start) * (x / width).clamp(0, 1)).toDouble();
+    if (modelForecastLocked &&
+        selectedTime > window.end.millisecondsSinceEpoch) {
+      context.push('/subscription');
+      return;
+    }
     var index = startIndex;
     var nearestDistance = double.infinity;
     for (var candidate = startIndex; candidate <= endIndex; candidate++) {
-      final effectiveTime = hasNowcast
+      final effectiveTime = hasForecast
           ? math.max(start, state.frames[candidate].time.millisecondsSinceEpoch)
           : state.frames[candidate].time.millisecondsSinceEpoch;
       final distance = (effectiveTime - selectedTime).abs().toDouble();
@@ -1652,6 +1728,8 @@ final class _RadarTimeRulerPainter extends CustomPainter {
     required this.rainPoints,
     required this.selectedIndex,
     required this.now,
+    required this.displayEnd,
+    required this.modelForecastLocked,
     required this.colors,
   });
 
@@ -1659,6 +1737,8 @@ final class _RadarTimeRulerPainter extends CustomPainter {
   final List<RainPoint> rainPoints;
   final int selectedIndex;
   final DateTime now;
+  final DateTime displayEnd;
+  final bool modelForecastLocked;
   final _RadarTimelineColors colors;
 
   @override
@@ -1672,12 +1752,12 @@ final class _RadarTimeRulerPainter extends CustomPainter {
     final observationIndex = currentObservationIndex < 0
         ? frames.length - 1
         : currentObservationIndex;
-    final hasNowcast = frames.any((frame) => frame.isNowcast);
-    final playbackStartIndex = hasNowcast ? observationIndex : 0;
-    final playbackEndIndex = hasNowcast ? frames.length - 1 : observationIndex;
+    final hasForecast = frames.any((frame) => frame.isForecast);
+    final playbackStartIndex = hasForecast ? observationIndex : 0;
+    final playbackEndIndex = hasForecast ? frames.length - 1 : observationIndex;
     final window = RadarFramePolicy.timelineWindow(frames, now);
     final start = window.start;
-    final end = window.end;
+    final end = displayEnd;
     final durationMs = math
         .max(1, end.millisecondsSinceEpoch - start.millisecondsSinceEpoch)
         .toDouble();
@@ -1687,6 +1767,33 @@ final class _RadarTimeRulerPainter extends CustomPainter {
                 (time.millisecondsSinceEpoch - start.millisecondsSinceEpoch) /
                 durationMs)
             .toDouble();
+
+    final lastNowcast = frames.lastWhere(
+      (frame) => frame.isNowcast,
+      orElse: () => frames[observationIndex],
+    );
+    final hasModelSegment =
+        modelForecastLocked || frames.any((frame) => frame.isModelForecast);
+    if (hasModelSegment) {
+      final boundary = lastNowcast.isNowcast
+          ? lastNowcast.time
+          : now.add(RadarFramePolicy.nowcastHorizon);
+      final boundaryX = xForTime(boundary).clamp(0, size.width).toDouble();
+      canvas.drawRect(
+        Rect.fromLTRB(boundaryX, chartTop, size.width, trackY + 5),
+        Paint()..color = const Color(0xFF7A5AF8).withValues(alpha: 0.08),
+      );
+      final divider = Paint()
+        ..color = const Color(0xFF7A5AF8).withValues(alpha: 0.65)
+        ..strokeWidth = 1;
+      for (var y = chartTop; y < trackY + 5; y += 5) {
+        canvas.drawLine(
+          Offset(boundaryX, y),
+          Offset(boundaryX, math.min(y + 2.5, trackY + 5)),
+          divider,
+        );
+      }
+    }
 
     final track = Paint()
       ..color = colors.outline
@@ -1698,7 +1805,7 @@ final class _RadarTimeRulerPainter extends CustomPainter {
       track,
     );
 
-    if (hasNowcast) {
+    if (hasForecast) {
       _paintPointRainProfile(
         canvas,
         size,
@@ -1727,10 +1834,10 @@ final class _RadarTimeRulerPainter extends CustomPainter {
       end,
       xForTime,
       trackY,
-      historical: !hasNowcast,
+      historical: !hasForecast,
     );
 
-    final nowX = hasNowcast ? 0.0 : size.width;
+    final nowX = hasForecast ? 0.0 : size.width;
     final nowPaint = Paint()
       ..color = ChetiwaColors.accentPrimary.withValues(alpha: 0.85)
       ..strokeWidth = 1;
@@ -1755,7 +1862,7 @@ final class _RadarTimeRulerPainter extends CustomPainter {
     nowLabel.paint(
       canvas,
       Offset(
-        (nowX - (hasNowcast ? 0 : nowLabel.width))
+        (nowX - (hasForecast ? 0 : nowLabel.width))
             .clamp(0, size.width - nowLabel.width)
             .toDouble(),
         chartTop,
@@ -1763,7 +1870,7 @@ final class _RadarTimeRulerPainter extends CustomPainter {
     );
 
     final selectedTime =
-        hasNowcast && frames[selectedIndex].time.isBefore(start)
+        hasForecast && frames[selectedIndex].time.isBefore(start)
         ? start
         : frames[selectedIndex].time;
     final cursorX = xForTime(selectedTime).clamp(0, size.width).toDouble();
@@ -1983,6 +2090,8 @@ final class _RadarTimeRulerPainter extends CustomPainter {
       selectedIndex != oldDelegate.selectedIndex ||
       rainPoints != oldDelegate.rainPoints ||
       now != oldDelegate.now ||
+      displayEnd != oldDelegate.displayEnd ||
+      modelForecastLocked != oldDelegate.modelForecastLocked ||
       colors != oldDelegate.colors;
 }
 

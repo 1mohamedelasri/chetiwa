@@ -18,13 +18,16 @@ active :
 
 - radar OPERA Europe ;
 - couche de précipitations mondiale RRQPE/IFS à résolution moindre ;
-- nowcast expérimental de 60 minutes ;
+- nowcast radar expérimental de 60 minutes, puis six trames de prévision
+  modèle jusqu'à +120 minutes ;
 - six frames d'historique ;
 - ni satellite, ni alertes, ni modèles régionaux lourds.
 
 Le graphe Chetiwa reste la référence explicitement nommée pour la prévision au
-point de maintenant à +2 h. Ne pas présenter la couche mondiale RRQPE comme un
-radar terrestre là où LibreWXR ne dispose pas de composite radar natif.
+point de maintenant à +2 h. Les tuiles +60–120 min sont étiquetées « prévision
+modèle », activées uniquement avec `PREMIUM_RADAR_MODEL_ENABLED` et filtrées
+sur mobile sans entitlement Chetiwa+. Ne jamais les présenter comme une mesure
+radar terrestre, notamment là où LibreWXR ne dispose pas de composite natif.
 
 ## Installation contrôlée
 

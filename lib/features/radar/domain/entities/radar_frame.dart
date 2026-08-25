@@ -26,6 +26,8 @@ final class RadarFrame extends Equatable {
 
   bool get isObservation => kind == WeatherDataKind.radarObservation;
   bool get isNowcast => kind == WeatherDataKind.radarNowcast;
+  bool get isModelForecast => kind == WeatherDataKind.modelForecast;
+  bool get isForecast => isNowcast || isModelForecast;
 
   WeatherDataProvenance get provenance =>
       WeatherDataProvenance(kind: kind, provider: providerName, validAt: time);

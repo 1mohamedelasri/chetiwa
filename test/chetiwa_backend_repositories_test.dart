@@ -99,6 +99,12 @@ void main() {
                     'tileUrlTemplate':
                         'https://tiles.test/future/{z}/{x}/{y}.png',
                   },
+                  <String, Object?>{
+                    'time': '2026-08-20T19:10:00.000Z',
+                    'kind': 'model',
+                    'tileUrlTemplate':
+                        'https://tiles.test/model/{z}/{x}/{y}.png',
+                  },
                 ],
                 'provider': <String, Object?>{'id': 'librewxr'},
               };
@@ -120,13 +126,15 @@ void main() {
 
     final frames = await repository.getFrames(Coordinates.paris);
 
-    expect(frames, hasLength(2));
+    expect(frames, hasLength(3));
     expect(frames.first.isObservation, isTrue);
-    expect(frames.last.isNowcast, isTrue);
+    expect(frames[1].isNowcast, isTrue);
+    expect(frames.last.isModelForecast, isTrue);
     expect(frames.last.progress, 1);
     expect(frames.last.providerName, 'librewxr via Chetiwa');
-    expect(frames.last.pointRainRateMmPerHour, 2.4);
-    expect(frames.last.pointRainSource, 'radar');
+    expect(frames[1].pointRainRateMmPerHour, 2.4);
+    expect(frames[1].pointRainSource, 'radar');
+    expect(frames.last.pointRainRateMmPerHour, isNull);
     expect(frames.first.pointRainRateMmPerHour, isNull);
     expect(
       requestedPaths,

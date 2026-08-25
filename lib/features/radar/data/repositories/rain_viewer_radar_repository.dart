@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../../../../core/location/coordinates.dart';
 import '../../../../core/config/api_config.dart';
 import '../../../../core/weather/weather_data_provenance.dart';
@@ -108,6 +110,11 @@ final class RainViewerRadarRepository implements RadarRepository {
         'Aucune image radar disponible pour cette zone',
       );
     }
+    final latestObservationEpoch = past
+        .whereType<Map<String, dynamic>>()
+        .map((frame) => frame['time'])
+        .whereType<num>()
+        .fold<int>(0, (latest, value) => math.max(latest, value.toInt()));
 
     final frames = RadarFramePolicy.normalizeProgress(
       List.generate(rawFrames.length, (index) {
@@ -138,8 +145,17 @@ final class RainViewerRadarRepository implements RadarRepository {
           progress: 0,
           tileUrlTemplate:
               '$tileHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '$libreWxrColorScheme/1_0' : '2/1_0'}.png',
-          kind: raw.forecast
-              ? WeatherDataKind.radarNowcast
+          kind: raw.forecast && latestObservationEpoch > 0
+              ? RadarFramePolicy.futureKind(
+                  latestObservation: DateTime.fromMillisecondsSinceEpoch(
+                    latestObservationEpoch * 1000,
+                    isUtc: true,
+                  ),
+                  forecastTime: DateTime.fromMillisecondsSinceEpoch(
+                    timestamp.toInt() * 1000,
+                    isUtc: true,
+                  ),
+                )
               : WeatherDataKind.radarObservation,
           providerName: usesLibreWxr ? 'LibreWXR' : 'RainViewer',
           pointRainRateMmPerHour: hasPointValue ? pointRate.toDouble() : null,

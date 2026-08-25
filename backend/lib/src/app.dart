@@ -105,6 +105,7 @@ Handler createApp({
           'features': <String, Object?>{
             'premium': premiumEligible,
             'premiumSatellite': config.premiumSatelliteEnabled,
+            'premiumRadarModel': config.premiumRadarModelEnabled,
             'ads': config.adsEnabled,
           },
         }, now: clock);

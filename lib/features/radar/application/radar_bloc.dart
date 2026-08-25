@@ -35,6 +35,21 @@ final class RadarLocationChanged extends RadarEvent {
   List<Object> get props => [coordinates];
 }
 
+final class RadarPremiumAccessChanged extends RadarEvent {
+  const RadarPremiumAccessChanged({
+    required this.allowModelForecast,
+    required this.maxFrames,
+    required this.historyHours,
+  });
+
+  final bool allowModelForecast;
+  final int maxFrames;
+  final int historyHours;
+
+  @override
+  List<Object> get props => [allowModelForecast, maxFrames, historyHours];
+}
+
 final class RadarFrameSelected extends RadarEvent {
   const RadarFrameSelected(this.index);
 
@@ -124,9 +139,10 @@ final class RadarReady extends RadarState {
   }
 
   bool get hasNowcast => frames.any((frame) => frame.isNowcast);
+  bool get hasForecast => frames.any((frame) => frame.isForecast);
 
   int get playbackStartIndex {
-    if (hasNowcast) return currentObservationIndex;
+    if (hasForecast) return currentObservationIndex;
     final index = frames.indexWhere((frame) => frame.isObservation);
     return index < 0 ? 0 : index;
   }
@@ -158,13 +174,16 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
     WeatherClock clock = const SystemWeatherClock(),
     int maxFrames = 24,
     int? historyHours,
+    bool allowModelForecast = false,
   }) : _clock = clock,
        _maxFrames = maxFrames,
        _historyHours = historyHours,
+       _allowModelForecast = allowModelForecast,
        super(const RadarInitial()) {
     on<RadarRequested>(_load);
     on<RadarRefreshed>(_load);
     on<RadarLocationChanged>(_changeLocation);
+    on<RadarPremiumAccessChanged>(_changePremiumAccess);
     on<RadarFrameSelected>(_selectFrame);
     on<RadarPlaybackToggled>(_togglePlayback);
     on<RadarPlaybackStarted>(_startPlayback);
@@ -178,8 +197,9 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
 
   final RadarRepository _repository;
   final WeatherClock _clock;
-  final int _maxFrames;
-  final int? _historyHours;
+  int _maxFrames;
+  int? _historyHours;
+  bool _allowModelForecast;
   Coordinates _coordinates = Coordinates.paris;
   Timer? _playbackTimer;
   var _loadGeneration = 0;
@@ -309,11 +329,15 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   }
 
   List<RadarFrame> _limitFrames(List<RadarFrame> frames) {
-    var visible = frames;
+    var visible = _allowModelForecast
+        ? frames
+        : frames
+              .where((frame) => !frame.isModelForecast)
+              .toList(growable: false);
     final hours = _historyHours;
-    if (hours != null && hours > 0 && frames.isNotEmpty) {
+    if (hours != null && hours > 0 && visible.isNotEmpty) {
       final cutoff = _clock.nowUtc.subtract(Duration(hours: hours));
-      final withinHistory = frames
+      final withinHistory = visible
           .where((frame) => !frame.time.isBefore(cutoff))
           .toList(growable: false);
       // Keep at least one frame when provider and device clocks differ.
@@ -494,6 +518,40 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   ) async {
     _coordinates = event.coordinates;
     await _load(const RadarRequested(), emit);
+  }
+
+  Future<void> _changePremiumAccess(
+    RadarPremiumAccessChanged event,
+    Emitter<RadarState> emit,
+  ) async {
+    if (_allowModelForecast == event.allowModelForecast &&
+        _maxFrames == event.maxFrames &&
+        _historyHours == event.historyHours) {
+      return;
+    }
+    _allowModelForecast = event.allowModelForecast;
+    _maxFrames = event.maxFrames;
+    _historyHours = event.historyHours;
+
+    final current = state;
+    if (current is RadarReady) {
+      final visible = _limitFrames(current.frames);
+      if (visible.isNotEmpty) {
+        emit(
+          RadarReady(
+            frames: visible,
+            selectedIndex: _nearestFrameIndex(
+              visible,
+              current.selectedFrame.time,
+            ),
+            coordinates: current.coordinates,
+            health: current.health,
+            isPlaying: current.isPlaying && visible.length > 1,
+          ),
+        );
+      }
+      await _load(const RadarRefreshed(), emit);
+    }
   }
 
   int _defaultIndex(List<RadarFrame> frames) {

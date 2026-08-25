@@ -54,9 +54,11 @@ final class ChetiwaRadarRepository implements RadarRepository {
           time: time,
           progress: mapped.length == 1 ? 1 : index / (mapped.length - 1),
           tileUrlTemplate: frame['tileUrlTemplate'] as String?,
-          kind: frame['kind'] == 'nowcast'
-              ? WeatherDataKind.radarNowcast
-              : WeatherDataKind.radarObservation,
+          kind: switch (frame['kind']) {
+            'nowcast' => WeatherDataKind.radarNowcast,
+            'model' => WeatherDataKind.modelForecast,
+            _ => WeatherDataKind.radarObservation,
+          },
           providerName: providerName,
           pointRainRateMmPerHour: frame['kind'] == 'nowcast'
               ? point?.rainRateMmPerHour ??

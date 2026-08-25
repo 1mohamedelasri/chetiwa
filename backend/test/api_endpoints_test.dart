@@ -54,6 +54,7 @@ void main() {
       expect(data['features'], <String, Object?>{
         'premium': false,
         'premiumSatellite': false,
+        'premiumRadarModel': false,
         'ads': false,
       });
     },
@@ -64,6 +65,7 @@ void main() {
       'PREMIUM_ENABLED': 'true',
       'PREMIUM_ROLLOUT_PERCENT': '100',
       'PREMIUM_SATELLITE_ENABLED': 'true',
+      'PREMIUM_RADAR_MODEL_ENABLED': 'true',
       'ADS_ENABLED': 'true',
       'ARCGIS_API_KEY': 'test-key',
     });
@@ -83,6 +85,7 @@ void main() {
     expect(data['features'], <String, Object?>{
       'premium': true,
       'premiumSatellite': true,
+      'premiumRadarModel': true,
       'ads': true,
     });
   });
@@ -234,6 +237,7 @@ void main() {
       'RADAR_PROVIDER': 'librewxr',
       'RADAR_METADATA_URL':
           'https://radar.ezplatforms.com/public/weather-maps.json',
+      'PREMIUM_RADAR_MODEL_ENABLED': 'true',
     });
     final app = appWith(
       MockClient(
@@ -246,6 +250,7 @@ void main() {
               ],
               'nowcast': <Object?>[
                 <String, Object?>{'time': 1776708000, 'path': '/future'},
+                <String, Object?>{'time': 1776711600, 'path': '/future-model'},
               ],
             },
           }),
@@ -267,14 +272,64 @@ void main() {
     final frames = data['frames'] as List<Object?>;
 
     expect(response.statusCode, 200);
-    expect(frames, hasLength(2));
+    expect(frames, hasLength(3));
     expect((frames.first as Map<String, Object?>)['kind'], 'observation');
-    expect((frames.last as Map<String, Object?>)['kind'], 'nowcast');
+    expect((frames[1] as Map<String, Object?>)['kind'], 'nowcast');
+    expect((frames.last as Map<String, Object?>)['kind'], 'model');
     expect(
-      (frames.last as Map<String, Object?>)['tileUrlTemplate'],
+      (frames[1] as Map<String, Object?>)['tileUrlTemplate'],
       'https://radar.ezplatforms.com/future/256/{z}/{x}/{y}/13/1_0.png',
     );
     expect((data['provider'] as Map<String, Object?>)['id'], 'librewxr');
+  });
+
+  test('model radar frames fail closed behind the premium flag', () async {
+    config = RuntimeConfig.fromEnvironment(const <String, String>{
+      'ARCGIS_API_KEY': 'test-key',
+      'RADAR_PROVIDER': 'librewxr',
+      'RADAR_METADATA_URL':
+          'https://radar.ezplatforms.com/public/weather-maps.json',
+    });
+    final app = appWith(
+      MockClient(
+        (_) async => http.Response(
+          jsonEncode(<String, Object?>{
+            'host': 'https://tile.example.test',
+            'radar': <String, Object?>{
+              'past': <Object?>[
+                <String, Object?>{'time': 1776707400, 'path': '/past'},
+              ],
+              'nowcast': <Object?>[
+                <String, Object?>{'time': 1776708000, 'path': '/future'},
+                <String, Object?>{'time': 1776711600, 'path': '/future-model'},
+              ],
+            },
+          }),
+          200,
+        ),
+      ),
+    );
+
+    final response = await app(
+      Request(
+        'GET',
+        Uri.parse(
+          'http://localhost/v1/radar/frames?latitude=48.85&longitude=2.35',
+        ),
+      ),
+    );
+    final body =
+        jsonDecode(await response.readAsString()) as Map<String, Object?>;
+    final data = body['data'] as Map<String, Object?>;
+    final frames = data['frames'] as List<Object?>;
+
+    expect(frames, hasLength(2));
+    expect(
+      frames.whereType<Map<String, Object?>>().any(
+        (frame) => frame['kind'] == 'model',
+      ),
+      isFalse,
+    );
   });
 
   test(

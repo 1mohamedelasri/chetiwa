@@ -1,4 +1,5 @@
 import '../entities/radar_frame.dart';
+import '../../../../core/weather/weather_data_provenance.dart';
 
 final class RadarTimelineWindow {
   const RadarTimelineWindow({required this.start, required this.end});
@@ -10,6 +11,7 @@ final class RadarTimelineWindow {
 /// Bounds metadata and tile work per radar refresh without hiding the most
 /// recent observed rain or the beginning of the nowcast.
 abstract final class RadarFramePolicy {
+  static const nowcastHorizon = Duration(minutes: 60);
   static const maxFrames = 24;
   static const maxObservedFrames = 12;
   static const maxNowcastFrames = 12;
@@ -36,17 +38,21 @@ abstract final class RadarFramePolicy {
         growable: false,
       );
 
-  /// Uses only timestamps backed by actual radar images.
-  ///
-  /// LibreWXR currently supplies about 60 minutes of future frames. A fixed
-  /// two-hour ruler made playback appear to stop halfway through an advertised
-  /// range even though no radar image existed for that empty second hour.
+  static WeatherDataKind futureKind({
+    required DateTime latestObservation,
+    required DateTime forecastTime,
+  }) => forecastTime.difference(latestObservation) > nowcastHorizon
+      ? WeatherDataKind.modelForecast
+      : WeatherDataKind.radarNowcast;
+
+  /// Uses only timestamps backed by an available image. The first future hour
+  /// is radar nowcast; an optional second hour is explicitly model forecast.
   static RadarTimelineWindow timelineWindow(
     List<RadarFrame> frames,
     DateTime now,
   ) {
     if (frames.isEmpty) return RadarTimelineWindow(start: now, end: now);
-    final nowcasts = frames.where((frame) => frame.isNowcast).toList()
+    final nowcasts = frames.where((frame) => frame.isForecast).toList()
       ..sort((left, right) => left.time.compareTo(right.time));
     if (nowcasts.isNotEmpty) {
       final end = nowcasts.last.time;

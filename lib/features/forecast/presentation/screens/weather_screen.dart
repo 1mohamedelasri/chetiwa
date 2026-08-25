@@ -50,16 +50,19 @@ final class WeatherScreen extends StatelessWidget {
       ),
       BlocProvider(
         lazy: false,
-        create: (context) => RadarBloc(
-          context.read<RadarRepository>(),
-          clock: context.read<WeatherClock>(),
-          maxFrames: PremiumLimits.forEntitlement(
-            context.read<EntitlementController>(),
-          ).maxRadarFrames,
-          historyHours: PremiumLimits.forEntitlement(
-            context.read<EntitlementController>(),
-          ).radarHistoryHours,
-        ),
+        create: (context) {
+          final entitlement = context.read<EntitlementController>();
+          final flags = context.read<AppFeatureFlagController>();
+          final limits = PremiumLimits.forEntitlement(entitlement);
+          return RadarBloc(
+            context.read<RadarRepository>(),
+            clock: context.read<WeatherClock>(),
+            maxFrames: limits.maxRadarFrames,
+            historyHours: limits.radarHistoryHours,
+            allowModelForecast:
+                entitlement.isPremium && flags.premiumRadarModelAvailable,
+          );
+        },
       ),
     ],
     child: const _WeatherView(),
@@ -77,6 +80,8 @@ final class _WeatherViewState extends State<_WeatherView>
     with WidgetsBindingObserver {
   late final ActiveLocationController _activeLocationController;
   late final RainAlertNavigationController _alertNavigationController;
+  late final EntitlementController _entitlementController;
+  late final AppFeatureFlagController _featureFlagController;
   Coordinates? _radarCoordinates;
   Timer? _resumeForecastTimer;
   Timer? _resumeRadarTimer;
@@ -90,14 +95,19 @@ final class _WeatherViewState extends State<_WeatherView>
     WidgetsBinding.instance.addObserver(this);
     _activeLocationController = context.read<ActiveLocationController>();
     _alertNavigationController = context.read<RainAlertNavigationController>();
+    _entitlementController = context.read<EntitlementController>();
+    _featureFlagController = context.read<AppFeatureFlagController>();
     _activeLocationController.addListener(_syncRadarLocation);
     _alertNavigationController.addListener(_openRainAlert);
+    _entitlementController.addListener(_syncRadarPremiumAccess);
+    _featureFlagController.addListener(_syncRadarPremiumAccess);
     // Both the forecast and the active-location controller restore the saved
     // main place asynchronously. Radar used to keep its independent Paris
     // default, so the header could say Lyon while the map pin stayed in Paris.
     // Defer the first sync until every provider above this view is mounted.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _syncRadarLocation();
+      _syncRadarPremiumAccess();
       _openRainAlert();
       if (_radarCoordinates == null) {
         // Give the small local saved-place read one short window to complete.
@@ -122,6 +132,8 @@ final class _WeatherViewState extends State<_WeatherView>
     _initialRadarTimer?.cancel();
     _activeLocationController.removeListener(_syncRadarLocation);
     _alertNavigationController.removeListener(_openRainAlert);
+    _entitlementController.removeListener(_syncRadarPremiumAccess);
+    _featureFlagController.removeListener(_syncRadarPremiumAccess);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -132,6 +144,20 @@ final class _WeatherViewState extends State<_WeatherView>
     if (coordinates == null || coordinates == _radarCoordinates) return;
     _radarCoordinates = coordinates;
     context.read<RadarBloc>().add(RadarLocationChanged(coordinates));
+  }
+
+  void _syncRadarPremiumAccess() {
+    if (!mounted) return;
+    final limits = PremiumLimits.forEntitlement(_entitlementController);
+    context.read<RadarBloc>().add(
+      RadarPremiumAccessChanged(
+        allowModelForecast:
+            _entitlementController.isPremium &&
+            _featureFlagController.premiumRadarModelAvailable,
+        maxFrames: limits.maxRadarFrames,
+        historyHours: limits.radarHistoryHours,
+      ),
+    );
   }
 
   void _openRainAlert() {
@@ -306,6 +332,14 @@ final class _WeatherViewState extends State<_WeatherView>
                               arcGisConfigured:
                                   ApiConfig.arcGisApiKey.isNotEmpty,
                             ),
+                        modelForecastLocked:
+                            context
+                                .watch<AppFeatureFlagController>()
+                                .premiumAvailable &&
+                            context
+                                .watch<AppFeatureFlagController>()
+                                .premiumRadarModelAvailable &&
+                            !context.watch<EntitlementController>().isPremium,
                       ),
                       ForecastPane(
                         key: const ValueKey('forecast'),

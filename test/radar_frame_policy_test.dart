@@ -42,4 +42,40 @@ void main() {
     expect(window.end, lastNowcast);
     expect(window.end, isNot(now.add(const Duration(hours: 2))));
   });
+
+  test('classifies and displays the premium model tail after 60 minutes', () {
+    final observation = DateTime.utc(2026, 8, 23, 20);
+    final model = observation.add(const Duration(minutes: 70));
+
+    expect(
+      RadarFramePolicy.futureKind(
+        latestObservation: observation,
+        forecastTime: observation.add(const Duration(minutes: 60)),
+      ),
+      WeatherDataKind.radarNowcast,
+    );
+    expect(
+      RadarFramePolicy.futureKind(
+        latestObservation: observation,
+        forecastTime: model,
+      ),
+      WeatherDataKind.modelForecast,
+    );
+
+    final window = RadarFramePolicy.timelineWindow([
+      RadarFrame(
+        time: observation,
+        progress: 0,
+        kind: WeatherDataKind.radarObservation,
+      ),
+      RadarFrame(
+        time: observation.add(const Duration(minutes: 60)),
+        progress: 0.5,
+        kind: WeatherDataKind.radarNowcast,
+      ),
+      RadarFrame(time: model, progress: 1, kind: WeatherDataKind.modelForecast),
+    ], observation);
+
+    expect(window.end, model);
+  });
 }
