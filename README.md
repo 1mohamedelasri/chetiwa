@@ -27,7 +27,7 @@ production Chetiwa exige HTTPS :
 ```sh
 flutter build appbundle \
   --dart-define=CHETIWA_ENV=production \
-  --dart-define=CHETIWA_API_BASE_URL=https://api.ezplatforms.com
+  --dart-define=CHETIWA_API_BASE_URL=https://chetiwa-api.ezplatforms.com
 ```
 
 Sans `CHETIWA_API_BASE_URL`, le profil développement conserve provisoirement

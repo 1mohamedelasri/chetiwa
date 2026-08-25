@@ -50,7 +50,7 @@ compte Google Cloud. Redis et le CDN restent derrière leurs gates de coût.
 
 Le profil `backend/deploy/hetzner` écoute uniquement sur
 `127.0.0.1:8081`. Le tunnel Cloudflare publie
-`https://api.ezplatforms.com` vers `http://127.0.0.1:8081`.
+`https://chetiwa-api.ezplatforms.com` vers `http://127.0.0.1:8081`.
 
 Copier `production.env.example` vers `production.env`, générer
 `INTERNAL_METRICS_TOKEN`, puis lancer :
@@ -77,7 +77,7 @@ avec le workflow manuel GitHub **Deploy backend production** ou localement :
 backend/deploy/cloud-run/deploy-api.sh \
   PROJECT_ID europe-west1 IMAGE_URI \
   chetiwa-api@PROJECT_ID.iam.gserviceaccount.com \
-  https://api.ezplatforms.com
+  https://chetiwa-api.ezplatforms.com
 ```
 
 Le workflow utilise Workload Identity Federation, sans JSON de compte de
@@ -86,7 +86,7 @@ reviewer. Une fois le domaine public actif :
 
 ```sh
 backend/deploy/cloud-run/provision-api-observability.sh \
-  PROJECT_ID api.ezplatforms.com \
+  PROJECT_ID chetiwa-api.ezplatforms.com \
   'projects/PROJECT_ID/notificationChannels/CHANNEL_ID'
 ```
 
