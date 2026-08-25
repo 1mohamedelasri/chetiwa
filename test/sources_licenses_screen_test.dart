@@ -46,6 +46,10 @@ void main() {
       find.text('Precipitation radar imagery via LibreWXR'),
       findsOneWidget,
     );
-    expect(find.text('Satellite map base, when selected'), findsOneWidget);
+    expect(find.text('Free standard vector basemap'), findsOneWidget);
+    expect(
+      find.text('Satellite map base, when selected · Chetiwa+ only'),
+      findsOneWidget,
+    );
   });
 }

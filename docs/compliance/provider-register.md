@@ -12,9 +12,8 @@ avant monétisation.
 | LibreWXR auto-hébergé | Radar et point-nowcast actuels | Bêta contrôlée après stabilité origine/CDN ; validation des données amont avant public | Capacité mesurée, VM Hetzner et Cloudflare ; pas de quota utilisateur fournisseur unique | Licence du code et droits/attributions de chaque donnée amont à archiver | Cache mobile, stale CDN et kill switch |
 | RainViewer | Ancien radar prototype | Non utilisé dans la configuration de production actuelle | API publique sans SLA commercial public | Attribution obligatoire ; autorisation commerciale écrite manquante | LibreWXR |
 | Rainbow | Radar Tiles et nowcast cible | Production après validation contrat | 30 k tiles/mois puis 0,20 $/1 k ; nowcast 5 k puis 0,10 $/1 k selon page officielle actuelle | Conditions, attribution, cache et DPA à archiver | Limiter frames + cache + désactivation |
-| CARTO | Fonds raster clair/sombre/voyager et sélecteur de lieu | Production bloquée sans clé et validation commerciale | Clé gratuite jusqu'au fair use publié de 5 M tuiles/mois ; accord commercial possible au-delà | Attribution OSM/CARTO et conditions commerciales à archiver | Fond autorisé de remplacement ou PMTiles self-hosted |
-| OpenFreeMap | Fond vectoriel standard cible | À confirmer pour l’usage exact et sans SLA | Instance publique annoncée gratuite sans limite | Attribution OpenMapTiles/OpenStreetMap à vérifier | Fond minimal/cache ou PMTiles self-hosted |
-| Esri | Satellite actuellement sélectionné par défaut dans Radar | Production bloquée sans compte, token, budget et droits validés | 2 M tuiles gratuites puis 0,15 $/1 k selon tarification actuelle | Token et attribution Esri/data | Fond standard autorisé |
+| OpenFreeMap | Fond vectoriel standard Radar et sélecteur de lieu | Production initiale autorisée selon les conditions publiques, sans SLA | Instance publique annoncée gratuite sans limite | Attribution OpenFreeMap/OpenMapTiles/OpenStreetMap visible | Cache disque, fond minimal ou PMTiles self-hosted |
+| Esri | Satellite Chetiwa+ optionnel | Désactivé par défaut ; activer après compte, token, budget et validation des achats | 2 M tuiles gratuites puis 0,15 $/1 k selon tarification actuelle | Token et attribution Esri/data | OpenFreeMap standard ; kill switch `PREMIUM_SATELLITE_ENABLED` |
 | Google Cloud/Firebase | API, devices, push, config, observabilité | Staging/prod après DPA et région UE | Free tiers + pay-as-you-go, budgets et max instances | DPA, sous-traitants et rétention à archiver | Cache mobile, runbook panne |
 | RevenueCat | Entitlements abonnements | Sandbox puis production | Gratuit jusqu’au seuil MTR officiel, puis pourcentage actuel | DPA, webhooks et politique de données | Validation store directe future |
 | Google AdMob/UMP | Ads et consentement | Production après consentement/config stores | Pas de coût fournisseur fixe attendu ; revenu variable | CMP, ATT si requis, Data Safety/App Privacy | Ads désactivées |
@@ -37,8 +36,8 @@ avant monétisation.
 - [RainViewer API](https://www.rainviewer.com/api.html)
 - [LibreWXR source](https://github.com/JoshuaKimsey/LibreWXR)
 - [Rainbow developer](https://developer.rainbow.ai/)
-- [CARTO raster key and fair use](https://carto.com/basemaps/apikey/)
 - [OpenFreeMap](https://openfreemap.org/)
+- [OpenFreeMap terms](https://openfreemap.org/tos/)
 - [Esri basemap pricing](https://developers.arcgis.com/rest/static-basemap-tiles/)
 - [Firebase pricing](https://firebase.google.com/pricing)
 - [RevenueCat pricing](https://www.revenuecat.com/pricing)

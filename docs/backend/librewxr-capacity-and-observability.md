@@ -112,20 +112,20 @@ d'un appel. En prenant 1,8 unité par rafraîchissement :
 ### Fond de carte
 
 Les tuiles de fond ne passent pas par LibreWXR : chaque téléphone appelle
-directement CARTO ou Esri. Augmenter la VM ne change donc rien à leur capacité.
+directement OpenFreeMap ou, pour Chetiwa+, Esri. Augmenter la VM ne change donc
+rien à leur capacité.
 
-- CARTO raster demande désormais une clé, offre un fair use de 5 M de
-  tuiles/mois et peut exiger un accord commercial. Les URLs actuelles sans clé
-  ne sont pas un choix de production durable.
+- OpenFreeMap fournit le fond vectoriel standard sans clé ni quota annoncé,
+  mais sans SLA. Le cache disque mobile sert de repli court.
 - ArcGIS Location Platform exige un compte/jeton. Le tarif publié inclut 2 M de
   tuiles/mois, puis 0,15 USD par 1 000 tuiles, ou un modèle par session.
 - Le satellite ne doit pas rester le fond par défaut à grande échelle avant
   calcul du coût. À 12 tuiles par ouverture quotidienne, 50 000 DAU représentent
   déjà environ 18 M de tuiles/mois.
 
-Avant la sortie publique, choisir explicitement : contrat CARTO/Esri avec clé
-et budget, ou fond vectoriel/PMTiles auto-hébergé. Les attributions visibles ne
-remplacent pas le droit commercial.
+Avant d’activer le satellite Chetiwa+, configurer Esri avec clé et budget. Le
+kill switch `PREMIUM_SATELLITE_ENABLED` permet de revenir immédiatement au fond
+OpenFreeMap. À terme, PMTiles auto-hébergé reste le repli sans dépendance SLA.
 
 ## Seuils de scaling LibreWXR
 

@@ -15,6 +15,7 @@ void main() {
     expect(config.radarPremiumSessions, 200);
     expect(config.premiumEnabled, isFalse);
     expect(config.premiumRolloutPercent, 0);
+    expect(config.premiumSatelliteEnabled, isFalse);
     expect(config.adsEnabled, isFalse);
     expect(config.rainAlertsEnabled, isFalse);
     expect(config.rainAlertsSendEnabled, isFalse);
@@ -107,11 +108,13 @@ void main() {
     final config = RuntimeConfig.fromEnvironment(const <String, String>{
       'PREMIUM_ENABLED': 'true',
       'PREMIUM_ROLLOUT_PERCENT': '25',
+      'PREMIUM_SATELLITE_ENABLED': 'true',
       'ADS_ENABLED': 'true',
     });
 
     expect(config.premiumEnabled, isTrue);
     expect(config.premiumRolloutPercent, 25);
+    expect(config.premiumSatelliteEnabled, isTrue);
     expect(config.adsEnabled, isTrue);
     expect(
       () => RuntimeConfig.fromEnvironment(const <String, String>{

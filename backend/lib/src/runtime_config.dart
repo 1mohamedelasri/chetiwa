@@ -53,6 +53,7 @@ final class RuntimeConfig {
     required this.globalKillSwitch,
     required this.premiumEnabled,
     required this.premiumRolloutPercent,
+    required this.premiumSatelliteEnabled,
     required this.adsEnabled,
     required this.publicBaseUrl,
     required this.internalMetricsToken,
@@ -198,6 +199,10 @@ final class RuntimeConfig {
         source['PREMIUM_ROLLOUT_PERCENT'],
         fallback: 0,
       ),
+      premiumSatelliteEnabled: _boolean(
+        source['PREMIUM_SATELLITE_ENABLED'],
+        fallback: false,
+      ),
       adsEnabled: _boolean(source['ADS_ENABLED'], fallback: false),
       publicBaseUrl: publicBaseUrl,
       internalMetricsToken: _optional(source['INTERNAL_METRICS_TOKEN']),
@@ -248,6 +253,7 @@ final class RuntimeConfig {
   final bool globalKillSwitch;
   final bool premiumEnabled;
   final int premiumRolloutPercent;
+  final bool premiumSatelliteEnabled;
   final bool adsEnabled;
   final Uri? publicBaseUrl;
   final String? internalMetricsToken;

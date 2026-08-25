@@ -53,6 +53,7 @@ void main() {
       final data = body['data'] as Map<String, Object?>;
       expect(data['features'], <String, Object?>{
         'premium': false,
+        'premiumSatellite': false,
         'ads': false,
       });
     },
@@ -62,6 +63,7 @@ void main() {
     config = RuntimeConfig.fromEnvironment(const <String, String>{
       'PREMIUM_ENABLED': 'true',
       'PREMIUM_ROLLOUT_PERCENT': '100',
+      'PREMIUM_SATELLITE_ENABLED': 'true',
       'ADS_ENABLED': 'true',
       'ARCGIS_API_KEY': 'test-key',
     });
@@ -78,7 +80,11 @@ void main() {
     final body =
         jsonDecode(await response.readAsString()) as Map<String, Object?>;
     final data = body['data'] as Map<String, Object?>;
-    expect(data['features'], <String, Object?>{'premium': true, 'ads': true});
+    expect(data['features'], <String, Object?>{
+      'premium': true,
+      'premiumSatellite': true,
+      'ads': true,
+    });
   });
 
   test('forecast normalizes provider data and supports ETag caching', () async {

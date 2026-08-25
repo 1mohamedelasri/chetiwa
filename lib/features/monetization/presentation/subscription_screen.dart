@@ -60,7 +60,7 @@ final class _SubscriptionScreenState extends State<SubscriptionScreen> {
           ),
           const SizedBox(height: 12),
           const Text(
-            'Chetiwa+ ajoute plusieurs lieux nommés, davantage d’historique Radar et supprime les publicités. Le Radar essentiel reste accessible gratuitement.',
+            'Chetiwa+ ajoute le fond satellite, plusieurs lieux nommés, davantage d’historique Radar et supprime les publicités. Le fond standard et le Radar essentiel restent gratuits.',
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),

@@ -9,14 +9,17 @@ final class AppFeatureFlags {
   const AppFeatureFlags({
     required this.premiumAvailable,
     required this.adsEnabled,
+    this.premiumSatelliteAvailable = false,
   });
 
   const AppFeatureFlags.disabled()
     : premiumAvailable = false,
-      adsEnabled = false;
+      adsEnabled = false,
+      premiumSatelliteAvailable = false;
 
   final bool premiumAvailable;
   final bool adsEnabled;
+  final bool premiumSatelliteAvailable;
 
   factory AppFeatureFlags.fromApi(Map<String, dynamic> data) {
     final features = data['features'];
@@ -26,6 +29,7 @@ final class AppFeatureFlags {
     return AppFeatureFlags(
       premiumAvailable: features['premium'] == true,
       adsEnabled: features['ads'] == true,
+      premiumSatelliteAvailable: features['premiumSatellite'] == true,
     );
   }
 }
@@ -58,6 +62,7 @@ final class AppFeatureFlagController extends ChangeNotifier {
 
   static const _premiumKey = 'feature-flags:premium:v1';
   static const _adsKey = 'feature-flags:ads:v1';
+  static const _premiumSatelliteKey = 'feature-flags:premium-satellite:v1';
 
   final AppFeatureFlagGateway? _gateway;
   final bool _persist;
@@ -67,6 +72,7 @@ final class AppFeatureFlagController extends ChangeNotifier {
   AppFeatureFlags get flags => _flags;
   bool get premiumAvailable => _flags.premiumAvailable;
   bool get adsEnabled => _flags.adsEnabled;
+  bool get premiumSatelliteAvailable => _flags.premiumSatelliteAvailable;
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -75,8 +81,15 @@ final class AppFeatureFlagController extends ChangeNotifier {
       final preferences = await SharedPreferences.getInstance();
       final premium = preferences.getBool(_premiumKey);
       final ads = preferences.getBool(_adsKey);
-      if (premium != null && ads != null) {
-        _setFlags(AppFeatureFlags(premiumAvailable: premium, adsEnabled: ads));
+      final premiumSatellite = preferences.getBool(_premiumSatelliteKey);
+      if (premium != null && ads != null && premiumSatellite != null) {
+        _setFlags(
+          AppFeatureFlags(
+            premiumAvailable: premium,
+            adsEnabled: ads,
+            premiumSatelliteAvailable: premiumSatellite,
+          ),
+        );
       }
     }
     await refresh();
@@ -93,6 +106,10 @@ final class AppFeatureFlagController extends ChangeNotifier {
         await Future.wait(<Future<bool>>[
           preferences.setBool(_premiumKey, remote.premiumAvailable),
           preferences.setBool(_adsKey, remote.adsEnabled),
+          preferences.setBool(
+            _premiumSatelliteKey,
+            remote.premiumSatelliteAvailable,
+          ),
         ]);
       }
     } on Object {
@@ -102,7 +119,8 @@ final class AppFeatureFlagController extends ChangeNotifier {
 
   void _setFlags(AppFeatureFlags value) {
     if (_flags.premiumAvailable == value.premiumAvailable &&
-        _flags.adsEnabled == value.adsEnabled) {
+        _flags.adsEnabled == value.adsEnabled &&
+        _flags.premiumSatelliteAvailable == value.premiumSatelliteAvailable) {
       return;
     }
     _flags = value;

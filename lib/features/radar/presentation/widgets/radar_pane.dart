@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../../app/theme/chetiwa_tokens.dart';
 import '../../../../core/config/api_config.dart';
 import '../../../../core/l10n/chetiwa_localizations.dart';
+import '../../../../core/maps/open_free_map_layer.dart';
 import '../../../../core/time/weather_clock.dart';
 import '../../../../core/widgets/weather_data_status.dart';
 import '../../../forecast/domain/entities/forecast.dart';
@@ -29,39 +30,38 @@ final class RadarPane extends StatelessWidget {
     required this.forecast,
     required this.snapshot,
     this.isActive = true,
+    this.satelliteAvailable = false,
     super.key,
   });
 
   final Forecast forecast;
   final ForecastSnapshot snapshot;
   final bool isActive;
+  final bool satelliteAvailable;
 
   @override
-  Widget build(BuildContext context) =>
-      _RadarMap(forecast: forecast, snapshot: snapshot, isActive: isActive);
+  Widget build(BuildContext context) => _RadarMap(
+    forecast: forecast,
+    snapshot: snapshot,
+    isActive: isActive,
+    satelliteAvailable: satelliteAvailable,
+  );
 }
 
-enum _RadarBaseMap { satellite, dark, light, voyager }
+enum _RadarBaseMap { standard, satellite }
 
 extension on _RadarBaseMap {
   IconData get icon => switch (this) {
+    _RadarBaseMap.standard => Icons.map_outlined,
     _RadarBaseMap.satellite => Icons.satellite_alt_outlined,
-    _RadarBaseMap.dark => Icons.dark_mode_outlined,
-    _RadarBaseMap.light => Icons.light_mode_outlined,
-    _RadarBaseMap.voyager => Icons.map_outlined,
   };
 
-  String get tileUrl => switch (this) {
-    _RadarBaseMap.satellite when ApiConfig.arcGisApiKey.isNotEmpty =>
-      'https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=${ApiConfig.arcGisApiKey}',
+  String get satelliteTileUrl => switch (this) {
     _RadarBaseMap.satellite =>
-      'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    _RadarBaseMap.dark =>
-      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-    _RadarBaseMap.light =>
-      'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png',
-    _RadarBaseMap.voyager =>
-      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
+      'https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=${ApiConfig.arcGisApiKey}',
+    _RadarBaseMap.standard => throw StateError(
+      'The standard basemap is vector-based and has no raster tile URL.',
+    ),
   };
 
   bool get isSatellite => this == _RadarBaseMap.satellite;
@@ -72,11 +72,13 @@ final class _RadarMap extends StatefulWidget {
     required this.forecast,
     required this.snapshot,
     required this.isActive,
+    required this.satelliteAvailable,
   });
 
   final Forecast forecast;
   final ForecastSnapshot snapshot;
   final bool isActive;
+  final bool satelliteAvailable;
 
   @override
   State<_RadarMap> createState() => _RadarMapState();
@@ -100,7 +102,7 @@ final class _RadarMapState extends State<_RadarMap> {
     _regionalZoom.round(),
   );
   late final RadarBloc _radarBloc;
-  _RadarBaseMap _baseMap = _RadarBaseMap.satellite;
+  _RadarBaseMap _baseMap = _RadarBaseMap.standard;
   // Preserve geographic context and avoid making weak echoes look more severe
   // than they are. Users can still raise this from the layer sheet.
   double _radarOpacity = 0.78;
@@ -139,6 +141,11 @@ final class _RadarMapState extends State<_RadarMap> {
   @override
   void didUpdateWidget(covariant _RadarMap oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.satelliteAvailable &&
+        !widget.satelliteAvailable &&
+        _baseMap.isSatellite) {
+      _baseMap = _RadarBaseMap.standard;
+    }
     if (!oldWidget.isActive && widget.isActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _maybeStartAutoplay();
@@ -375,14 +382,16 @@ final class _RadarMapState extends State<_RadarMap> {
                     ),
                   ),
                   children: [
-                    TileLayer(
-                      key: ValueKey(_baseMap),
-                      urlTemplate: _baseMap.tileUrl,
-                      subdomains: const ['a', 'b', 'c', 'd'],
-                      userAgentPackageName: 'com.chetiwa.chetiwa',
-                      maxNativeZoom: 20,
-                      maxZoom: 20,
-                    ),
+                    if (_baseMap == _RadarBaseMap.standard)
+                      const OpenFreeMapLayer()
+                    else
+                      TileLayer(
+                        key: ValueKey(_baseMap),
+                        urlTemplate: _baseMap.satelliteTileUrl,
+                        userAgentPackageName: 'com.chetiwa.chetiwa',
+                        maxNativeZoom: 20,
+                        maxZoom: 20,
+                      ),
                     if (_radarVisible)
                       Opacity(
                         key: const Key('chetiwa-radar-precipitation-tile'),
@@ -414,10 +423,10 @@ final class _RadarMapState extends State<_RadarMap> {
                               EvictErrorTileStrategy.notVisible,
                         ),
                       ),
-                    if (_baseMap.isSatellite)
+                    if (_baseMap.isSatellite && widget.satelliteAvailable)
                       TileLayer(
                         urlTemplate:
-                            'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+                            'https://static-map-tiles-api.arcgis.com/arcgis/rest/services/static-basemap-tiles-service/v1/arcgis/imagery/labels/static/tile/{z}/{y}/{x}?token=${ApiConfig.arcGisApiKey}',
                         userAgentPackageName: 'com.chetiwa.chetiwa',
                         maxNativeZoom: 20,
                         maxZoom: 20,
@@ -674,6 +683,10 @@ final class _RadarMapState extends State<_RadarMap> {
   }
 
   Future<void> _showLayers() async {
+    final availableMaps = <_RadarBaseMap>[
+      _RadarBaseMap.standard,
+      if (widget.satelliteAvailable) _RadarBaseMap.satellite,
+    ];
     await showModalBottomSheet<void>(
       context: context,
       useSafeArea: true,
@@ -708,12 +721,12 @@ final class _RadarMapState extends State<_RadarMap> {
                 GridView.count(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: 2,
+                  crossAxisCount: availableMaps.length == 1 ? 1 : 2,
                   childAspectRatio: 2.15,
                   mainAxisSpacing: 10,
                   crossAxisSpacing: 10,
                   children: [
-                    for (final map in _RadarBaseMap.values)
+                    for (final map in availableMaps)
                       _MapStyleOption(
                         map: map,
                         selected: _baseMap == map,
@@ -989,7 +1002,7 @@ final class _MapAttribution extends StatelessWidget {
         Uri.parse(
           baseMap.isSatellite
               ? 'https://www.esri.com/en-us/legal/terms/full-master-agreement'
-              : 'https://carto.com/legal/terms/',
+              : OpenFreeMapLayer.homepage,
         ),
       ),
       borderRadius: BorderRadius.circular(ChetiwaRadius.small),
@@ -998,7 +1011,7 @@ final class _MapAttribution extends StatelessWidget {
         child: Text(
           baseMap.isSatellite
               ? '© Esri, Maxar, Earthstar · Radar LibreWXR'
-              : '© OpenStreetMap © CARTO · Radar LibreWXR',
+              : '${OpenFreeMapLayer.attribution} · Radar LibreWXR',
           style: const TextStyle(
             color: ChetiwaColors.textSecondary,
             fontSize: 8,

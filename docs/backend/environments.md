@@ -77,7 +77,7 @@ avec le workflow manuel GitHub **Deploy backend production** ou localement :
 backend/deploy/cloud-run/deploy-api.sh \
   PROJECT_ID europe-west1 IMAGE_URI \
   chetiwa-api@PROJECT_ID.iam.gserviceaccount.com \
-  https://api.chetiwa.app
+  https://api.ezplatforms.com
 ```
 
 Le workflow utilise Workload Identity Federation, sans JSON de compte de
@@ -86,7 +86,7 @@ reviewer. Une fois le domaine public actif :
 
 ```sh
 backend/deploy/cloud-run/provision-api-observability.sh \
-  PROJECT_ID api.chetiwa.app \
+  PROJECT_ID api.ezplatforms.com \
   'projects/PROJECT_ID/notificationChannels/CHANNEL_ID'
 ```
 

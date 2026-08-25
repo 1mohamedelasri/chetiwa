@@ -164,12 +164,13 @@ final class ChetiwaLocalizations {
   String get sourceRainViewerPurpose => _fr
       ? 'Images radar de précipitations via LibreWXR'
       : 'Precipitation radar imagery via LibreWXR';
-  String get sourceCartoPurpose => _fr
-      ? 'Fond de carte Routes, Clair et Sombre'
-      : 'Streets, light and dark map base';
+  String get sourceOpenFreeMapPurpose => _fr
+      ? 'Fond de carte standard vectoriel gratuit'
+      : 'Free standard vector basemap';
   String get sourceEsriPurpose => _fr
       ? 'Fond satellite, lorsqu’il est sélectionné'
       : 'Satellite map base, when selected';
+  String get premiumOnly => _fr ? 'Chetiwa+ uniquement' : 'Chetiwa+ only';
   String get chooseMainLocationHelp => _fr
       ? 'Choisissez une ville ou un point sur la carte.'
       : 'Choose a city or a point on the map.';
@@ -203,8 +204,8 @@ final class ChetiwaLocalizations {
       ? 'Prévenir avant le début de la pluie'
       : 'Warn me before rain begins';
   String get premiumSubtitle => _fr
-      ? 'Alertes intelligentes et zéro publicité'
-      : 'Smart alerts and no advertising';
+      ? 'Satellite, alertes intelligentes et zéro publicité'
+      : 'Satellite, smart alerts and no advertising';
   String get hourlyForecast =>
       _fr ? 'PRÉVISIONS HEURE PAR HEURE' : 'HOURLY FORECAST';
   String get tenDayForecast =>
@@ -222,10 +223,9 @@ final class ChetiwaLocalizations {
   String get weakEchoes => _fr ? 'Échos faibles' : 'Weak echoes';
   String get opacity => _fr ? 'Opacité' : 'Opacity';
   String mapStyle(String name) => switch (name) {
+    'standard' => _fr ? 'Standard' : 'Standard',
     'satellite' => 'Satellite',
-    'dark' => _fr ? 'Sombre' : 'Dark',
-    'light' => _fr ? 'Clair' : 'Light',
-    _ => _fr ? 'Routes' : 'Streets',
+    _ => _fr ? 'Standard' : 'Standard',
   };
   String get returnLatestRadar => _fr
       ? 'Revenir à la dernière image radar'

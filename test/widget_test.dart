@@ -92,18 +92,14 @@ void main() {
     await tester.tap(find.byKey(const Key('radar-layers-button')));
     await tester.pumpAndSettle();
     expect(find.text('Couches de la carte'), findsOneWidget);
-    expect(find.text('Satellite'), findsOneWidget);
-    expect(find.text('Sombre'), findsOneWidget);
-    expect(find.text('Clair'), findsOneWidget);
-    expect(find.text('Routes'), findsOneWidget);
+    expect(find.text('Standard'), findsOneWidget);
+    expect(find.text('Satellite'), findsNothing);
     expect(find.text('Radar de précipitations'), findsOneWidget);
     expect(
       find.byKey(const Key('radar-precipitation-explanation')),
       findsOneWidget,
     );
-    await tester.tap(find.text('Clair'));
-    await tester.pump();
-    await tester.tapAt(const Offset(8, 8));
+    Navigator.of(tester.element(find.text('Standard'))).pop();
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('radar-city-pin')));

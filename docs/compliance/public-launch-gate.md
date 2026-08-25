@@ -14,8 +14,8 @@ responsable identifié.
 | --- | --- | --- | --- |
 | Prévisions/géocodage | Open-Meteo direct en dev, proxy en prod | Contrat/API commerciale avant pubs ou abonnements | Conditions acceptées, quota, attribution, DPA |
 | Radar | LibreWXR auto-hébergé derrière Cloudflare | Bêta après gate technique ; public après validation du code et de chaque donnée amont | Licences, droit de redistribution, cache/CDN, attribution, capacité et procédure incident |
-| Fond standard | CARTO dans le radar actuel | Remplacer par un fond explicitement autorisé ou signer l’offre adaptée | Licence mobile/commerciale, cache, attribution, quota |
-| Satellite | Esri, actuellement fond Radar par défaut | Désactiver comme défaut ou configurer compte/token/budget avant publication | Token, droits d’application, cache, attribution, budget |
+| Fond standard | OpenFreeMap vectoriel dans Radar et le sélecteur | Autorisé pour le lancement initial, avec cache et surveillance car aucun SLA n’est fourni | Conditions datées, attribution, procédure de repli PMTiles |
+| Satellite | Esri, réservé à Chetiwa+ | Désactivé par défaut ; activer avec compte/token/budget et achats validés | Token, droits d’application, attribution, budget, kill switch testé |
 | Achats | Apple App Store / Google Play | Autoriser après validation des droits et textes store | Accords développeur, produits, commissions, fiscalité |
 | Publicité | Slot Free, aucune requête Premium | Activer uniquement avec CMP et contrat publicitaire validés | DPA, consentement, ATT/App Privacy/Data Safety, attribution |
 

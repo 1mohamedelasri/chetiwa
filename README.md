@@ -27,16 +27,16 @@ production Chetiwa exige HTTPS :
 ```sh
 flutter build appbundle \
   --dart-define=CHETIWA_ENV=production \
-  --dart-define=CHETIWA_API_BASE_URL=https://api.chetiwa.example
+  --dart-define=CHETIWA_API_BASE_URL=https://api.ezplatforms.com
 ```
 
 Sans `CHETIWA_API_BASE_URL`, le profil développement conserve provisoirement
 les appels directs existants. Ce fallback est automatiquement interdit lorsque
 `CHETIWA_ENV=production`.
 
-The development build can load Esri World Imagery from its public endpoint.
-For a production build, provision an Esri API key/licence and inject it at
-compile time so usage and attribution comply with the provider terms:
+The free app uses OpenFreeMap. Esri World Imagery is an optional Chetiwa+
+feature and stays disabled unless the remote cost switch and a licensed Esri
+key are both configured:
 
 ```sh
 flutter run --dart-define=ARCGIS_API_KEY=your_key

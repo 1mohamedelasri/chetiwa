@@ -104,6 +104,7 @@ Handler createApp({
         return _dataResponse(<String, Object?>{
           'features': <String, Object?>{
             'premium': premiumEligible,
+            'premiumSatellite': config.premiumSatelliteEnabled,
             'ads': config.adsEnabled,
           },
         }, now: clock);

@@ -9,6 +9,7 @@ import '../../../../core/l10n/chetiwa_localizations.dart';
 import '../../../../core/location/coordinates.dart';
 import '../../../../core/location/location_repository.dart';
 import '../../../../core/location/location_preferences_store.dart';
+import '../../../../core/maps/open_free_map_layer.dart';
 
 /// Full-screen map choice with a fixed centre marker. It stays useful when
 /// reverse geocoding is unavailable: coordinates are still a valid weather
@@ -214,16 +215,7 @@ final class _MapLocationPickerScreenState
                 flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
               ),
             ),
-            children: [
-              TileLayer(
-                urlTemplate:
-                    'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
-                subdomains: ['a', 'b', 'c', 'd'],
-                userAgentPackageName: 'com.chetiwa.chetiwa',
-                maxNativeZoom: 20,
-                maxZoom: 20,
-              ),
-            ],
+            children: [const OpenFreeMapLayer()],
           ),
           const IgnorePointer(
             child: Center(
@@ -282,7 +274,7 @@ final class _MapLocationPickerScreenState
             left: 8,
             bottom: 90,
             child: Text(
-              '© OpenStreetMap contributors © CARTO',
+              OpenFreeMapLayer.attribution,
               style: TextStyle(color: ChetiwaColors.textSecondary, fontSize: 9),
             ),
           ),

@@ -9,15 +9,18 @@ import '../../../../core/time/weather_clock.dart';
 import '../../../../core/location/location_repository.dart';
 import '../../../../core/location/active_location_controller.dart';
 import '../../../../core/l10n/chetiwa_localizations.dart';
+import '../../../../core/config/api_config.dart';
 import '../../../../core/notifications/rain_alert_navigation_controller.dart';
 import '../../../../core/widgets/weather_data_status.dart';
 import '../../../radar/application/radar_bloc.dart';
 import '../../../radar/domain/repositories/radar_repository.dart';
+import '../../../radar/domain/services/radar_basemap_policy.dart';
 import '../../../radar/presentation/widgets/radar_pane.dart';
 import '../../../analytics/application/analytics_tracker.dart';
 import '../../../alerts/application/local_rain_alert_coordinator.dart';
 import '../../../monetization/domain/premium_entitlement.dart';
 import '../../../monetization/domain/premium_limits.dart';
+import '../../../monetization/application/app_feature_flag_controller.dart';
 import '../../application/forecast_bloc.dart';
 import '../../application/graph_horizon_cubit.dart';
 import '../../application/weather_section_cubit.dart';
@@ -292,6 +295,17 @@ final class _WeatherViewState extends State<_WeatherView>
                         forecast: forecast,
                         snapshot: state.snapshot,
                         isActive: section == WeatherSection.radar,
+                        satelliteAvailable:
+                            RadarBasemapPolicy.canUsePremiumSatellite(
+                              isPremium: context
+                                  .watch<EntitlementController>()
+                                  .isPremium,
+                              premiumSatelliteEnabled: context
+                                  .watch<AppFeatureFlagController>()
+                                  .premiumSatelliteAvailable,
+                              arcGisConfigured:
+                                  ApiConfig.arcGisApiKey.isNotEmpty,
+                            ),
                       ),
                       ForecastPane(
                         key: const ValueKey('forecast'),
