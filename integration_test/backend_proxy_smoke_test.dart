@@ -1,6 +1,7 @@
 import 'package:chetiwa/app/app.dart';
 import 'package:chetiwa/app/di/chetiwa_dependencies.dart';
 import 'package:chetiwa/core/config/api_config.dart';
+import 'package:chetiwa/core/location/coordinates.dart';
 import 'package:chetiwa/features/radar/application/radar_bloc.dart';
 import 'package:chetiwa/features/radar/data/cache/radar_tile_cache.dart';
 import 'package:chetiwa/features/radar/domain/services/radar_frame_policy.dart';
@@ -116,7 +117,11 @@ void main() {
       tester,
       () => (radarBloc.state as RadarReady).isPlaying,
       reason: 'Rapid consecutive zooms left Radar playback suspended',
-      timeout: const Duration(seconds: 3),
+      diagnostics: () => RadarMapSmokeTestBridge.debugState,
+      // iOS may need one native tile-cache invalidation and composition pass
+      // after crossing z14 -> z5. It must recover automatically, but a cold
+      // server/network path is not required to finish inside three seconds.
+      timeout: const Duration(seconds: 15),
     );
 
     radarBloc.add(const RadarPlaybackPaused());
@@ -186,6 +191,12 @@ void main() {
         },
         reason:
             'The cursor advanced without presenting the matching native Radar tile',
+        diagnostics: () {
+          final state = radarBloc.state as RadarReady;
+          return 'selected=${state.selectedIndex} '
+              'selectedTemplate=${state.selectedFrame.tileUrlTemplate} '
+              '${RadarMapSmokeTestBridge.debugState}';
+        },
         timeout: const Duration(seconds: 15),
       );
       final state = radarBloc.state as RadarReady;
@@ -196,10 +207,61 @@ void main() {
       (radarBloc.state as RadarReady).selectedIndex,
       initialRadar.playbackStartIndex,
     );
-    await tester.tap(find.byKey(const Key('radar-playback-button')));
+    radarBloc.add(const RadarPlaybackPaused());
     await tester.pump();
 
-    final probeUrl = initialRadar.selectedFrame.tileUrlTemplate!
+    // Reproduce the real cache-persistence regression: zoom out in one
+    // viewport, cross the Atlantic, then return to Paris without clearing app
+    // data. Every location must create a fresh native map presentation and
+    // restart automatic playback on its own.
+    for (final coordinates in const <Coordinates>[
+      Coordinates(latitude: 36.1627, longitude: -86.7816),
+      Coordinates.paris,
+    ]) {
+      final mapCreationsBefore = RadarMapSmokeTestBridge.mapCreationCount;
+      radarBloc.add(RadarLocationChanged(coordinates));
+      await _waitForCondition(
+        tester,
+        () {
+          final state = radarBloc.state;
+          return state is RadarReady && state.coordinates == coordinates;
+        },
+        reason: 'Changing continent did not update the Radar viewport',
+        timeout: const Duration(seconds: 45),
+      );
+      expect(
+        RadarMapSmokeTestBridge.mapCreationCount,
+        mapCreationsBefore,
+        reason:
+            'Changing city should preserve the stable native Google map surface',
+      );
+      await _waitForCondition(
+        tester,
+        () {
+          final state = radarBloc.state;
+          return state is RadarReady &&
+              state.coordinates == coordinates &&
+              state.isPlaying &&
+              !RadarMapSmokeTestBridge.tileHandoffPending &&
+              RadarMapSmokeTestBridge.presentedTileTemplate ==
+                  state.selectedFrame.tileUrlTemplate;
+        },
+        reason:
+            'Radar did not recover tiles and playback after changing continent',
+        diagnostics: () {
+          final state = radarBloc.state;
+          return 'target=$coordinates state=$state '
+              '${RadarMapSmokeTestBridge.debugState}';
+        },
+        timeout: const Duration(seconds: 45),
+      );
+    }
+
+    radarBloc.add(const RadarPlaybackPaused());
+    await tester.pump();
+
+    final probeState = radarBloc.state as RadarReady;
+    final probeUrl = probeState.selectedFrame.tileUrlTemplate!
         .replaceAll('{z}', '7')
         .replaceAll('{x}', '64')
         .replaceAll('{y}', '44');
@@ -234,13 +296,18 @@ Future<void> _waitForCondition(
   WidgetTester tester,
   bool Function() condition, {
   required String reason,
+  String Function()? diagnostics,
   Duration timeout = const Duration(seconds: 8),
 }) async {
   final deadline = DateTime.now().add(timeout);
   while (!condition() && DateTime.now().isBefore(deadline)) {
     await tester.pump(const Duration(milliseconds: 16));
   }
-  expect(condition(), isTrue, reason: reason);
+  expect(
+    condition(),
+    isTrue,
+    reason: diagnostics == null ? reason : '$reason\n${diagnostics()}',
+  );
 }
 
 Future<void> _waitFor(

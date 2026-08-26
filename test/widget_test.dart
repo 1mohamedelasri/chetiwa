@@ -139,9 +139,10 @@ void main() {
     expect((radarBloc.state as RadarReady).isPlaying, isTrue);
     expect(find.byKey(const Key('radar-city-pin')), findsOneWidget);
     expect(find.byKey(const Key('radar-time-ruler')), findsOneWidget);
-    expect(find.byKey(const Key('radar-reset-button')), findsOneWidget);
+    expect(find.byKey(const Key('radar-playback-button')), findsNothing);
+    expect(find.byKey(const Key('radar-now-button')), findsNothing);
+    expect(find.byKey(const Key('radar-reset-button')), findsNothing);
     expect(find.text('Paris, France'), findsOneWidget);
-    expect(find.textContaining('dernière observation'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('radar-layers-button')));
     await tester.pump(const Duration(milliseconds: 400));
@@ -167,29 +168,7 @@ void main() {
     );
     await tester.pump();
     expect(find.textContaining('prévision'), findsWidgets);
-    expect(find.byKey(const Key('radar-now-button')), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('radar-now-button')));
-    await tester.pump();
-    expect(find.textContaining('dernière observation'), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('radar-playback-button')));
-    await tester.pump();
-    expect(find.text('Lecture'), findsOneWidget);
-    expect((radarBloc.state as RadarReady).isPlaying, isFalse);
-    await tester.pump(const Duration(milliseconds: 2600));
-    expect(find.text('Lecture'), findsOneWidget);
-    expect((radarBloc.state as RadarReady).isPlaying, isFalse);
-    await tester.tap(find.byKey(const Key('radar-playback-button')));
-    await tester.pump();
-    expect(find.text('Pause'), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('radar-reset-button')));
-    await tester.pump();
-    expect(find.text('Pause'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('radar-playback-button')));
-    await tester.pump();
-    expect(find.text('Lecture'), findsOneWidget);
+    expect((radarBloc.state as RadarReady).isPlaying, isTrue);
 
     await tester.tap(find.text('Prévisions'));
     await tester.pump();

@@ -69,6 +69,13 @@ final class _RadarDownloadWaiter {
   final Completer<bool> completer;
 }
 
+final class _RadarCoordinateFallback {
+  const _RadarCoordinateFallback({required this.bytes, required this.savedAt});
+
+  final Uint8List bytes;
+  final DateTime savedAt;
+}
+
 /// Shared LibreWXR cache used by Google Maps tile overlays on Android and iOS.
 ///
 /// The Google basemap is rendered by the native SDK. Radar bytes still flow
@@ -81,6 +88,8 @@ final class RadarTileCache {
   static const _maxConcurrentRenders = 2;
   static const _maxDiskBytes = 128 * 1024 * 1024;
   static const _maxMemoryBytes = 16 * 1024 * 1024;
+  static const _maxCoordinateFallbacks = 64;
+  static const _coordinateFallbackAge = Duration(minutes: 30);
   static const _freshAge = Duration(hours: 6);
   // A genuinely cold LibreWXR coordinate can take 5-7 seconds to build once
   // before the server/CDN caches it. Returning NO_TILE after 2.5 seconds made
@@ -163,6 +172,8 @@ final class RadarTileCache {
   final Queue<Completer<void>> _renderWaiters = Queue<Completer<void>>();
   final LinkedHashSet<RadarTileCoordinate> _recentCoordinates =
       LinkedHashSet<RadarTileCoordinate>();
+  final LinkedHashMap<String, _RadarCoordinateFallback> _coordinateFallbacks =
+      LinkedHashMap<String, _RadarCoordinateFallback>();
   final Set<String> _readySessionTiles = <String>{};
   var _memoryBytes = 0;
   var _activeDownloads = 0;
@@ -181,6 +192,7 @@ final class RadarTileCache {
     metrics.beginSession();
     _readySessionTiles.clear();
     _recentCoordinates.clear();
+    _coordinateFallbacks.clear();
     readyTileCount.value = 0;
     successfulTileResponseCount.value = 0;
     _smokeController.resetFailures();
@@ -356,16 +368,23 @@ final class RadarTileCache {
     _recordRequested(requestedCoordinate);
     final sourceCoordinate = requestedCoordinate.ancestorAt(_maxNativeZoom);
     final sourceUrl = sourceCoordinate.resolve(template);
+    final fallbackKey = _coordinateFallbackKey(sourceCoordinate);
+    final fallback = _takeCoordinateFallback(fallbackKey);
     final sourceBytes = await _getBytes(
       sourceUrl,
+      fallbackAvailable: fallback != null,
       requestGeneration: effectiveGeneration,
     );
-    if (sourceBytes == null) return null;
+    final effectiveSourceBytes = sourceBytes ?? fallback?.bytes;
+    if (effectiveSourceBytes == null) return null;
+    if (sourceBytes != null) {
+      _putCoordinateFallback(fallbackKey, sourceBytes);
+    }
 
     final bytes = requestedCoordinate.zoom <= _maxNativeZoom
-        ? sourceBytes
+        ? effectiveSourceBytes
         : await _overzoomBytes(
-            sourceBytes: sourceBytes,
+            sourceBytes: effectiveSourceBytes,
             sourceUrl: sourceUrl,
             sourceCoordinate: sourceCoordinate,
             requestedCoordinate: requestedCoordinate,
@@ -470,6 +489,7 @@ final class RadarTileCache {
   Future<Uint8List?> _getBytes(
     String url, {
     bool forceNetwork = false,
+    bool fallbackAvailable = false,
     required int? requestGeneration,
   }) {
     final inFlightKey = '${requestGeneration ?? 'smoke'}:$url';
@@ -478,6 +498,7 @@ final class RadarTileCache {
     final operation = _loadBytes(
       url,
       forceNetwork: forceNetwork,
+      fallbackAvailable: fallbackAvailable,
       requestGeneration: requestGeneration,
     );
     _inFlight[inFlightKey] = operation;
@@ -488,6 +509,7 @@ final class RadarTileCache {
   Future<Uint8List?> _loadBytes(
     String url, {
     required bool forceNetwork,
+    required bool fallbackAvailable,
     required int? requestGeneration,
   }) async {
     if (!forceNetwork && !_smokeController.shouldBypassCacheFor(url)) {
@@ -506,12 +528,24 @@ final class RadarTileCache {
     metrics.recordCacheLookup(url, hit: false);
     if (!await _acquireDownloadSlot(requestGeneration)) return null;
     try {
-      final attempts = forceNetwork && _smokeController.enabled ? 1 : 2;
+      // Once this exact geographic tile has a previously presented image,
+      // one bounded refresh attempt is enough. A second long retry used to
+      // freeze the complete animation whenever LibreWXR regenerated frames.
+      // The caller can safely preserve the last good echo and try the next
+      // timestamp without ever returning a blank native Google tile.
+      final attempts =
+          (forceNetwork && _smokeController.enabled) || fallbackAvailable
+          ? 1
+          : 2;
       for (var attempt = 0; attempt < attempts; attempt++) {
         try {
           final response = await _client
               .get(Uri.parse(url))
-              .timeout(_tileRequestTimeout);
+              .timeout(
+                fallbackAvailable
+                    ? const Duration(seconds: 4)
+                    : _tileRequestTimeout,
+              );
           if (response.statusCode == 200) {
             if (isSupportedImageBytes(response.bodyBytes)) {
               final bytes = Uint8List.fromList(response.bodyBytes);
@@ -615,6 +649,30 @@ final class RadarTileCache {
     while (_memoryBytes > _maxMemoryBytes && _memory.isNotEmpty) {
       final first = _memory.remove(_memory.keys.first);
       if (first != null) _memoryBytes -= first.length;
+    }
+  }
+
+  static String _coordinateFallbackKey(RadarTileCoordinate coordinate) =>
+      '${coordinate.zoom}/${coordinate.x}/${coordinate.y}';
+
+  _RadarCoordinateFallback? _takeCoordinateFallback(String key) {
+    final fallback = _coordinateFallbacks.remove(key);
+    if (fallback == null) return null;
+    if (DateTime.now().difference(fallback.savedAt) > _coordinateFallbackAge) {
+      return null;
+    }
+    _coordinateFallbacks[key] = fallback;
+    return fallback;
+  }
+
+  void _putCoordinateFallback(String key, Uint8List bytes) {
+    _coordinateFallbacks.remove(key);
+    _coordinateFallbacks[key] = _RadarCoordinateFallback(
+      bytes: bytes,
+      savedAt: DateTime.now(),
+    );
+    while (_coordinateFallbacks.length > _maxCoordinateFallbacks) {
+      _coordinateFallbacks.remove(_coordinateFallbacks.keys.first);
     }
   }
 

@@ -213,8 +213,12 @@ Handler createApp({
         if (config.globalKillSwitch || !radarGuard.policy.enabled) {
           throw radarDisabled();
         }
-        final latitude = _coordinate(request, 'latitude', -90, 90);
-        final longitude = _coordinate(request, 'longitude', -180, 180);
+        // Validate the legacy query contract, but keep the cached response
+        // provider-wide: frame timestamps and tile templates do not depend on
+        // the selected city. Echoing the first request's coordinates from this
+        // shared cache made later city changes incorrectly report Paris.
+        _coordinate(request, 'latitude', -90, 90);
+        _coordinate(request, 'longitude', -180, 180);
         return await _serveCached(
           request: request,
           cache: responseCache,
@@ -226,8 +230,7 @@ Handler createApp({
             freshFor: Duration(minutes: 2),
             staleIfErrorFor: Duration(minutes: 30),
           ),
-          loader: () =>
-              gateway.radarFrames(latitude: latitude, longitude: longitude),
+          loader: gateway.radarFrames,
         );
       } on ApiException catch (error) {
         return _apiError(error);

@@ -54,13 +54,16 @@ void main() {
         ),
       ),
     );
-    // Autoplay must already be visible when Radar opens. Capture it before the
-    // 1.5 s timer advances to the next deterministic frame.
+    // Autoplay starts without exposing transport controls. Capture the first
+    // deterministic cycle after the state confirms automatic playback.
     for (var index = 0; index < 10; index++) {
       await tester.pump(const Duration(milliseconds: 50));
-      if (find.text('Pause').evaluate().isNotEmpty) break;
+      final state = radarBloc.state;
+      if (state is RadarReady && state.isPlaying) break;
     }
-    expect(find.text('Pause'), findsOneWidget);
+    expect((radarBloc.state as RadarReady).isPlaying, isTrue);
+    expect(find.byKey(const Key('radar-playback-button')), findsNothing);
+    expect(find.byKey(const Key('radar-reset-button')), findsNothing);
 
     expect(find.byKey(const Key('radar-city-pin')), findsOneWidget);
     expect(find.byKey(const Key('fallback-radar-none')), findsOneWidget);

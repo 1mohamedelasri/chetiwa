@@ -7,13 +7,15 @@ set -euo pipefail
 
 local_base_url="${CHETIWA_RADAR_LOCAL_BASE_URL:-http://127.0.0.1:8080}"
 public_base_url="${CHETIWA_RADAR_BASE_URL:-https://radar.ezplatforms.com}"
+api_local_base_url="${CHETIWA_API_LOCAL_BASE_URL:-http://127.0.0.1:8081}"
+api_public_base_url="${CHETIWA_API_BASE_URL:-https://chetiwa-api.ezplatforms.com}"
 state_dir="${CHETIWA_RADAR_PREWARM_STATE_DIR:-/var/lib/chetiwa-radar-prewarm}"
 zoom="${CHETIWA_RADAR_PREWARM_ZOOM:-7}"
 tile_x="${CHETIWA_RADAR_PREWARM_TILE_X:-64}"
 tile_y="${CHETIWA_RADAR_PREWARM_TILE_Y:-44}"
 scheme="${CHETIWA_RADAR_PREWARM_SCHEME:-14}"
 
-for command in curl python3 flock; do
+for command in base64 curl python3 flock; do
   command -v "$command" >/dev/null || {
     printf 'Missing required command: %s\n' "$command" >&2
     exit 2
@@ -27,7 +29,7 @@ flock -n 9 || exit 0
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
 metadata="$work_dir/metadata.json"
-previous="$state_dir/warmed-frames.txt"
+previous="$state_dir/warmed-api-frames-v2.txt"
 completed="$work_dir/completed.txt"
 touch "$previous" "$completed"
 
@@ -69,7 +71,7 @@ for key in sorted(keys):
 PY
 
 warm_frame() {
-  local key="$1" frame run path local_url public_url
+  local key="$1" frame run path local_url public_url frame_id api_path
   frame="${key%%|*}"
   run=""
   if [[ "$key" == *"|"* ]]; then
@@ -88,6 +90,22 @@ warm_frame() {
     --connect-timeout 3 --max-time 45 --output /dev/null "$local_url" || return 1
   curl --fail --silent --show-error --retry 1 --retry-delay 1 \
     --connect-timeout 3 --max-time 15 --output /dev/null "$public_url" || return 1
+
+  # Production phones use the Chetiwa API proxy, not the LibreWXR hostname.
+  # Warming only radar.ezplatforms.com left the API binary cache and its
+  # Cloudflare cache cold, so the first phone still paid the complete render
+  # cost. Seed the exact base64 frame URL emitted by /v1/radar/frames.
+  frame_id="$(printf '%s' "$frame" | base64 | tr '+/' '-_' | tr -d '=\n')"
+  api_path="/v1/radar/tiles/$frame_id/$zoom/$tile_x/$tile_y"
+  if [[ -n "$run" ]]; then
+    api_path="$api_path?run=$run"
+  fi
+  curl --fail --silent --show-error --retry 1 --retry-delay 1 \
+    --connect-timeout 3 --max-time 45 --output /dev/null \
+    "$api_local_base_url$api_path" || return 1
+  curl --fail --silent --show-error --retry 1 --retry-delay 1 \
+    --connect-timeout 3 --max-time 15 --output /dev/null \
+    "$api_public_base_url$api_path" || return 1
   printf '%s\n' "$key" >>"$completed"
 }
 

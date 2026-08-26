@@ -155,10 +155,7 @@ final class ProviderGateway {
     };
   }
 
-  Future<Map<String, Object?>> radarFrames({
-    required double latitude,
-    required double longitude,
-  }) async {
+  Future<Map<String, Object?>> radarFrames() async {
     final usesRainViewer = _config.radarProvider == RadarProvider.rainViewer;
     final usesLibreWxr = _config.radarProvider == RadarProvider.librewxr;
     if (_config.isProduction && usesRainViewer) {
@@ -292,10 +289,6 @@ final class ProviderGateway {
       );
     }
     return <String, Object?>{
-      'location': <String, Object?>{
-        'latitude': latitude,
-        'longitude': longitude,
-      },
       'frames': frames,
       'provider': <String, Object?>{
         'id': usesRainViewer

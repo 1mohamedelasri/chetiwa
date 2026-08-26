@@ -31,20 +31,25 @@ abstract final class RadarMapSmokeTestBridge {
   static int Function()? _tileOverlayCount;
   static String? Function()? _presentedTileTemplate;
   static bool Function()? _tileHandoffPending;
+  static String Function()? _debugState;
   static int _maxTileOverlayCount = 0;
+  static int _mapCreationCount = 0;
 
   static void attach(
     GoogleMapController controller, {
     required int Function() tileOverlayCount,
     required String? Function() presentedTileTemplate,
     required bool Function() tileHandoffPending,
+    required String Function() debugState,
   }) {
     if (!_enabled) return;
     _controller = controller;
     _tileOverlayCount = tileOverlayCount;
     _presentedTileTemplate = presentedTileTemplate;
     _tileHandoffPending = tileHandoffPending;
+    _debugState = debugState;
     _maxTileOverlayCount = 0;
+    _mapCreationCount++;
   }
 
   static void detach(GoogleMapController? controller) {
@@ -53,6 +58,7 @@ abstract final class RadarMapSmokeTestBridge {
     _tileOverlayCount = null;
     _presentedTileTemplate = null;
     _tileHandoffPending = null;
+    _debugState = null;
   }
 
   static Future<bool> zoomTo(double zoom) async {
@@ -72,6 +78,12 @@ abstract final class RadarMapSmokeTestBridge {
 
   static bool get tileHandoffPending =>
       _enabled && (_tileHandoffPending?.call() ?? false);
+
+  static int get mapCreationCount => _enabled ? _mapCreationCount : 0;
+
+  static String get debugState => _enabled
+      ? _debugState?.call() ?? 'Radar map detached'
+      : 'Radar smoke bridge disabled';
 
   static void resetMaxTileOverlayCount() {
     if (!_enabled) return;
@@ -152,13 +164,9 @@ final class _RadarMapState extends State<_RadarMap>
   // correct z10 ancestor through z14, so city zoom stays geographically exact
   // instead of disappearing or requesting unsupported server tiles.
   static const _maxRadarZoom = 14.0;
-  static const _timelineHeight = 150.0;
+  static const _timelineHeight = 104.0;
   static const _minimumInitialVisibleTileResponses = 4;
   static const _maxVisibleRadarTiles = 16;
-  static const _tileOverlayIds = <TileOverlayId>[
-    TileOverlayId('chetiwa-radar-a'),
-    TileOverlayId('chetiwa-radar-b'),
-  ];
 
   GoogleMapController? _mapController;
   final RadarTileCache _tileCache = RadarTileCache.shared;
@@ -185,6 +193,7 @@ final class _RadarMapState extends State<_RadarMap>
   final List<bool> _tileSlotUsesModelSnapshot = List<bool>.filled(2, false);
   var _frontTileSlot = 0;
   int? _incomingTileSlot;
+  var _tileOverlayGeneration = 0;
   var _tileTransitionGeneration = 0;
   var _cameraInteractionGeneration = 0;
   Timer? _prefetchDebounce;
@@ -197,9 +206,7 @@ final class _RadarMapState extends State<_RadarMap>
   var _viewportRequestGeneration = 0;
   var _radarTilesLoading = false;
   var _visibleTileRetryCount = 0;
-  var _userPausedPlayback = false;
   var _autoplayRequested = false;
-  var _playbackBufferReady = false;
   // The BLoC owns the frame index while Google Maps paints tile overlays on a
   // separate native surface. This gate stops only the automatic clock during
   // a handoff so the cursor can never run ahead of the last confirmed image.
@@ -219,8 +226,10 @@ final class _RadarMapState extends State<_RadarMap>
   var _timelineScrubbing = false;
   var _resumePlaybackAfterTimelineScrub = false;
   var _visibleTileSuccessBaseline = 0;
+  LatLng? _activeRadarCenter;
   String? _lastReportedMetadataIssue;
   var _tileIssueReported = false;
+  var _lastTileHandoffDiagnostic = 'none';
 
   @override
   void initState() {
@@ -294,7 +303,7 @@ final class _RadarMapState extends State<_RadarMap>
       unawaited(_recoverRadarAfterResume());
       return;
     }
-    if (widget.isActive && !_userPausedPlayback) {
+    if (widget.isActive) {
       _radarBloc.add(const RadarPlaybackResumed());
     }
   }
@@ -303,7 +312,7 @@ final class _RadarMapState extends State<_RadarMap>
     if (!mounted || _resumeRecoveryInProgress) return;
     final state = _radarBloc.state;
     if (state is! RadarReady || state.selectedFrame.tileUrlTemplate == null) {
-      if (widget.isActive && !_userPausedPlayback) {
+      if (widget.isActive) {
         _radarBloc.add(const RadarPlaybackResumed());
       }
       return;
@@ -375,19 +384,35 @@ final class _RadarMapState extends State<_RadarMap>
 
   void _handleReadyRadarTile() {
     if (!mounted || _tileCache.readyTileCount.value == 0) return;
-    _visibleTileWatchdog?.cancel();
     _preparationRevealTimer?.cancel();
+    // The cache notifier fires while the native TileProvider is still
+    // completing its callback. Reconcile on the next Flutter/native boundary
+    // and never cancel recovery merely because one tile succeeded.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _reconcileVisibleRadarPresentation();
+    });
+    _scheduleSurfaceReady();
+    _maybeStartAutoplay();
+  }
+
+  void _reconcileVisibleRadarPresentation() {
+    if (!_frontViewportPresentationReady) return;
+    _visibleTileWatchdog?.cancel();
+    _visibleTileRetryCount = 0;
+    _tileIssueReported = false;
     if (_surfaceReady && (_radarTilesLoading || _showTilePreparation)) {
       setState(() {
         _radarTilesLoading = false;
         _showTilePreparation = false;
       });
     }
-    _visibleTileRetryCount = 0;
-    _tileIssueReported = false;
-    // Camera idle owns buffer preparation. Rescheduling it on tile 1, 4 and 8
-    // repeatedly cancelled the active next-frame warm-up on cold iOS starts,
-    // leaving autoplay false even though the visible frame had appeared.
+    if (_resumePlaybackAfterCameraMove &&
+        !_cameraIsMoving &&
+        !_timelineScrubbing &&
+        widget.isActive) {
+      _resumePlaybackAfterCameraMove = false;
+      _radarBloc.add(const RadarPlaybackResumed());
+    }
     _scheduleSurfaceReady();
     _maybeStartAutoplay();
   }
@@ -395,6 +420,75 @@ final class _RadarMapState extends State<_RadarMap>
   void _handleSuccessfulRadarTile() {
     if (!mounted || _tileCache.successfulTileResponseCount.value == 0) return;
     _scheduleSurfaceReady();
+    // A zoom can initially leave the viewport-coordinate set empty because
+    // Google Maps reused a native tile. As soon as the forced repaint asks for
+    // a real tile again, restart current/next preparation automatically.
+    if (_tilePlaybackClockHeld) {
+      final state = _radarBloc.state;
+      if (state is RadarReady) _schedulePrefetch(state);
+    }
+  }
+
+  void _resetForRadarLocation(RadarReady state) {
+    final center = LatLng(
+      state.coordinates.latitude,
+      state.coordinates.longitude,
+    );
+    final previous = _activeRadarCenter;
+    _activeRadarCenter = center;
+    if (previous == null || previous == center) return;
+
+    _surfacePreparationGeneration++;
+    _cameraInteractionGeneration++;
+    _viewportRequestGeneration++;
+    _tileTransitionGeneration++;
+    _tileOverlayGeneration++;
+    _surfaceReadyTimer?.cancel();
+    _surfaceReadyTimer = null;
+    _prefetchDebounce?.cancel();
+    _cameraPlaybackResumeTimer?.cancel();
+    _visibleTileWatchdog?.cancel();
+    _preparationRevealTimer?.cancel();
+    _tileCache.beginViewport();
+    for (final provider in _tileProviders.nonNulls) {
+      provider.resetPresentationTracking();
+    }
+    _tileTransitionController
+      ..stop()
+      ..value = 0;
+    _playheadController
+      ..stop()
+      ..value = 0;
+    // Keep the same native Google map alive across city changes. Recreating
+    // the iOS platform view occasionally produced a map that never requested
+    // its initial TileProvider. A new overlay generation plus the camera move
+    // below is sufficient and avoids the blank/recreation race entirely.
+    _tileTemplates.fillRange(0, _tileTemplates.length, null);
+    _tileProviders.fillRange(0, _tileProviders.length, null);
+    _tileSlotUsesModelSnapshot.fillRange(
+      0,
+      _tileSlotUsesModelSnapshot.length,
+      false,
+    );
+    _frontTileSlot = 0;
+    _incomingTileSlot = null;
+    _radarTilesLoading = true;
+    _visibleTileRetryCount = 0;
+    _autoplayRequested = false;
+    _tilePlaybackClockHeld = false;
+    _showTilePreparation = true;
+    _surfaceReady = false;
+    _nativeMapSettled = false;
+    _resumeRecoveryInProgress = false;
+    _cameraIsMoving = false;
+    _resumePlaybackAfterCameraMove = state.isPlaying;
+    _timelineScrubbing = false;
+    _resumePlaybackAfterTimelineScrub = false;
+    _minimumSuccessfulTileResponses =
+        _tileCache.successfulTileResponseCount.value +
+        _minimumInitialVisibleTileResponses;
+    _visibleTileSuccessBaseline = _tileCache.successfulTileResponseCount.value;
+    if (state.isPlaying) _radarBloc.add(const RadarPlaybackSuspended());
   }
 
   void _scheduleSurfaceReady() {
@@ -553,24 +647,37 @@ final class _RadarMapState extends State<_RadarMap>
     // Keep the previous timestamp fully visible until every known tile in the
     // incoming viewport is available. Swapping after only one tile produced
     // the large patch-by-patch jump visible on a cold iPhone launch.
-    final expectedTiles = math.min(
-      _tileCache.recentCoordinateCount,
-      _maxVisibleRadarTiles,
-    );
+    // Native Google Maps may request a ring of off-screen tiles around a
+    // phone viewport. Preparing that entire ring delayed every frame behind
+    // coordinates the user could not see. Eight most-recent coordinates cover
+    // the visible surface while the provider fills the native margin lazily.
+    final expectedTiles = math.min(_tileCache.recentCoordinateCount, 8);
     if (expectedTiles == 0) {
+      _lastTileHandoffDiagnostic = 'no-visible-coordinates';
       _pauseForIncompletePlaybackBuffer();
       return;
     }
     final preparedTiles = await _tileCache.prepareVisibleFrame(
       template,
-      maxTiles: _maxVisibleRadarTiles,
+      maxTiles: 8,
     );
     if (!mounted ||
         generation != _tileTransitionGeneration ||
         _cameraIsMoving) {
       return;
     }
-    if (preparedTiles < expectedTiles) {
+    // A wide z5 viewport legitimately contains coordinates outside the
+    // regional nowcast footprint. LibreWXR returns no precipitation tile for
+    // those coordinates; treating them as failed weather data froze playback
+    // forever at 9/16. Require a strong visible quorum while allowing the
+    // Google basemap to remain visible outside provider coverage.
+    final requiredPreparedTiles = math.min(
+      expectedTiles,
+      math.max(4, (expectedTiles * 0.5).ceil()),
+    );
+    if (preparedTiles < requiredPreparedTiles) {
+      _lastTileHandoffDiagnostic =
+          'prepared-$preparedTiles-of-$expectedTiles-required-$requiredPreparedTiles';
       _pauseForIncompletePlaybackBuffer();
       return;
     }
@@ -587,12 +694,26 @@ final class _RadarMapState extends State<_RadarMap>
       setState(() => _incomingTileSlot = targetSlot);
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted || generation != _tileTransitionGeneration) return;
+      // iOS keys its native tile cache by overlay id. Clearing this slot before
+      // it was attached could be ignored, leaving the new Dart provider with
+      // zero requests forever. Clear once more after native insertion so the
+      // selected timestamp is guaranteed to be requested.
+      await _clearRadarTileSlot(targetSlot);
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || generation != _tileTransitionGeneration) return;
       final presented = await _waitForNativeTilePresentation(
         provider: incomingProvider,
         minimumCoordinates: math.min(preparedTiles, 8),
+        // The native request set includes off-screen and out-of-coverage
+        // coordinates at low zoom. The absolute minimum above still requires
+        // eight successfully painted coordinates for this 16-tile viewport.
+        minimumCoverage: 0.5,
       );
       if (!mounted || generation != _tileTransitionGeneration) return;
       if (!presented) {
+        _lastTileHandoffDiagnostic =
+            'native-timeout-requested-${incomingProvider.requestedCoordinateCount}'
+            '-successful-${incomingProvider.successfulCoordinateCount}';
         _cancelTileTransition(invalidatePending: false);
         _pauseForIncompletePlaybackBuffer();
         return;
@@ -606,6 +727,7 @@ final class _RadarMapState extends State<_RadarMap>
         _frontTileSlot = targetSlot;
         _incomingTileSlot = null;
       });
+      _lastTileHandoffDiagnostic = 'presented-$preparedTiles';
       _releasePlaybackClockAfterTileHandoff();
       return;
     }
@@ -675,7 +797,6 @@ final class _RadarMapState extends State<_RadarMap>
   }
 
   void _pauseForIncompletePlaybackBuffer() {
-    _playbackBufferReady = false;
     final state = _radarBloc.state;
     if (state is RadarReady && state.isPlaying) {
       _holdPlaybackClockForTileHandoff();
@@ -726,7 +847,7 @@ final class _RadarMapState extends State<_RadarMap>
     final controller = _mapController;
     if (controller == null) return;
     try {
-      await controller.clearTileCache(_tileOverlayIds[slot]);
+      await controller.clearTileCache(_tileOverlayId(slot));
     } on Object {
       // The slot may not exist natively yet. Its first insertion is already a
       // clean cache generation, so this is safe to ignore.
@@ -753,7 +874,7 @@ final class _RadarMapState extends State<_RadarMap>
     TileOverlay overlay(int slot, double contribution, int zIndex) {
       final effectiveOpacity = (_radarOpacity * contribution).clamp(0.0, 1.0);
       return TileOverlay(
-        tileOverlayId: _tileOverlayIds[slot],
+        tileOverlayId: _tileOverlayId(slot),
         tileProvider: _tileProviders[slot],
         transparency: 1 - effectiveOpacity,
         // Native fading removes the remaining pop when a pan or zoom exposes
@@ -787,6 +908,10 @@ final class _RadarMapState extends State<_RadarMap>
     return overlays;
   }
 
+  TileOverlayId _tileOverlayId(int slot) => TileOverlayId(
+    'chetiwa-radar-$_tileOverlayGeneration-${slot == 0 ? 'a' : 'b'}',
+  );
+
   void _revealPreparationIfStillNeeded() {
     _preparationRevealTimer?.cancel();
     if (_tileCache.readyTileCount.value > 0) return;
@@ -806,7 +931,6 @@ final class _RadarMapState extends State<_RadarMap>
         (WidgetsBinding.instance.lifecycleState != null &&
             WidgetsBinding.instance.lifecycleState !=
                 AppLifecycleState.resumed) ||
-        _userPausedPlayback ||
         _timelineScrubbing ||
         _cameraIsMoving ||
         _autoplayRequested) {
@@ -818,8 +942,7 @@ final class _RadarMapState extends State<_RadarMap>
     }
     if (!_isSelectedTilePresented(state)) return;
     final needsNetworkTile = state.selectedFrame.tileUrlTemplate != null;
-    if (needsNetworkTile &&
-        (_tileCache.readyTileCount.value == 0 || !_playbackBufferReady)) {
+    if (needsNetworkTile && _tileCache.readyTileCount.value == 0) {
       return;
     }
     _autoplayRequested = true;
@@ -868,26 +991,11 @@ final class _RadarMapState extends State<_RadarMap>
     _resumePlaybackAfterTimelineScrub = false;
     if (!shouldResume) return;
     scheduleMicrotask(() {
-      if (!mounted ||
-          _timelineScrubbing ||
-          _userPausedPlayback ||
-          !widget.isActive) {
+      if (!mounted || _timelineScrubbing || !widget.isActive) {
         return;
       }
       _radarBloc.add(const RadarPlaybackResumed());
     });
-  }
-
-  void _handleUserPlaybackToggle() {
-    final state = _radarBloc.state;
-    if (state is! RadarReady) return;
-    _userPausedPlayback = state.isPlaying;
-    if (!state.isPlaying) _autoplayRequested = true;
-  }
-
-  void _handleUserPlaybackRestart() {
-    _userPausedPlayback = false;
-    _autoplayRequested = true;
   }
 
   void _scheduleDataRefresh(RadarState state) {
@@ -921,6 +1029,7 @@ final class _RadarMapState extends State<_RadarMap>
     listener: (_, state) {
       _reportRadarState(state);
       _scheduleDataRefresh(state);
+      if (state is RadarReady) _resetForRadarLocation(state);
       if (state is RadarReady && state.isPlaying) {
         if (!_surfaceReady || _resumeRecoveryInProgress) {
           // A parent lifecycle callback can request resume while the native map
@@ -1019,7 +1128,7 @@ final class _RadarMapState extends State<_RadarMap>
                 Positioned.fill(
                   bottom: _timelineHeight,
                   child: GoogleMap(
-                    key: const Key('chetiwa-google-radar-map'),
+                    key: const ValueKey('chetiwa-google-radar-map'),
                     initialCameraPosition: CameraPosition(
                       target: center,
                       zoom: _regionalZoom,
@@ -1055,6 +1164,26 @@ final class _RadarMapState extends State<_RadarMap>
                                 !_isSelectedTilePresented(
                                   _radarBloc.state as RadarReady,
                                 )),
+                        debugState: () {
+                          final provider = _tileProviders[_frontTileSlot];
+                          final incoming = _incomingTileSlot;
+                          final incomingProvider = incoming == null
+                              ? null
+                              : _tileProviders[incoming];
+                          return 'front=$_frontTileSlot '
+                              'incoming=$_incomingTileSlot '
+                              'frontTemplate=${_tileTemplates[_frontTileSlot]} '
+                              'requested=${provider?.requestedCoordinateCount} '
+                              'successful=${provider?.successfulCoordinateCount} '
+                              'incomingRequested=${incomingProvider?.requestedCoordinateCount} '
+                              'incomingSuccessful=${incomingProvider?.successfulCoordinateCount} '
+                              'recent=${_tileCache.recentCoordinateCount} '
+                              'surfaceReady=$_surfaceReady '
+                              'cameraMoving=$_cameraIsMoving '
+                              'resumeAfterCamera=$_resumePlaybackAfterCameraMove '
+                              'clockHeld=$_tilePlaybackClockHeld '
+                              'lastHandoff=$_lastTileHandoffDiagnostic';
+                        },
                       );
                       _visibleTileSuccessBaseline =
                           _tileCache.successfulTileResponseCount.value;
@@ -1068,6 +1197,28 @@ final class _RadarMapState extends State<_RadarMap>
                           modelSnapshot: state.selectedFrame.isModelForecast,
                         );
                       }
+                      final overlayGeneration = _tileOverlayGeneration;
+                      // iOS may preserve a native NO_TILE decision across map
+                      // recreation when the previous city used the same
+                      // overlay slot. The location-specific overlay id above
+                      // prevents reuse; this post-attach invalidation also
+                      // guarantees the new provider receives its first
+                      // viewport request without clearing application data.
+                      WidgetsBinding.instance.addPostFrameCallback((_) async {
+                        if (!mounted ||
+                            overlayGeneration != _tileOverlayGeneration ||
+                            !identical(_mapController, controller)) {
+                          return;
+                        }
+                        try {
+                          await controller.clearTileCache(
+                            _tileOverlayId(_frontTileSlot),
+                          );
+                        } on Object {
+                          // The watchdog retries if the native map is disposed
+                          // between this frame and the platform call.
+                        }
+                      });
                     },
                     onCameraMove: (position) {
                       final roundedZoom = position.zoom.round();
@@ -1215,8 +1366,6 @@ final class _RadarMapState extends State<_RadarMap>
                   playbackProgress: _playheadController,
                   scrubFraction: _timelineScrubFraction,
                   modelForecastLocked: widget.modelForecastLocked,
-                  onPlaybackToggled: _handleUserPlaybackToggle,
-                  onPlaybackRestarted: _handleUserPlaybackRestart,
                   onScrubStarted: _handleTimelineScrubStarted,
                   onScrubEnded: _handleTimelineScrubEnded,
                 ),
@@ -1252,6 +1401,30 @@ final class _RadarMapState extends State<_RadarMap>
     );
     if (expectedTiles == 0) return false;
 
+    final selectedTemplate = state.selectedFrame.tileUrlTemplate;
+    if (!_isSelectedTilePresented(state) && selectedTemplate != null) {
+      // Foreground always wins over speculation. Previously this method
+      // downloaded the frame after the selected one first; on a cold iPhone
+      // viewport the cursor could therefore wait 15+ seconds while unrelated
+      // bytes consumed every download slot.
+      final selectedReady = await _tileCache.prepareVisibleFrame(
+        selectedTemplate,
+        maxTiles: _maxVisibleRadarTiles,
+      );
+      if (!mounted || _cameraIsMoving) return false;
+      final latest = _radarBloc.state;
+      if (latest is RadarReady && !_isSelectedTilePresented(latest)) {
+        final latestTemplate = latest.selectedFrame.tileUrlTemplate;
+        if (latestTemplate != null) {
+          _queueTileFrameTransition(
+            latestTemplate,
+            modelSnapshot: latest.selectedFrame.isModelForecast,
+          );
+        }
+      }
+      return selectedReady == expectedTiles;
+    }
+
     // The native front overlay has already presented the selected frame.
     // Re-fetching current+next in interleaved pairs made a cold next frame use
     // only one network slot and could leave iOS paused after a fast zoom. Warm
@@ -1270,25 +1443,13 @@ final class _RadarMapState extends State<_RadarMap>
             maxConcurrent: 6,
           );
     if (!mounted || _cameraIsMoving) return false;
-    if (ready == expectedTiles) {
-      _playbackBufferReady = true;
-      final latestState = _radarBloc.state;
-      if (latestState is RadarReady && !_isSelectedTilePresented(latestState)) {
-        final selectedTemplate = latestState.selectedFrame.tileUrlTemplate;
-        if (selectedTemplate != null) {
-          _queueTileFrameTransition(
-            selectedTemplate,
-            modelSnapshot: latestState.selectedFrame.isModelForecast,
-          );
-        }
-      } else {
-        _releasePlaybackClockAfterTileHandoff();
-        _maybeStartAutoplay();
-      }
-      return true;
+    final bufferReady = ready == expectedTiles;
+    final latestState = _radarBloc.state;
+    if (latestState is RadarReady && _isSelectedTilePresented(latestState)) {
+      _releasePlaybackClockAfterTileHandoff();
+      _maybeStartAutoplay();
     }
-    _playbackBufferReady = false;
-    return false;
+    return bufferReady;
   }
 
   void _handleCameraMoveStarted() {
@@ -1305,7 +1466,6 @@ final class _RadarMapState extends State<_RadarMap>
     for (final provider in _tileProviders.nonNulls) {
       provider.resetPresentationTracking();
     }
-    _playbackBufferReady = false;
     // Never pan while a native handoff is pending. Retain the last fully
     // presented timestamp; promoting an unconfirmed incoming layer here was a
     // second route to a blank radar surface.
@@ -1357,17 +1517,18 @@ final class _RadarMapState extends State<_RadarMap>
       final template = state.selectedFrame.tileUrlTemplate;
       if (template != null) {
         viewportReady = false;
-        final expectedTiles = math.min(
-          _tileCache.recentCoordinateCount,
-          _maxVisibleRadarTiles,
-        );
+        final expectedTiles = math.min(_tileCache.recentCoordinateCount, 8);
         final ready = await _tileCache
-            .prepareVisibleFrame(template, maxTiles: _maxVisibleRadarTiles)
+            .prepareVisibleFrame(template, maxTiles: 8)
             .timeout(const Duration(seconds: 9), onTimeout: () => 0);
         if (!mounted || cameraGeneration != _cameraInteractionGeneration) {
           return;
         }
-        if (expectedTiles > 0 && ready == expectedTiles) {
+        final requiredReady = math.min(
+          expectedTiles,
+          math.max(4, (expectedTiles * 0.5).ceil()),
+        );
+        if (expectedTiles > 0 && ready >= requiredReady) {
           // Google Maps can retain NO_TILE from a request issued mid-gesture.
           // The bytes are now in Chetiwa's memory cache, so this repaint is
           // immediate instead of exposing an empty overlay for many seconds.
@@ -1393,13 +1554,20 @@ final class _RadarMapState extends State<_RadarMap>
               _cameraIsMoving) {
             return;
           }
-          final bufferReady =
-              presented &&
-              await _warmPlaybackBuffer(
-                state,
-              ).timeout(const Duration(seconds: 6), onTimeout: () => false);
-          viewportReady = presented && bufferReady;
+          viewportReady = presented;
+          // The next image is only an optimisation. The per-frame native
+          // handoff gate already freezes the cursor if that image is late, so
+          // a failed speculative request must never suspend the whole Radar.
+          if (presented) unawaited(_warmPlaybackBuffer(state));
         } else {
+          if (expectedTiles == 0) {
+            // Google Maps may reuse its private tile cache after a zoom and
+            // therefore not call our provider. Force one repaint so the new
+            // viewport coordinates become observable instead of waiting in a
+            // permanent zero-coordinate loop.
+            _tileProviders[_frontTileSlot]?.resetPresentationTracking();
+            await _clearRadarTileSlot(_frontTileSlot);
+          }
           unawaited(_retryVisibleRadar(state));
           return;
         }
@@ -1417,7 +1585,6 @@ final class _RadarMapState extends State<_RadarMap>
       if (!mounted ||
           cameraGeneration != _cameraInteractionGeneration ||
           !widget.isActive ||
-          _userPausedPlayback ||
           _timelineScrubbing ||
           WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
         return;
@@ -1456,16 +1623,23 @@ final class _RadarMapState extends State<_RadarMap>
       maxTiles: 8,
     );
     if (!mounted || generation != _viewportRequestGeneration) return;
-    if (expectedTiles == 0 || ready < expectedTiles) {
+    final requiredReady = math.min(
+      expectedTiles,
+      math.max(4, (expectedTiles * 0.5).ceil()),
+    );
+    if (expectedTiles == 0 || ready < requiredReady) {
       _reportTileIssue();
       setState(() {
         _radarTilesLoading = false;
-        _showTilePreparation = false;
+        _showTilePreparation = !_frontViewportPresentationReady;
       });
-      // A quick pan invalidates old viewport requests by design. Zero ready
-      // tiles therefore does not prove that LibreWXR is unavailable, and must
-      // never produce an alarming user-facing error. Retry silently at most
-      // twice for this settled viewport; Analytics already records the event.
+      if (expectedTiles == 0) {
+        _tileProviders[_frontTileSlot]?.resetPresentationTracking();
+        await _clearRadarTileSlot(_frontTileSlot);
+      }
+      // A quick pan invalidates old viewport requests by design. Retry
+      // silently with capped backoff until the active settled viewport has a
+      // real presentation; clearing app data must never be the recovery path.
       _scheduleVisibleRadarRetry();
       return;
     }
@@ -1496,14 +1670,9 @@ final class _RadarMapState extends State<_RadarMap>
     _visibleTileRetryCount = 0;
     final latest = _radarBloc.state;
     if (latest is RadarReady) {
-      final bufferReady = await _warmPlaybackBuffer(
-        latest,
-      ).timeout(const Duration(seconds: 6), onTimeout: () => false);
-      if (!mounted || generation != _viewportRequestGeneration) return;
+      unawaited(_warmPlaybackBuffer(latest));
       if (_resumePlaybackAfterCameraMove &&
-          bufferReady &&
           widget.isActive &&
-          !_userPausedPlayback &&
           !_timelineScrubbing) {
         _resumePlaybackAfterCameraMove = false;
         _radarBloc.add(const RadarPlaybackResumed());
@@ -1512,11 +1681,18 @@ final class _RadarMapState extends State<_RadarMap>
   }
 
   void _scheduleVisibleRadarRetry() {
-    if (_cameraIsMoving || _visibleTileRetryCount >= 2) return;
+    if (_cameraIsMoving || !widget.isActive) return;
     _visibleTileRetryCount++;
+    final delay = switch (_visibleTileRetryCount) {
+      1 => const Duration(seconds: 1),
+      2 => const Duration(seconds: 2),
+      3 => const Duration(seconds: 4),
+      4 => const Duration(seconds: 8),
+      _ => const Duration(seconds: 15),
+    };
     final retryGeneration = _cameraInteractionGeneration;
     _visibleTileWatchdog?.cancel();
-    _visibleTileWatchdog = Timer(const Duration(seconds: 2), () {
+    _visibleTileWatchdog = Timer(delay, () {
       if (!mounted ||
           _cameraIsMoving ||
           retryGeneration != _cameraInteractionGeneration) {
@@ -2198,8 +2374,6 @@ final class RadarTimeline extends StatelessWidget {
     required this.playbackProgress,
     this.scrubFraction,
     this.modelForecastLocked = false,
-    this.onPlaybackToggled,
-    this.onPlaybackRestarted,
     this.onScrubStarted,
     this.onScrubEnded,
     super.key,
@@ -2211,8 +2385,6 @@ final class RadarTimeline extends StatelessWidget {
   final Animation<double> playbackProgress;
   final ValueNotifier<double?>? scrubFraction;
   final bool modelForecastLocked;
-  final VoidCallback? onPlaybackToggled;
-  final VoidCallback? onPlaybackRestarted;
   final VoidCallback? onScrubStarted;
   final VoidCallback? onScrubEnded;
 
@@ -2241,39 +2413,6 @@ final class RadarTimeline extends StatelessWidget {
             point.time.isAfter(nowInstant) && !point.time.isAfter(graphEnd),
       ),
     ];
-    final selectedPointRate = state.selectedFrame.pointRainRateMmPerHour;
-    final selectedModelRate = state.selectedFrame.isModelForecast
-        ? state.selectedFrame.pointRainRateMmPerHour ??
-              forecast.rainPointAt(state.selectedFrame.time)?.rateMmPerHour
-        : null;
-    final status = state.selectedFrame.isModelForecast
-        ? selectedModelRate == null
-              ? (context.l10n.isFrench
-                    ? 'prévision étendue · Chetiwa+'
-                    : 'extended forecast · Chetiwa+')
-              : '${selectedModelRate.toStringAsFixed(1)} mm/h · ${context.l10n.isFrench ? 'prévision étendue Chetiwa+' : 'Chetiwa+ extended forecast'}'
-        : state.selectedFrame.isNowcast && selectedPointRate != null
-        ? RainRateScale.isRain(selectedPointRate)
-              ? '${selectedPointRate.toStringAsFixed(1)} mm/h ${context.l10n.isFrench ? 'au point' : 'at point'}'
-              : (context.l10n.isFrench ? 'sec au point' : 'dry at point')
-        : state.selectedFrame.isNowcast
-        ? (context.l10n.isFrench ? 'prévision' : 'forecast')
-        : state.isAtLatestObservation
-        ? (context.l10n.isFrench
-              ? 'dernière observation'
-              : 'latest observation')
-        : (context.l10n.isFrench ? 'observation' : 'observation');
-    final statusColor = state.selectedFrame.isModelForecast
-        ? const Color(0xFF7A5AF8)
-        : state.selectedFrame.isNowcast &&
-              selectedPointRate != null &&
-              !RainRateScale.isRain(selectedPointRate)
-        ? timelineColors.muted
-        : state.selectedFrame.isNowcast
-        ? ChetiwaColors.warning
-        : state.isAtLatestObservation
-        ? ChetiwaColors.accentPrimary
-        : timelineColors.muted;
     return Semantics(
       key: const Key('radar-local-time'),
       label:
@@ -2281,8 +2420,8 @@ final class RadarTimeline extends StatelessWidget {
           '${WeatherTimeZone.displayUtcOffsetLabel(state.selectedFrame.time)} · '
           '${WeatherTimeZone.displayHourMinute(state.selectedFrame.time)}',
       child: Container(
-        height: 150,
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+        height: 104,
+        padding: const EdgeInsets.fromLTRB(14, 5, 14, 7),
         decoration: BoxDecoration(
           // The map must never bleed through time labels or the scrubber.
           // Full opacity also keeps this panel readable over bright satellite
@@ -2290,194 +2429,88 @@ final class RadarTimeline extends StatelessWidget {
           color: timelineColors.surface,
           border: Border(top: BorderSide(color: timelineColors.outline)),
         ),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Material(
-                  color: state.isPlaying
-                      ? ChetiwaColors.accentPrimary.withValues(alpha: 0.16)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(ChetiwaRadius.full),
-                  child: InkWell(
-                    key: const Key('radar-playback-button'),
-                    onTap: () {
-                      onPlaybackToggled?.call();
-                      context.read<RadarBloc>().add(
-                        const RadarPlaybackToggled(),
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(ChetiwaRadius.full),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 3,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            state.isPlaying
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
-                            size: 20,
-                            color: state.isPlaying
-                                ? ChetiwaColors.accentPrimary
-                                : timelineColors.foreground,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            state.isPlaying
-                                ? context.l10n.pause
-                                : context.l10n.play,
-                            style: TextStyle(
-                              color: timelineColors.foreground,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                if (!state.isAtLatestObservation) ...[
-                  const SizedBox(width: 4),
-                  IconButton(
-                    key: const Key('radar-now-button'),
-                    tooltip: context.l10n.returnLatestRadar,
-                    visualDensity: VisualDensity.compact,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 36,
-                      height: 36,
-                    ),
-                    padding: EdgeInsets.zero,
-                    onPressed: () => context.read<RadarBloc>().add(
-                      const RadarNowRequested(),
-                    ),
-                    icon: const Icon(Icons.update_rounded, size: 18),
-                  ),
-                ],
-                IconButton(
-                  key: const Key('radar-reset-button'),
-                  tooltip: context.l10n.restartPlayback,
-                  visualDensity: VisualDensity.compact,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 36,
-                    height: 36,
-                  ),
-                  padding: EdgeInsets.zero,
-                  onPressed: () {
-                    onPlaybackRestarted?.call();
-                    context.read<RadarBloc>().add(
-                      const RadarPlaybackRestarted(),
-                    );
-                  },
-                  icon: const Icon(Icons.replay_rounded, size: 18),
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    '${WeatherTimeZone.displayHourMinute(state.selectedFrame.time)} · $status',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      color: statusColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ],
+        child: LayoutBuilder(
+          builder: (context, constraints) => GestureDetector(
+            key: const Key('radar-time-ruler'),
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (details) {
+              onScrubStarted?.call();
+              _selectFrame(
+                context,
+                details.localPosition.dx,
+                constraints.maxWidth,
+                displayEnd,
+              );
+            },
+            onTapUp: (_) => _endScrub(),
+            onTapCancel: _endScrub,
+            onHorizontalDragStart: (details) {
+              onScrubStarted?.call();
+              _selectFrame(
+                context,
+                details.localPosition.dx,
+                constraints.maxWidth,
+                displayEnd,
+              );
+            },
+            onHorizontalDragUpdate: (details) => _selectFrame(
+              context,
+              details.localPosition.dx,
+              constraints.maxWidth,
+              displayEnd,
             ),
-            const SizedBox(height: 3),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) => GestureDetector(
-                  key: const Key('radar-time-ruler'),
-                  behavior: HitTestBehavior.opaque,
-                  onTapDown: (details) {
-                    onScrubStarted?.call();
-                    _selectFrame(
-                      context,
-                      details.localPosition.dx,
-                      constraints.maxWidth,
-                      displayEnd,
-                    );
-                  },
-                  onTapUp: (_) => _endScrub(),
-                  onTapCancel: _endScrub,
-                  onHorizontalDragStart: (details) {
-                    onScrubStarted?.call();
-                    _selectFrame(
-                      context,
-                      details.localPosition.dx,
-                      constraints.maxWidth,
-                      displayEnd,
-                    );
-                  },
-                  onHorizontalDragUpdate: (details) => _selectFrame(
-                    context,
-                    details.localPosition.dx,
-                    constraints.maxWidth,
-                    displayEnd,
+            onHorizontalDragEnd: (_) => _endScrub(),
+            onHorizontalDragCancel: _endScrub,
+            child: Semantics(
+              label: modelForecastLocked
+                  ? (context.l10n.isFrench
+                        ? 'Prévision pluie étendue de 60 à 120 minutes réservée à Chetiwa+'
+                        : 'Extended rain forecast from 60 to 120 minutes reserved for Chetiwa+')
+                  : null,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  AnimatedBuilder(
+                    animation: Listenable.merge(<Listenable>[
+                      playbackProgress,
+                      if (scrubFraction != null) scrubFraction!,
+                    ]),
+                    builder: (context, _) => CustomPaint(
+                      key: ValueKey(
+                        '${state.frames.any((frame) => frame.isNowcast && frame.pointRainRateMmPerHour != null) ? 'radar-point-profile-visible' : 'radar-point-profile-unavailable'}-${modelForecastLocked ? 'premium-locked' : 'premium-open'}',
+                      ),
+                      painter: _RadarTimeRulerPainter(
+                        frames: state.frames,
+                        rainPoints: rainPoints,
+                        cursorTime: _cursorTime(context, displayEnd),
+                        now: nowInstant,
+                        displayEnd: displayEnd,
+                        modelForecastLocked: modelForecastLocked,
+                        colors: timelineColors,
+                      ),
+                      child: const SizedBox.expand(),
+                    ),
                   ),
-                  onHorizontalDragEnd: (_) => _endScrub(),
-                  onHorizontalDragCancel: _endScrub,
-                  child: Semantics(
-                    label: modelForecastLocked
-                        ? (context.l10n.isFrench
-                              ? 'Prévision pluie étendue de 60 à 120 minutes réservée à Chetiwa+'
-                              : 'Extended rain forecast from 60 to 120 minutes reserved for Chetiwa+')
-                        : null,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        AnimatedBuilder(
-                          animation: Listenable.merge(<Listenable>[
-                            playbackProgress,
-                            if (scrubFraction != null) scrubFraction!,
-                          ]),
-                          builder: (context, _) => CustomPaint(
-                            key: ValueKey(
-                              '${state.frames.any((frame) => frame.isNowcast && frame.pointRainRateMmPerHour != null) ? 'radar-point-profile-visible' : 'radar-point-profile-unavailable'}-${modelForecastLocked ? 'premium-locked' : 'premium-open'}',
-                            ),
-                            painter: _RadarTimeRulerPainter(
-                              frames: state.frames,
-                              rainPoints: rainPoints,
-                              cursorTime: _cursorTime(context, displayEnd),
-                              now: nowInstant,
-                              displayEnd: displayEnd,
-                              modelForecastLocked: modelForecastLocked,
-                              colors: timelineColors,
-                            ),
-                            child: const SizedBox.expand(),
+                  if (modelForecastLocked ||
+                      state.frames.any((frame) => frame.isModelForecast))
+                    Align(
+                      alignment: Alignment.topRight,
+                      child: const Padding(
+                        padding: EdgeInsets.only(top: 6, right: 7),
+                        child: Text(
+                          'PRÉVISION ÉTENDUE · 10 MIN',
+                          style: TextStyle(
+                            color: Color(0xFF7A5AF8),
+                            fontSize: 7,
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
-                        if (modelForecastLocked ||
-                            state.frames.any((frame) => frame.isModelForecast))
-                          Align(
-                            alignment: Alignment.topRight,
-                            child: const Padding(
-                              padding: EdgeInsets.only(top: 6, right: 7),
-                              child: Text(
-                                'PRÉVISION ÉTENDUE · 10 MIN',
-                                style: TextStyle(
-                                  color: Color(0xFF7A5AF8),
-                                  fontSize: 7,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );

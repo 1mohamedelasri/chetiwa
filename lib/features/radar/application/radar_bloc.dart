@@ -277,6 +277,28 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
           _resumeAfterSuspension = false;
           _startPlaybackTimer();
         }
+      } else if (activeBeforeRefresh is RadarReady) {
+        // Keep the last fully rendered radar alive while a newly selected
+        // city loads. Replacing the native Google map with RadarLoading caused
+        // a white surface and, on iOS, could leave the replacement overlay
+        // permanently cached as NO_TILE. The new coordinates replace this
+        // snapshot atomically once their metadata is ready.
+        visible = RadarReady(
+          frames: activeBeforeRefresh.frames,
+          selectedIndex: activeBeforeRefresh.selectedIndex,
+          coordinates: activeBeforeRefresh.coordinates,
+          health: WeatherDataHealth(
+            freshness: activeBeforeRefresh.health.freshness,
+            cachedAt: activeBeforeRefresh.health.cachedAt,
+            issue: activeBeforeRefresh.health.issue,
+            isRefreshing: true,
+          ),
+          isPlaying: wasPlaying,
+        );
+        emit(visible);
+        if (wasPlaying && visible.frames.length > 1) {
+          _startPlaybackTimer();
+        }
       } else {
         emit(const RadarLoading());
       }

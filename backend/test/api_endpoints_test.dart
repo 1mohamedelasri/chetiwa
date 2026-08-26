@@ -239,9 +239,11 @@ void main() {
           'https://radar.ezplatforms.com/public/weather-maps.json',
       'PREMIUM_RADAR_MODEL_ENABLED': 'true',
     });
+    var providerCalls = 0;
     final app = appWith(
-      MockClient(
-        (request) async => http.Response(
+      MockClient((request) async {
+        providerCalls++;
+        return http.Response(
           jsonEncode(<String, Object?>{
             'generated': 1776707460,
             'host': 'https://tile.example.test',
@@ -271,8 +273,8 @@ void main() {
             },
           }),
           200,
-        ),
-      ),
+        );
+      }),
     );
     final response = await app(
       Request(
@@ -286,8 +288,24 @@ void main() {
         jsonDecode(await response.readAsString()) as Map<String, Object?>;
     final data = body['data'] as Map<String, Object?>;
     final frames = data['frames'] as List<Object?>;
+    final secondResponse = await app(
+      Request(
+        'GET',
+        Uri.parse(
+          'http://localhost/v1/radar/frames?latitude=36.1627&longitude=-86.7816',
+        ),
+      ),
+    );
+    final secondBody =
+        jsonDecode(await secondResponse.readAsString()) as Map<String, Object?>;
+    final secondData = secondBody['data'] as Map<String, Object?>;
 
     expect(response.statusCode, 200);
+    expect(response.headers['x-cache'], 'MISS');
+    expect(secondResponse.headers['x-cache'], 'HIT');
+    expect(providerCalls, 1);
+    expect(data, isNot(contains('location')));
+    expect(secondData, isNot(contains('location')));
     expect(frames, hasLength(5));
     expect((frames.first as Map<String, Object?>)['kind'], 'observation');
     expect((frames[1] as Map<String, Object?>)['kind'], 'nowcast');

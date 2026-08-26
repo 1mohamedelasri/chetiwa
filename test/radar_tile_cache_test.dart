@@ -208,6 +208,66 @@ void main() {
     expect(provider.hasCompletePresentation, isFalse);
   });
 
+  test(
+    'keeps the last good geographic tile when a newer frame is unavailable',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'chetiwa-radar-last-good-test-',
+      );
+      addTearDown(() => _deleteDirectoryEventually(directory));
+      final png = await _solidPngTile();
+      var newerRequests = 0;
+      final cache = RadarTileCache.forTesting(
+        client: MockClient((request) async {
+          if (request.url.path.contains('/current/')) {
+            return http.Response.bytes(png, 200);
+          }
+          newerRequests++;
+          return http.Response('temporarily unavailable', 502);
+        }),
+        directory: directory,
+      )..beginSession();
+
+      final current = await cache
+          .providerFor('https://tiles.test/current/{z}/{x}/{y}.png')
+          .getTile(64, 44, 7);
+      final newer = await cache
+          .providerFor('https://tiles.test/newer/{z}/{x}/{y}.png')
+          .getTile(64, 44, 7);
+
+      expect(current.data, png);
+      expect(newer.data, png);
+      expect(newerRequests, 1);
+    },
+  );
+
+  test('a new radar session does not leak another location fallback', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'chetiwa-radar-session-fallback-test-',
+    );
+    addTearDown(() => _deleteDirectoryEventually(directory));
+    final png = await _solidPngTile();
+    var healthy = true;
+    final cache = RadarTileCache.forTesting(
+      client: MockClient((_) async {
+        if (healthy) return http.Response.bytes(png, 200);
+        return http.Response('temporarily unavailable', 502);
+      }),
+      directory: directory,
+    )..beginSession();
+
+    await cache
+        .providerFor('https://tiles.test/current/{z}/{x}/{y}.png')
+        .getTile(64, 44, 7);
+    healthy = false;
+    cache.beginSession();
+    final tile = await cache
+        .providerFor('https://tiles.test/new-city/{z}/{x}/{y}.png')
+        .getTile(64, 44, 7);
+
+    expect(tile.data, isNull);
+  });
+
   test('presentation tracking ignores a tile completed after reset', () async {
     final directory = await Directory.systemTemp.createTemp(
       'chetiwa-radar-presentation-generation-test-',

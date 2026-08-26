@@ -62,7 +62,9 @@ serveur. Politique : fraîche 24 heures, repli maximal 7 jours.
 Paramètres requis : `latitude`, `longitude`.
 
 Retourne des frames ordonnées, explicitement marquées `observation` ou
-`nowcast`, ainsi qu’un modèle d’URL de tuile. Politique : fraîche 2 minutes,
+`nowcast`, ainsi qu’un modèle d’URL de tuile. Cette chronologie est globale et
+n’écho pas les coordonnées de la requête ; les données au point restent sur
+`/v1/radar/point-nowcast`. Politique : fraîche 2 minutes,
 repli maximal 30 minutes. RainViewer est accepté uniquement en développement ;
 le profil production le refuse tant qu’un fournisseur licencié n’est pas
 configuré.

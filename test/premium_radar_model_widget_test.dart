@@ -107,7 +107,7 @@ void main() {
       ),
     );
 
-    expect(find.textContaining('prévision étendue Chetiwa+'), findsOneWidget);
+    expect(find.text('PRÉVISION ÉTENDUE · 10 MIN'), findsOneWidget);
     expect(find.textContaining('prévision radar'), findsNothing);
     expect(
       find.byKey(
@@ -162,7 +162,7 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(
       tester.getSize(find.byKey(const Key('radar-local-time'))).height,
-      150,
+      104,
     );
   });
 }
