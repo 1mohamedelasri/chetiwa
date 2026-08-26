@@ -84,10 +84,25 @@ abstract final class RadarFramePolicy {
       ..sort((left, right) => left.time.compareTo(right.time));
     if (nowcasts.isNotEmpty) {
       final end = nowcasts.last.time;
-      return RadarTimelineWindow(
-        start: now.isBefore(end) ? now : end,
-        end: end,
-      );
+      // A sleeping app or a transient provider failure can leave the last
+      // usable radar product behind the current clock. Collapsing the window
+      // to `end -> end` pins every playback timestamp to x=0 even while the
+      // frames themselves continue advancing. In that degraded state, show
+      // the real available playback interval until the background refresh
+      // replaces it with fresh frames.
+      if (!now.isBefore(end)) {
+        final observations =
+            frames.where((frame) => frame.isObservation).toList()
+              ..sort((left, right) => left.time.compareTo(right.time));
+        final availableStart = observations.isNotEmpty
+            ? observations.last.time
+            : nowcasts.first.time;
+        return RadarTimelineWindow(
+          start: availableStart.isBefore(end) ? availableStart : end,
+          end: end,
+        );
+      }
+      return RadarTimelineWindow(start: now, end: end);
     }
 
     final observations = frames.where((frame) => frame.isObservation).toList()

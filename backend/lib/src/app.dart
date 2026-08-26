@@ -338,6 +338,17 @@ Handler createApp({
             message: 'z, x and y must be valid tile coordinates',
           );
         }
+        final cacheVersionValue = request.url.queryParameters['run'];
+        final cacheVersion = cacheVersionValue == null
+            ? null
+            : int.tryParse(cacheVersionValue);
+        if (cacheVersionValue != null && cacheVersion == null) {
+          throw const ApiException(
+            statusCode: 400,
+            code: 'invalid_radar_run',
+            message: 'run must be a valid radar generation timestamp',
+          );
+        }
         final world = 1 << z;
         if (x < 0 || x >= world || y < 0 || y >= world) {
           throw const ApiException(
@@ -346,7 +357,7 @@ Handler createApp({
             message: 'tile coordinates are outside the zoom range',
           );
         }
-        final key = 'radar-tile:$frame:$z:$x:$y';
+        final key = 'radar-tile:$frame:${cacheVersion ?? 'stable'}:$z:$x:$y';
         final policy = const TileCachePolicy();
         final instant = clock().toUtc();
         final cached = binaryTileCache.read(key);
@@ -387,6 +398,7 @@ Handler createApp({
             z: z,
             x: x,
             y: y,
+            cacheVersion: cacheVersion,
           );
           final tile = CachedTileResponse(
             bytes: bytes,

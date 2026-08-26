@@ -74,6 +74,9 @@ void main() {
                   ],
                   'past': [
                     {'time': 1787008800, 'path': '/v2/radar/observed'},
+                    // LibreWXR can publish this observation a few seconds
+                    // before replacing the previous run's nowcast.
+                    {'time': 1787009400, 'path': '/v2/radar/racing-observed'},
                   ],
                   'nowcast': [
                     {'time': 1787009400, 'path': '/v2/radar/forecast'},
@@ -104,8 +107,15 @@ void main() {
       contains('/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2'),
     );
     expect(frames.last.kind, WeatherDataKind.radarNowcast);
+    expect(frames.last.tileUrlTemplate, contains('&run=1787008800'));
     expect(frames.last.pointRainRateMmPerHour, 1.4);
     expect(frames.last.pointRainSource, 'radar');
+    expect(
+      frames.any(
+        (frame) => frame.tileUrlTemplate?.contains('racing-observed') ?? false,
+      ),
+      isFalse,
+    );
     expect(cached?.frames, frames);
     client.close();
   });

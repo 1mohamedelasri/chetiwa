@@ -58,7 +58,9 @@ probe_tile() {
   local coordinates url pass headers body metrics status total ttfb bytes
   local content_type cache_status age signature limit
   coordinates="$(tile_coordinates "$longitude" "$latitude")"
-  url="$base_url$frame/256/$zoom/$coordinates/13/1_0.png"
+  # Probe the exact palette/presentation requested by the released apps.
+  # Probing scheme 13 used to leave scheme 14 cold for the first real user.
+  url="$base_url$frame/256/$zoom/$coordinates/14/1_0.png?presentation=crisp-v2"
 
   for pass in first repeat; do
     headers="$work_dir/$name-$pass.headers"

@@ -20,6 +20,8 @@ git -C "$target_dir" apply "$script_dir/chetiwa-drops-palette.patch"
 git -C "$target_dir" apply "$script_dir/chetiwa-crisp-presentation.patch"
 git -C "$target_dir" apply "$script_dir/chetiwa-crisp-palette-upgrade.patch"
 git -C "$target_dir" apply "$script_dir/chetiwa-smooth-120-nowcast.patch"
+git -C "$target_dir" apply "$script_dir/chetiwa-native-nowcast-memory.patch"
+git -C "$target_dir" apply "$script_dir/chetiwa-distinct-flow-baseline.patch"
 cp "$script_dir/hetzner-small.env" "$target_dir/.env"
 mkdir -p "$target_dir/logs"
 

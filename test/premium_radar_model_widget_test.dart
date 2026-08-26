@@ -116,4 +116,53 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('rapid playback suspension never corrupts timeline layout', (
+    tester,
+  ) async {
+    final frames = <RadarFrame>[
+      RadarFrame(
+        time: now,
+        progress: 0,
+        kind: WeatherDataKind.radarObservation,
+      ),
+      RadarFrame(
+        time: now.add(const Duration(minutes: 10)),
+        progress: 1,
+        kind: WeatherDataKind.radarNowcast,
+      ),
+    ];
+    final snapshot = ForecastSnapshotBuilder.build(
+      forecast: forecast,
+      nowUtc: now,
+    );
+
+    Widget timeline({required bool isPlaying}) => MaterialApp(
+      home: Scaffold(
+        body: RadarTimeline(
+          state: RadarReady(
+            frames: frames,
+            selectedIndex: 0,
+            coordinates: Coordinates.paris,
+            isPlaying: isPlaying,
+          ),
+          forecast: forecast,
+          snapshot: snapshot,
+          playbackProgress: const AlwaysStoppedAnimation<double>(0),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(timeline(isPlaying: false));
+    await tester.pumpWidget(timeline(isPlaying: true));
+    await tester.pump(const Duration(milliseconds: 20));
+    await tester.pumpWidget(timeline(isPlaying: false));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(
+      tester.getSize(find.byKey(const Key('radar-local-time'))).height,
+      150,
+    );
+  });
 }

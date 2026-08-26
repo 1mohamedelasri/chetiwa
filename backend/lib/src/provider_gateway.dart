@@ -179,7 +179,56 @@ final class ProviderGateway {
       );
     }
     final frames = <Map<String, Object?>>[];
-    var latestObservationEpoch = 0;
+    final generatedEpoch = (raw['generated'] as num?)?.toInt();
+    final pastFrames = (radar['past'] as List? ?? const <Object?>[])
+        .whereType<Map<String, dynamic>>()
+        .toList(growable: false);
+    final nowcastFrames = (radar['nowcast'] as List? ?? const <Object?>[])
+        .whereType<Map<String, dynamic>>()
+        .toList(growable: false);
+    final firstNowcastEpoch = nowcastFrames
+        .map((frame) => frame['time'])
+        .whereType<num>()
+        .map((value) => value.toInt())
+        .fold<int?>(
+          null,
+          (first, value) => first == null || value < first ? value : first,
+        );
+    final latestRawObservationEpoch = pastFrames
+        .map((frame) => frame['time'])
+        .whereType<num>()
+        .map((value) => value.toInt())
+        .fold<int>(0, (latest, value) => value > latest ? value : latest);
+    final lastNowcastEpoch = nowcastFrames
+        .map((frame) => frame['time'])
+        .whereType<num>()
+        .map((value) => value.toInt())
+        .fold<int>(0, (latest, value) => value > latest ? value : latest);
+    final horizonAnchorEpoch =
+        lastNowcastEpoch - const Duration(minutes: 120).inSeconds;
+    final hasHorizonAnchor =
+        horizonAnchorEpoch > 0 &&
+        pastFrames.any(
+          (frame) => (frame['time'] as num?)?.toInt() == horizonAnchorEpoch,
+        );
+    // LibreWXR updates observations immediately, then replaces its nowcast a
+    // few seconds later. During that short window, bind the timeline to the
+    // newest observation strictly before the first future timestamp. Mixing a
+    // newer observation with the previous run shortened +120 to +110 and made
+    // forecast cache keys point at the wrong generation.
+    final nowcastRunEpoch = hasHorizonAnchor
+        ? horizonAnchorEpoch
+        : firstNowcastEpoch == null
+        ? 0
+        : pastFrames
+              .map((frame) => frame['time'])
+              .whereType<num>()
+              .map((value) => value.toInt())
+              .where((value) => value < firstNowcastEpoch)
+              .fold<int>(0, (latest, value) => value > latest ? value : latest);
+    final latestObservationEpoch = nowcastRunEpoch > 0
+        ? nowcastRunEpoch
+        : latestRawObservationEpoch;
     void appendFrames(Object? values, String kind) {
       if (values is! List) return;
       for (final item in values.whereType<Map<String, dynamic>>()) {
@@ -187,16 +236,21 @@ final class ProviderGateway {
         final timestamp = item['time'];
         if (path is! String || timestamp is! num) continue;
         final epoch = timestamp.toInt();
-        if (kind == 'observation' && epoch > latestObservationEpoch) {
-          latestObservationEpoch = epoch;
-        }
         final frameId = base64Url.encode(utf8.encode(path)).replaceAll('=', '');
         final directHost = usesLibreWxr
             ? _config.radarMetadataUri.origin
             : host;
+        final cacheVersion = kind == 'observation'
+            ? null
+            : latestObservationEpoch > 0
+            ? latestObservationEpoch
+            : generatedEpoch;
+        final query = usesLibreWxr
+            ? '?presentation=crisp-v2${cacheVersion == null ? '' : '&run=$cacheVersion'}'
+            : '';
         final tileUrlTemplate = _config.publicBaseUrl == null
-            ? '$directHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '14/1_0.png?presentation=crisp-v2' : '2/1_0.png'}'
-            : '${_config.publicBaseUrl}/v1/radar/tiles/$frameId/{z}/{x}/{y}';
+            ? '$directHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '14/1_0.png' : '2/1_0.png'}$query'
+            : '${_config.publicBaseUrl}/v1/radar/tiles/$frameId/{z}/{x}/{y}${cacheVersion == null ? '' : '?run=$cacheVersion'}';
         frames.add(<String, Object?>{
           'time': _isoFromEpoch(epoch),
           'kind': kind,
@@ -205,12 +259,21 @@ final class ProviderGateway {
       }
     }
 
-    appendFrames(radar['past'], 'observation');
+    appendFrames(
+      latestObservationEpoch == 0
+          ? pastFrames
+          : pastFrames
+                .where((frame) {
+                  final time = frame['time'];
+                  return time is num && time.toInt() <= latestObservationEpoch;
+                })
+                .toList(growable: false),
+      'observation',
+    );
     // RainViewer stopped serving future frames in 2026. Keep the development
     // path truthful even if a legacy response happens to contain that field.
-    if (!usesRainViewer && radar['nowcast'] is List) {
-      for (final item
-          in (radar['nowcast'] as List).whereType<Map<String, dynamic>>()) {
+    if (!usesRainViewer && nowcastFrames.isNotEmpty) {
+      for (final item in nowcastFrames) {
         final timestamp = item['time'];
         if (timestamp is! num) continue;
         final leadSeconds = timestamp.toInt() - latestObservationEpoch;
@@ -371,6 +434,7 @@ final class ProviderGateway {
     required int z,
     required int x,
     required int y,
+    int? cacheVersion,
   }) async {
     final template = _config.radarTileUrlTemplate;
     if (template == null) {
@@ -380,13 +444,21 @@ final class ProviderGateway {
         message: 'A licensed radar tile provider is not configured',
       );
     }
-    final uri = Uri.parse(
+    final baseUri = Uri.parse(
       template
           .replaceAll('{frame}', frame)
           .replaceAll('{z}', '$z')
           .replaceAll('{x}', '$x')
           .replaceAll('{y}', '$y'),
     );
+    final uri = cacheVersion == null
+        ? baseUri
+        : baseUri.replace(
+            queryParameters: <String, String>{
+              ...baseUri.queryParameters,
+              'run': '$cacheVersion',
+            },
+          );
     Object? lastError;
     for (var attempt = 0; attempt < 3; attempt++) {
       try {

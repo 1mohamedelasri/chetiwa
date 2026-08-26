@@ -89,8 +89,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 250));
       expect(
         RadarMapSmokeTestBridge.maxTileOverlayCount,
-        1,
-        reason: 'The extended forecast used a two-layer opacity dissolve.',
+        lessThanOrEqualTo(2),
+        reason:
+            'The extended forecast allocated more than the bounded handoff pair.',
       );
     }
   });

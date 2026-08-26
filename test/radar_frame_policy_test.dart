@@ -43,6 +43,47 @@ void main() {
     expect(window.end, isNot(now.add(const Duration(hours: 2))));
   });
 
+  test('stale nowcast keeps a non-zero playback window for the cursor', () {
+    final observation = DateTime.utc(2026, 8, 26, 11, 50);
+    final lastNowcast = DateTime.utc(2026, 8, 26, 12, 50);
+    final phoneNow = DateTime.utc(2026, 8, 26, 16, 36);
+
+    final window = RadarFramePolicy.timelineWindow([
+      RadarFrame(
+        time: observation.subtract(const Duration(minutes: 10)),
+        progress: 0,
+        kind: WeatherDataKind.radarObservation,
+      ),
+      RadarFrame(
+        time: observation,
+        progress: 0.2,
+        kind: WeatherDataKind.radarObservation,
+      ),
+      RadarFrame(
+        time: observation.add(const Duration(minutes: 10)),
+        progress: 0.4,
+        kind: WeatherDataKind.radarNowcast,
+      ),
+      RadarFrame(
+        time: lastNowcast,
+        progress: 1,
+        kind: WeatherDataKind.modelForecast,
+      ),
+    ], phoneNow);
+
+    expect(window.start, observation);
+    expect(window.end, lastNowcast);
+    expect(window.end.difference(window.start), const Duration(hours: 1));
+    expect(
+      RadarFramePolicy.interpolateFrameTime(
+        observation,
+        observation.add(const Duration(minutes: 10)),
+        0.5,
+      ),
+      observation.add(const Duration(minutes: 5)),
+    );
+  });
+
   test('classifies and displays the premium model tail after 60 minutes', () {
     final observation = DateTime.utc(2026, 8, 23, 20);
     final model = observation.add(const Duration(minutes: 70));

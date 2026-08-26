@@ -120,12 +120,12 @@ void main() {
     await _waitForCondition(
       tester,
       () => RadarMapSmokeTestBridge.tileOverlayCount == 1,
-      reason: 'The preloaded Radar frame was not swapped into view',
+      reason: 'The native Radar handoff did not settle on one overlay',
     );
     expect(
       RadarMapSmokeTestBridge.maxTileOverlayCount,
-      1,
-      reason: 'Radar animation used a two-layer opacity dissolve.',
+      lessThanOrEqualTo(2),
+      reason: 'Radar animation allocated more than the bounded handoff pair.',
     );
 
     radarBloc.add(const RadarPlaybackRestarted());

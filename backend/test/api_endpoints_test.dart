@@ -243,10 +243,15 @@ void main() {
       MockClient(
         (request) async => http.Response(
           jsonEncode(<String, Object?>{
+            'generated': 1776707460,
             'host': 'https://tile.example.test',
             'radar': <String, Object?>{
               'past': <Object?>[
                 <String, Object?>{'time': 1776707400, 'path': '/past'},
+                <String, Object?>{
+                  'time': 1776708000,
+                  'path': '/racing-new-past',
+                },
               ],
               'nowcast': <Object?>[
                 <String, Object?>{'time': 1776708000, 'path': '/future'},
@@ -300,7 +305,14 @@ void main() {
     );
     expect(
       (frames[1] as Map<String, Object?>)['tileUrlTemplate'],
-      'https://radar.ezplatforms.com/future/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2',
+      'https://radar.ezplatforms.com/future/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2&run=1776707400',
+    );
+    expect(
+      frames.whereType<Map<String, Object?>>().any(
+        (frame) =>
+            (frame['tileUrlTemplate'] as String).contains('racing-new-past'),
+      ),
+      isFalse,
     );
     expect((data['provider'] as Map<String, Object?>)['id'], 'librewxr');
   });
@@ -613,6 +625,46 @@ void main() {
         0x0a,
       ]),
     );
+  });
+
+  test('Radar tile proxy forwards and isolates forecast generations', () async {
+    config = RuntimeConfig.fromEnvironment(const <String, String>{
+      'ARCGIS_API_KEY': 'test-key',
+      'RADAR_PROVIDER': 'librewxr',
+      'RADAR_TILE_URL_TEMPLATE':
+          'https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2',
+    });
+    final png = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+3MxZ5wAAAABJRU5ErkJggg==',
+    );
+    final requestedRuns = <String?>[];
+    final app = appWith(
+      MockClient((request) async {
+        requestedRuns.add(request.url.queryParameters['run']);
+        return http.Response.bytes(
+          png,
+          200,
+          headers: const <String, String>{'content-type': 'image/png'},
+        );
+      }),
+    );
+    final frame = base64Url
+        .encode(utf8.encode('/v2/radar/forecast'))
+        .replaceAll('=', '');
+
+    for (final run in const <int>[1776707400, 1776708000]) {
+      final response = await app(
+        Request(
+          'GET',
+          Uri.parse('http://localhost/v1/radar/tiles/$frame/7/64/44?run=$run'),
+        ),
+      );
+      expect(response.statusCode, 200);
+      expect(response.headers['x-cache'], 'MISS');
+      await response.read().drain<void>();
+    }
+
+    expect(requestedRuns, <String>['1776707400', '1776708000']);
   });
 
   test('Radar tile proxy serves stale PNG after an origin 502', () async {

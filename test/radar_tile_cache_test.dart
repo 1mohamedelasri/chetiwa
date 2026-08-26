@@ -192,12 +192,47 @@ void main() {
       directory: directory,
     )..beginSession();
 
-    final tile = await cache
-        .providerFor('https://tiles.test/{z}/{x}/{y}.png')
-        .getTile(64, 44, 7);
+    final provider = cache.providerFor('https://tiles.test/{z}/{x}/{y}.png');
+    final tile = await provider.getTile(64, 44, 7);
 
     expect(tile.data, png);
     expect(requests, 2);
+    expect(provider.requestedCoordinateCount, 1);
+    expect(provider.successfulCoordinateCount, 1);
+    expect(provider.presentedCoordinateCount, 1);
+    expect(provider.hasCompletePresentation, isTrue);
+    expect(provider.hasPresentationCoverage(minimumCoordinates: 1), isTrue);
+    provider.resetPresentationTracking();
+    expect(provider.requestedCoordinateCount, 0);
+    expect(provider.successfulCoordinateCount, 0);
+    expect(provider.hasCompletePresentation, isFalse);
+  });
+
+  test('presentation tracking ignores a tile completed after reset', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'chetiwa-radar-presentation-generation-test-',
+    );
+    addTearDown(() => _deleteDirectoryEventually(directory));
+    final response = Completer<http.Response>();
+    final png = await _solidPngTile();
+    final cache = RadarTileCache.forTesting(
+      client: MockClient((_) => response.future),
+      directory: directory,
+    )..beginSession();
+    final provider = cache.providerFor('https://tiles.test/{z}/{x}/{y}.png');
+
+    final staleRequest = provider.getTile(64, 44, 7);
+    await Future<void>.delayed(Duration.zero);
+    provider.resetPresentationTracking();
+    response.complete(http.Response.bytes(png, 200));
+    expect((await staleRequest).data, png);
+    expect(provider.requestedCoordinateCount, 0);
+    expect(provider.successfulCoordinateCount, 0);
+
+    expect((await provider.getTile(64, 44, 7)).data, png);
+    expect(provider.requestedCoordinateCount, 1);
+    expect(provider.successfulCoordinateCount, 1);
+    expect(provider.hasCompletePresentation, isTrue);
   });
 
   test(
@@ -245,6 +280,7 @@ void main() {
     await cache
         .providerFor('https://tiles.test/current/{z}/{x}/{y}.png')
         .getTile(2056, 1408, 12);
+    expect(cache.recentCoordinateCount, 1);
 
     final ready = await cache.prefetchNextFrames(
       frameTemplates: const [
@@ -296,6 +332,40 @@ void main() {
     expect(cache.readyTileCount.value, 2);
   });
 
+  test(
+    'resume keeps viewport coordinates while invalidating old work',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'chetiwa-radar-resume-test-',
+      );
+      addTearDown(() => _deleteDirectoryEventually(directory));
+      final png = await _solidPngTile();
+      final requestedUrls = <String>[];
+      final cache = RadarTileCache.forTesting(
+        client: MockClient((request) async {
+          requestedUrls.add(request.url.toString());
+          return http.Response.bytes(png, 200);
+        }),
+        directory: directory,
+      )..beginSession();
+
+      await cache
+          .providerFor('https://tiles.test/before-sleep/{z}/{x}/{y}.png')
+          .getTile(64, 44, 7);
+      cache.beginViewport(preserveRecentCoordinates: true);
+      expect(cache.recentCoordinateCount, 1);
+      final restored = await cache.prepareVisibleFrame(
+        'https://tiles.test/after-wake/{z}/{x}/{y}.png',
+      );
+
+      expect(restored, 1);
+      expect(requestedUrls, [
+        'https://tiles.test/before-sleep/7/64/44.png',
+        'https://tiles.test/after-wake/7/64/44.png',
+      ]);
+    },
+  );
+
   test('a new viewport discards queued tiles from the previous zoom', () async {
     final directory = await Directory.systemTemp.createTemp(
       'chetiwa-radar-viewport-priority-test-',
@@ -320,6 +390,7 @@ void main() {
     await _waitUntil(() => responses.length == 6);
 
     cache.beginViewport();
+    expect(cache.recentCoordinateCount, 0);
     expect((await queuedOldViewport).data, isNull);
     final currentViewport = provider.getTile(7, 44, 7);
     expect(responses, hasLength(6));

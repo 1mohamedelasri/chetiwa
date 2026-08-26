@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 final class RadarTileMetricsSnapshot {
   const RadarTileMetricsSnapshot({
@@ -81,7 +82,13 @@ final class RadarTileCache {
   static const _maxDiskBytes = 128 * 1024 * 1024;
   static const _maxMemoryBytes = 16 * 1024 * 1024;
   static const _freshAge = Duration(hours: 6);
-  static const _tileRequestTimeout = Duration(milliseconds: 2500);
+  // A genuinely cold LibreWXR coordinate can take 5-7 seconds to build once
+  // before the server/CDN caches it. Returning NO_TILE after 2.5 seconds made
+  // Google Maps remember a blank tile while the origin finished useful work
+  // in the background. Keep the request asynchronous, but allow that first
+  // bounded render to complete so the preparation screen can hand off a
+  // complete viewport instead of a patchwork.
+  static const _tileRequestTimeout = Duration(seconds: 8);
   static const _retryDelay = Duration(milliseconds: 120);
   static const _smokeTestEnabled = bool.fromEnvironment(
     'CHETIWA_RADAR_SMOKE_TEST',
@@ -89,7 +96,7 @@ final class RadarTileCache {
 
   static Future<bool> clearDiskCacheForSmokeTest() async {
     if (!_smokeTestEnabled) return false;
-    final directory = _defaultDirectory();
+    final directory = await _persistentDirectory();
     if (await directory.exists()) await directory.delete(recursive: true);
     return true;
   }
@@ -98,13 +105,15 @@ final class RadarTileCache {
     : this._withClient(
         client ?? http.Client(),
         _RadarSmokeController(enabled: _smokeTestEnabled),
-        directory ?? _defaultDirectory(),
+        directory == null
+            ? _persistentDirectory()
+            : Future<Directory>.value(directory),
       );
 
   RadarTileCache._withClient(
     http.Client delegate,
     this._smokeController,
-    this._directory,
+    this._directoryFuture,
   ) : metrics = RadarTileMetrics(),
       _client = _RadarSmokeClient(delegate, _smokeController) {
     unawaited(_prepareDirectory());
@@ -118,12 +127,24 @@ final class RadarTileCache {
 
   static final RadarTileCache shared = RadarTileCache._();
 
-  static Directory _defaultDirectory() => Directory(
-    '${Directory.systemTemp.path}/chetiwa-radar-tiles-$_cacheSchemaVersion',
-  );
+  static Future<Directory> _persistentDirectory() async {
+    try {
+      final parent = await getApplicationCacheDirectory();
+      return Directory(
+        '${parent.path}/chetiwa-radar-tiles-$_cacheSchemaVersion',
+      );
+    } on Object {
+      // Unit tests and very early platform bootstrap may not expose the path
+      // provider yet. The fallback remains functional, while real Android and
+      // iOS builds use their persistent application cache directory.
+      return Directory(
+        '${Directory.systemTemp.path}/chetiwa-radar-tiles-$_cacheSchemaVersion',
+      );
+    }
+  }
 
   final http.Client _client;
-  final Directory _directory;
+  final Future<Directory> _directoryFuture;
   final _RadarSmokeController _smokeController;
   final RadarTileMetrics metrics;
   final ValueNotifier<int> readyTileCount = ValueNotifier<int>(0);
@@ -149,6 +170,13 @@ final class RadarTileCache {
   var _prefetchGeneration = 0;
   var _viewportGeneration = 0;
 
+  /// Coordinates requested by the native map for the settled viewport.
+  ///
+  /// Playback uses this to require a complete current/next-frame buffer. A
+  /// single successful tile is not enough: swapping on that signal was the
+  /// source of the small-echo-then-large-patch jump on real phones.
+  int get recentCoordinateCount => _recentCoordinates.length;
+
   void beginSession() {
     metrics.beginSession();
     _readySessionTiles.clear();
@@ -162,10 +190,10 @@ final class RadarTileCache {
   /// Invalidates queued work from the previous camera viewport. Downloads
   /// already on the wire may finish and populate the cache, but they cannot
   /// retry or keep newer visible requests trapped behind an obsolete queue.
-  int beginViewport() {
+  int beginViewport({bool preserveRecentCoordinates = false}) {
     _viewportGeneration++;
     cancelPrefetch();
-    _recentCoordinates.clear();
+    if (!preserveRecentCoordinates) _recentCoordinates.clear();
     while (_downloadWaiters.isNotEmpty) {
       _downloadWaiters.removeFirst().completer.complete(false);
     }
@@ -192,8 +220,10 @@ final class RadarTileCache {
     required Iterable<String> frameTemplates,
     int maxFrames = 1,
     int maxTiles = 6,
+    int maxConcurrent = 2,
     bool completeOnFirstReady = false,
   }) async {
+    assert(maxConcurrent > 0 && maxConcurrent <= _maxConcurrentDownloads);
     final generation = ++_prefetchGeneration;
     final viewportGeneration = _viewportGeneration;
     final coordinates = _recentCoordinates.toList(growable: false).reversed;
@@ -210,12 +240,12 @@ final class RadarTileCache {
     }
     if (requests.isEmpty) return 0;
     var readyTiles = 0;
-    // Only two speculative operations run at once. A pan/zoom can therefore
-    // cancel the remaining old viewport work while four network slots stay
-    // available for the tiles the user is actively looking at.
-    for (var index = 0; index < requests.length; index += 2) {
+    // Camera-idle recovery may use four operations once the current viewport
+    // is already presented; ordinary speculative work keeps the conservative
+    // default of two so native Google Maps requests retain priority.
+    for (var index = 0; index < requests.length; index += maxConcurrent) {
       if (generation != _prefetchGeneration) return 0;
-      final end = math.min(index + 2, requests.length);
+      final end = math.min(index + maxConcurrent, requests.length);
       final operations = requests
           .sublist(index, end)
           .map((request) async {
@@ -589,16 +619,18 @@ final class RadarTileCache {
   }
 
   Future<void> _prepareDirectory() async {
-    await _directory.create(recursive: true);
+    final directory = await _directoryFuture;
+    await directory.create(recursive: true);
     await _trimDiskCache();
   }
 
-  File _fileFor(String url) =>
-      File('${_directory.path}/${_stableHash(url)}.tile');
+  File _fileFor(Directory directory, String url) =>
+      File('${directory.path}/${_stableHash(url)}.tile');
 
   Future<Uint8List?> _readDisk(String url) async {
     try {
-      final file = _fileFor(url);
+      final directory = await _directoryFuture;
+      final file = _fileFor(directory, url);
       final stat = await file.stat();
       if (stat.type != FileSystemEntityType.file ||
           DateTime.now().difference(stat.modified) > _freshAge) {
@@ -617,8 +649,9 @@ final class RadarTileCache {
 
   Future<void> _writeDisk(String url, Uint8List bytes) async {
     try {
-      await _directory.create(recursive: true);
-      final file = _fileFor(url);
+      final directory = await _directoryFuture;
+      await directory.create(recursive: true);
+      final file = _fileFor(directory, url);
       final temporary = File(
         '${file.path}.tmp-${DateTime.now().microsecondsSinceEpoch}',
       );
@@ -631,7 +664,8 @@ final class RadarTileCache {
 
   Future<void> _trimDiskCache() async {
     try {
-      final files = await _directory
+      final directory = await _directoryFuture;
+      final files = await directory
           .list()
           .where((entry) => entry is File && entry.path.endsWith('.tile'))
           .cast<File>()
@@ -690,10 +724,45 @@ final class RadarTileCache {
 }
 
 final class RadarGoogleTileProvider implements TileProvider {
-  const RadarGoogleTileProvider({required this.cache, required this.template});
+  RadarGoogleTileProvider({required this.cache, required this.template});
 
   final RadarTileCache cache;
   final String template;
+  final ValueNotifier<int> presentationRevision = ValueNotifier<int>(0);
+  final Set<RadarTileCoordinate> _presentationRequests =
+      <RadarTileCoordinate>{};
+  final Set<RadarTileCoordinate> _presentationSuccesses =
+      <RadarTileCoordinate>{};
+  var _presentationGeneration = 0;
+
+  int get requestedCoordinateCount => _presentationRequests.length;
+  int get successfulCoordinateCount => _presentationSuccesses.length;
+  int get presentedCoordinateCount =>
+      _presentationRequests.where(_presentationSuccesses.contains).length;
+  bool get hasCompletePresentation =>
+      _presentationRequests.isNotEmpty &&
+      presentedCoordinateCount == _presentationRequests.length;
+
+  bool hasPresentationCoverage({
+    required int minimumCoordinates,
+    double minimumRatio = 1,
+  }) {
+    if (_presentationRequests.length < minimumCoordinates) return false;
+    final presented = presentedCoordinateCount;
+    return presented >= minimumCoordinates &&
+        presented / _presentationRequests.length >= minimumRatio;
+  }
+
+  /// Starts a new native repaint observation window without invalidating the
+  /// shared byte cache. A subsequent `clearTileCache` should repopulate this
+  /// provider from memory and lets the UI wait for the exact visible viewport
+  /// instead of a global "one tile arrived" signal.
+  void resetPresentationTracking() {
+    _presentationGeneration++;
+    _presentationRequests.clear();
+    _presentationSuccesses.clear();
+    presentationRevision.value++;
+  }
 
   @override
   Future<Tile> getTile(int x, int y, int? zoom) async {
@@ -705,8 +774,23 @@ final class RadarGoogleTileProvider implements TileProvider {
       y: y,
       zoom: zoom,
     );
+    final presentationGeneration = _presentationGeneration;
+    if (_presentationRequests.add(coordinate)) {
+      presentationRevision.value++;
+    }
     final bytes = await cache._tileBytes(template, coordinate);
-    return bytes == null ? TileProvider.noTile : Tile(256, 256, bytes);
+    if (bytes == null) return TileProvider.noTile;
+    // A native request may finish after a camera move reset the observation
+    // window. Never let that old completion masquerade as a tile presented in
+    // the new viewport; it was the source of equal request/success counts with
+    // zero actual overlap on iOS.
+    if (presentationGeneration != _presentationGeneration) {
+      return Tile(256, 256, bytes);
+    }
+    if (_presentationSuccesses.add(coordinate)) {
+      presentationRevision.value++;
+    }
+    return Tile(256, 256, bytes);
   }
 }
 

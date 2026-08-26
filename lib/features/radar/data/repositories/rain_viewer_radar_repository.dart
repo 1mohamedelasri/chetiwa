@@ -79,18 +79,59 @@ final class RainViewerRadarRepository implements RadarRepository {
     final nowcast = usesLibreWxr
         ? radar['nowcast'] as List<dynamic>? ?? const []
         : const <dynamic>[];
+    final firstNowcastEpoch = nowcast
+        .whereType<Map<String, dynamic>>()
+        .map((frame) => frame['time'])
+        .whereType<num>()
+        .map((value) => value.toInt())
+        .fold<int?>(
+          null,
+          (first, value) => first == null || value < first ? value : first,
+        );
+    final latestRawObservationEpoch = past
+        .whereType<Map<String, dynamic>>()
+        .map((frame) => frame['time'])
+        .whereType<num>()
+        .fold<int>(0, (latest, value) => math.max(latest, value.toInt()));
+    final lastNowcastEpoch = nowcast
+        .whereType<Map<String, dynamic>>()
+        .map((frame) => frame['time'])
+        .whereType<num>()
+        .fold<int>(0, (latest, value) => math.max(latest, value.toInt()));
+    final horizonAnchorEpoch =
+        lastNowcastEpoch - const Duration(minutes: 120).inSeconds;
+    final hasHorizonAnchor =
+        horizonAnchorEpoch > 0 &&
+        past.whereType<Map<String, dynamic>>().any(
+          (frame) => (frame['time'] as num?)?.toInt() == horizonAnchorEpoch,
+        );
+    final nowcastRunEpoch = hasHorizonAnchor
+        ? horizonAnchorEpoch
+        : firstNowcastEpoch == null
+        ? 0
+        : past
+              .whereType<Map<String, dynamic>>()
+              .map((frame) => frame['time'])
+              .whereType<num>()
+              .map((value) => value.toInt())
+              .where((value) => value < firstNowcastEpoch)
+              .fold<int>(0, math.max);
+    final latestObservationEpoch = nowcastRunEpoch > 0
+        ? nowcastRunEpoch
+        : latestRawObservationEpoch;
+    final timelinePast = latestObservationEpoch == 0
+        ? past
+        : past
+              .whereType<Map<String, dynamic>>()
+              .where((frame) {
+                final time = frame['time'];
+                return time is num && time.toInt() <= latestObservationEpoch;
+              })
+              .toList(growable: false);
     if (usesLibreWxr && past.isNotEmpty && response['generated'] is num) {
-      final latestObservation = past
-          .whereType<Map<String, dynamic>>()
-          .map((frame) => frame['time'])
-          .whereType<num>()
-          .fold<int>(
-            0,
-            (latest, value) => value.toInt() > latest ? value.toInt() : latest,
-          );
       final generatedAt = (response['generated'] as num).toInt();
-      if (latestObservation > 0 &&
-          generatedAt - latestObservation >
+      if (latestRawObservationEpoch > 0 &&
+          generatedAt - latestRawObservationEpoch >
               const Duration(minutes: 20).inSeconds) {
         throw const WeatherDataException(
           WeatherDataIssue.providerUnavailable,
@@ -99,7 +140,7 @@ final class RainViewerRadarRepository implements RadarRepository {
       }
     }
     final rawFrames = RadarFramePolicy.select(
-      past
+      timelinePast
           .whereType<Map<String, dynamic>>()
           .map((frame) => (json: frame, forecast: false))
           .toList(growable: false),
@@ -114,12 +155,6 @@ final class RainViewerRadarRepository implements RadarRepository {
         'Aucune image radar disponible pour cette zone',
       );
     }
-    final latestObservationEpoch = past
-        .whereType<Map<String, dynamic>>()
-        .map((frame) => frame['time'])
-        .whereType<num>()
-        .fold<int>(0, (latest, value) => math.max(latest, value.toInt()));
-
     final frames = RadarFramePolicy.normalizeProgress(
       List.generate(rawFrames.length, (index) {
         final raw = rawFrames[index];
@@ -147,8 +182,12 @@ final class RainViewerRadarRepository implements RadarRepository {
             isUtc: true,
           ),
           progress: 0,
+          // LibreWXR regenerates a future valid-time on every observation
+          // cycle while keeping the same timestamp path. Include the source
+          // observation in forecast URLs so Cloudflare and the persistent
+          // mobile cache cannot keep an older forecast for up to six hours.
           tileUrlTemplate:
-              '$tileHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '$libreWxrColorScheme/1_0' : '2/1_0'}.png${usesLibreWxr ? '?presentation=crisp-v2' : ''}',
+              '$tileHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '$libreWxrColorScheme/1_0' : '2/1_0'}.png${usesLibreWxr ? '?presentation=crisp-v2${raw.forecast && latestObservationEpoch > 0 ? '&run=$latestObservationEpoch' : ''}' : ''}',
           kind: raw.forecast && latestObservationEpoch > 0
               ? RadarFramePolicy.futureKind(
                   latestObservation: DateTime.fromMillisecondsSinceEpoch(
