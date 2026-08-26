@@ -13,7 +13,7 @@ final class GoogleAdsRepository implements AdsRepository {
   bool _initializing = false;
 
   @override
-  bool get canRequestAds => _initialized && _consent.canRequestPersonalizedAds;
+  bool get canRequestAds => _initialized && _consent.canRequestAds;
 
   @override
   bool get areAdsRemoved => false;
@@ -23,7 +23,7 @@ final class GoogleAdsRepository implements AdsRepository {
     if (!AdMobConfig.isConfigured) return;
     _initializing = true;
     await _consent.initialize();
-    if (_consent.canRequestPersonalizedAds) {
+    if (_consent.canRequestAds) {
       await MobileAds.instance.initialize();
       _initialized = true;
     }

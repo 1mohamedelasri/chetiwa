@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/forecast/presentation/screens/weather_screen.dart';
@@ -13,7 +14,9 @@ import '../../features/monetization/presentation/subscription_screen.dart';
 GoRouter createAppRouter({
   String initialLocation = '/weather',
   WeatherSection initialWeatherSection = WeatherSection.graph,
+  GlobalKey<NavigatorState>? navigatorKey,
 }) => GoRouter(
+  navigatorKey: navigatorKey,
   initialLocation: initialLocation,
   routes: [
     GoRoute(path: '/', redirect: (_, __) => '/weather'),

@@ -8,6 +8,7 @@ import '../../../core/time/weather_clock.dart';
 import '../../../core/weather/weather_data_health.dart';
 import '../domain/entities/radar_frame.dart';
 import '../domain/repositories/radar_repository.dart';
+import '../domain/services/radar_frame_policy.dart';
 
 sealed class RadarEvent extends Equatable {
   const RadarEvent();
@@ -505,9 +506,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   void _startPlaybackTimer() {
     _stopPlayback();
     _playbackTimer = Timer.periodic(
-      // The next viewport is prefetched in a bounded batch. 1.5 s remains
-      // readable on Android while avoiding the sluggish 2.5 s cadence.
-      const Duration(milliseconds: 1500),
+      RadarFramePolicy.playbackFrameDuration,
       (_) => add(const RadarPlaybackAdvanced()),
     );
   }

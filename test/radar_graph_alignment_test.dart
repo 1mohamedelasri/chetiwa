@@ -56,7 +56,7 @@ void main() {
     expect(identical(aligned, forecast), isTrue);
   });
 
-  test('Graph resumes model data after the LibreWXR nowcast window', () {
+  test('Graph uses LibreWXR samples across the extended projection', () {
     final now = DateTime.utc(2026, 8, 23, 12);
     final modelTailTime = now.add(const Duration(minutes: 90));
     final forecast = Forecast(
@@ -87,14 +87,14 @@ void main() {
 
     final aligned = alignForecastWithRadarNowcast(forecast, [
       RadarFrame(
-        time: now.add(const Duration(minutes: 60)),
+        time: modelTailTime,
         progress: 1,
-        kind: WeatherDataKind.radarNowcast,
+        kind: WeatherDataKind.modelForecast,
         pointRainRateMmPerHour: 2,
       ),
     ], now);
 
-    expect(aligned.rainPointAt(modelTailTime)?.rateMmPerHour, 3);
+    expect(aligned.rainPointAt(modelTailTime)?.rateMmPerHour, 2);
     expect(aligned.points.last.time, modelTailTime);
   });
 }

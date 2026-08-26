@@ -29,6 +29,7 @@ upsert_metric() {
 
 upsert_metric chetiwa_rain_alert_duration_ms durationMilliseconds GAUGE ms
 upsert_metric chetiwa_rain_alert_cells cellsEvaluated DELTA 1
+upsert_metric chetiwa_rain_alert_cells_skipped cellsSkipped DELTA 1
 upsert_metric chetiwa_rain_alert_proposed deliveriesProposed DELTA 1
 upsert_metric chetiwa_rain_alert_push_sent pushSent DELTA 1
 upsert_metric chetiwa_rain_alert_push_failed pushFailed DELTA 1

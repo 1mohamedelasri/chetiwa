@@ -195,7 +195,7 @@ final class ProviderGateway {
             ? _config.radarMetadataUri.origin
             : host;
         final tileUrlTemplate = _config.publicBaseUrl == null
-            ? '$directHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '13/1_0' : '2/1_0'}.png'
+            ? '$directHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '14/1_0.png?presentation=crisp-v2' : '2/1_0.png'}'
             : '${_config.publicBaseUrl}/v1/radar/tiles/$frameId/{z}/{x}/{y}';
         frames.add(<String, Object?>{
           'time': _isoFromEpoch(epoch),
@@ -286,7 +286,7 @@ final class ProviderGateway {
                 'arguments': <String, Object?>{
                   'lat': latitude,
                   'lon': longitude,
-                  'minutes': 60,
+                  'minutes': 120,
                 },
               },
             }),

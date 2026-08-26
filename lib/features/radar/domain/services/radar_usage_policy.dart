@@ -14,7 +14,7 @@ final class RadarUsagePolicy {
     : this(
         subscription: RadarSubscription.free,
         maxFrames: 12,
-        maxZoom: 10,
+        maxZoom: 14,
         monthlySessions: 20,
       );
 
@@ -22,7 +22,7 @@ final class RadarUsagePolicy {
     : this(
         subscription: RadarSubscription.premium,
         maxFrames: 24,
-        maxZoom: 12,
+        maxZoom: 14,
         monthlySessions: 200,
       );
 

@@ -33,14 +33,9 @@ final class SourcesLicensesScreen extends StatelessWidget {
             url: 'https://github.com/JoshuaKimsey/LibreWXR',
           ),
           _SourceTile(
-            name: 'OpenFreeMap · OpenMapTiles · OpenStreetMap',
-            purpose: strings.sourceOpenFreeMapPurpose,
-            url: 'https://openfreemap.org/tos/',
-          ),
-          _SourceTile(
-            name: 'Esri · Maxar · Earthstar',
-            purpose: '${strings.sourceEsriPurpose} · ${strings.premiumOnly}',
-            url: 'https://www.esri.com/en-us/legal/terms/full-master-agreement',
+            name: 'Google Maps Platform',
+            purpose: strings.sourceGoogleMapsPurpose,
+            url: 'https://cloud.google.com/maps-platform/terms',
           ),
           const SizedBox(height: ChetiwaSpacing.x5),
           Text(

@@ -1,0 +1,50 @@
+diff --git a/src/librewxr/colors/schemes.py b/src/librewxr/colors/schemes.py
+index 630c474..cb114d5 100644
+--- a/src/librewxr/colors/schemes.py
++++ b/src/librewxr/colors/schemes.py
+@@ -25,6 +25,7 @@ SCHEME_NAMES = {
+     11: "MRMS CREF",
+     12: "33/40 Max Storm",
+     13: "Chetiwa Grey Red",
++    14: "Chetiwa Crisp Grey Red",
+ }
+ 
+ # Rain LUTs: scheme_id -> (256, 4) uint8 array mapping pixel value -> RGBA
+@@ -153,6 +154,8 @@ def _load_color_table() -> None:
+     # avoids the broad pink haze produced by a client-side linear matrix.
+     new_rain[13] = _chetiwa_lut()
+     new_snow[13] = new_rain[13]
++    new_rain[14] = _chetiwa_lut()
++    new_snow[14] = new_rain[14]
+ 
+     # Atomic publish: every concurrent reader sees either the empty
+     # dict (load hasn't run) or the fully-populated dict (load done).
+diff --git a/src/librewxr/tiles/renderer.py b/src/librewxr/tiles/renderer.py
+index 0948ca5..9ddd19d 100644
+--- a/src/librewxr/tiles/renderer.py
++++ b/src/librewxr/tiles/renderer.py
+@@ -378,13 +378,18 @@ def present_tile(
+ 
+     img = Image.fromarray(rgba, "RGBA")
+ 
++    # Scheme 14 keeps the geometry's bilinear sampling but deliberately skips
++    # the second, post-colour Gaussian pass.  Blurring RGBA after the palette
++    # creates a wide translucent red halo that looks out of focus on a native
++    # satellite basemap.  Cropping the padded geometry is still mandatory.
+     if geom.blur_radius >= 0.5:
+-        r, g, b, a = img.split()
+-        rgb = Image.merge("RGB", (r, g, b))
+-        rgb = rgb.filter(ImageFilter.GaussianBlur(radius=geom.blur_radius))
+-        a = a.filter(ImageFilter.GaussianBlur(radius=geom.blur_radius))
+-        r, g, b = rgb.split()
+-        img = Image.merge("RGBA", (r, g, b, a))
++        if color_scheme != 14:
++            r, g, b, a = img.split()
++            rgb = Image.merge("RGB", (r, g, b))
++            rgb = rgb.filter(ImageFilter.GaussianBlur(radius=geom.blur_radius))
++            a = a.filter(ImageFilter.GaussianBlur(radius=geom.blur_radius))
++            r, g, b = rgb.split()
++            img = Image.merge("RGBA", (r, g, b, a))
+ 
+         if geom.pad > 0:
+             img = img.crop(

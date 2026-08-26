@@ -53,9 +53,9 @@ final class RuntimeConfig {
     required this.globalKillSwitch,
     required this.premiumEnabled,
     required this.premiumRolloutPercent,
-    required this.premiumSatelliteEnabled,
     required this.premiumRadarModelEnabled,
     required this.adsEnabled,
+    required this.analyticsConsentPromptEnabled,
     required this.publicBaseUrl,
     required this.internalMetricsToken,
     required this.rainAlertsEnabled,
@@ -180,7 +180,7 @@ final class RuntimeConfig {
       // public API can cache, meter and replace it without an app release.
       radarTileUrlTemplate: _optionalUrlTemplate(
         source['RADAR_TILE_URL_TEMPLATE'] ??
-            'https://api.librewxr.net{frame}/256/{z}/{x}/{y}/13/1_0.png',
+            'https://api.librewxr.net{frame}/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2',
       ),
       sharedCounterUrl: _optionalUrl(source['SHARED_COUNTER_URL']),
       monthlyBudgetCents: _positiveInt(
@@ -200,15 +200,15 @@ final class RuntimeConfig {
         source['PREMIUM_ROLLOUT_PERCENT'],
         fallback: 0,
       ),
-      premiumSatelliteEnabled: _boolean(
-        source['PREMIUM_SATELLITE_ENABLED'],
-        fallback: false,
-      ),
       premiumRadarModelEnabled: _boolean(
         source['PREMIUM_RADAR_MODEL_ENABLED'],
         fallback: false,
       ),
       adsEnabled: _boolean(source['ADS_ENABLED'], fallback: false),
+      analyticsConsentPromptEnabled: _boolean(
+        source['ANALYTICS_CONSENT_PROMPT_ENABLED'],
+        fallback: false,
+      ),
       publicBaseUrl: publicBaseUrl,
       internalMetricsToken: _optional(source['INTERNAL_METRICS_TOKEN']),
       rainAlertsEnabled: _boolean(
@@ -258,9 +258,9 @@ final class RuntimeConfig {
   final bool globalKillSwitch;
   final bool premiumEnabled;
   final int premiumRolloutPercent;
-  final bool premiumSatelliteEnabled;
   final bool premiumRadarModelEnabled;
   final bool adsEnabled;
+  final bool analyticsConsentPromptEnabled;
   final Uri? publicBaseUrl;
   final String? internalMetricsToken;
   final bool rainAlertsEnabled;

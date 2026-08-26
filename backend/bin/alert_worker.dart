@@ -28,6 +28,7 @@ Future<void> main() async {
   final store = await FirestoreDeviceAlertStore.connect(
     projectId: config.googleCloudProject!,
     databaseId: config.firestoreDatabaseId,
+    rainAlertCellSizeDegrees: config.rainAlertCellSizeDegrees,
   );
   FirebaseRainAlertPushSender? sender;
   final startedAt = DateTime.now().toUtc();
@@ -82,7 +83,6 @@ Future<void> main() async {
     final engine = RainAlertEngine(
       store: store,
       provider: ProviderRainAlertNowcast(provider),
-      cellSizeDegrees: config.rainAlertCellSizeDegrees,
       maximumConcurrentCells: config.rainAlertMaxConcurrentCells,
       enqueueDeliveries: control.maySend,
       localTime: (utc, name) {
@@ -126,6 +126,7 @@ Future<void> main() async {
         status: status,
         activeAlerts: run.activeAlerts,
         cellsEvaluated: run.cellsEvaluated,
+        cellsSkipped: run.cellsSkipped,
         providerFailures: run.providerFailures,
         alertsEvaluated: run.alertsEvaluated,
         deliveriesProposed: run.deliveriesProposed,
@@ -144,6 +145,7 @@ Future<void> main() async {
         'runId': run.runId,
         'activeAlerts': run.activeAlerts,
         'cellsEvaluated': run.cellsEvaluated,
+        'cellsSkipped': run.cellsSkipped,
         'providerFailures': run.providerFailures,
         'alertsEvaluated': run.alertsEvaluated,
         'deliveriesProposed': run.deliveriesProposed,

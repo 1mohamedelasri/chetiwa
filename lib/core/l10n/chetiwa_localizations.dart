@@ -45,9 +45,6 @@ final class ChetiwaLocalizations {
       : 'The map is loading in the background. Graph remains available.';
   String get loadingRadarTiles =>
       _fr ? 'Chargement des échos radar…' : 'Loading radar echoes…';
-  String get radarTilesUnavailable => _fr
-      ? 'Échos radar temporairement indisponibles'
-      : 'Radar echoes temporarily unavailable';
   String get retry => _fr ? 'Réessayer' : 'Retry';
   String get advertisement => _fr ? 'PUBLICITÉ' : 'ADVERTISEMENT';
   String get chooseCity => _fr ? 'Choisir une ville' : 'Choose a city';
@@ -135,17 +132,19 @@ final class ChetiwaLocalizations {
   String get temperature => _fr ? 'Température' : 'Temperature';
   String get privacy => _fr ? 'Confidentialité' : 'Privacy';
   String get analyticsTitle =>
-      _fr ? 'Statistiques d’utilisation' : 'Usage analytics';
+      _fr ? 'Aider Chetiwa à s’améliorer' : 'Help improve Chetiwa';
   String get analyticsDisabledDetail => _fr
-      ? 'Désactivées · aucune statistique Firebase envoyée'
-      : 'Off · no Firebase analytics is sent';
+      ? 'Désactivé · aucune statistique ni rapport de panne envoyé'
+      : 'Off · no usage statistics or crash reports are sent';
   String get analyticsEnabledDetail => _fr
-      ? 'Activées · uniquement des événements d’usage anonymisés'
-      : 'On · only anonymised usage events';
+      ? 'Activé · statistiques et diagnostics techniques limités'
+      : 'On · limited usage statistics and technical diagnostics';
   String get analyticsEnableDetail => _fr
-      ? 'Chetiwa enverra des statistiques d’usage limitées pour améliorer l’application. Elles ne contiennent ni adresse, ni recherche saisie, ni coordonnées précises. Vous pourrez désactiver ce choix à tout moment.'
-      : 'Chetiwa will send limited usage statistics to improve the app. They contain no address, typed search, or precise coordinates. You can turn this off at any time.';
-  String get analyticsEnable => _fr ? 'Activer' : 'Enable';
+      ? 'Avec votre accord, Chetiwa enverra des statistiques d’usage limitées et des rapports techniques en cas de panne. Nous n’ajoutons volontairement ni ville, ni recherche, ni coordonnées précises, ni contenu de notification. Ce choix est facultatif et modifiable à tout moment.'
+      : 'With your permission, Chetiwa will send limited usage statistics and technical crash reports. We deliberately add no city, search, precise coordinates, or notification content. This choice is optional and can be changed at any time.';
+  String get analyticsEnable => _fr ? 'Autoriser' : 'Allow';
+  String get analyticsDecline =>
+      _fr ? 'Continuer sans partager' : 'Continue without sharing';
   String get analyticsUpdateFailed => _fr
       ? 'Impossible de modifier ce choix pour le moment.'
       : 'This choice could not be updated right now.';
@@ -164,12 +163,9 @@ final class ChetiwaLocalizations {
   String get sourceRainViewerPurpose => _fr
       ? 'Images radar de précipitations via LibreWXR'
       : 'Precipitation radar imagery via LibreWXR';
-  String get sourceOpenFreeMapPurpose => _fr
-      ? 'Fond de carte standard vectoriel gratuit'
-      : 'Free standard vector basemap';
-  String get sourceEsriPurpose => _fr
-      ? 'Fond satellite, lorsqu’il est sélectionné'
-      : 'Satellite map base, when selected';
+  String get sourceGoogleMapsPurpose => _fr
+      ? 'Fond satellite hybride et carte de sélection de lieu'
+      : 'Hybrid satellite basemap and location picker map';
   String get premiumOnly => _fr ? 'Chetiwa+ uniquement' : 'Chetiwa+ only';
   String get chooseMainLocationHelp => _fr
       ? 'Choisissez une ville ou un point sur la carte.'

@@ -1,0 +1,43 @@
+diff --git a/src/librewxr/colors/schemes.py b/src/librewxr/colors/schemes.py
+--- a/src/librewxr/colors/schemes.py
++++ b/src/librewxr/colors/schemes.py
+@@ -79,5 +79,30 @@ def _chetiwa_lut() -> np.ndarray:
+     return lut
+ 
+ 
++def _chetiwa_crisp_lut() -> np.ndarray:
++    """Calm, discrete radar bands without interpolated red haze."""
++    bands = (
++        (4.0, (0, 0, 0, 0)),
++        (10.0, (216, 220, 222, 90)),
++        (16.0, (185, 190, 193, 125)),
++        (22.0, (135, 142, 146, 160)),
++        (28.0, (83, 91, 95, 190)),
++        (34.0, (225, 155, 152, 195)),
++        (40.0, (214, 91, 85, 215)),
++        (50.0, (188, 38, 32, 230)),
++        (95.0, (132, 0, 0, 240)),
++    )
++    lut = np.zeros((256, 4), dtype=np.uint8)
++    for pixel_value in range(256):
++        dbz = pixel_value / 2.0 - 32.0
++        for upper_dbz, rgba in bands:
++            if dbz <= upper_dbz:
++                lut[pixel_value] = rgba
++                break
++        else:
++            lut[pixel_value] = bands[-1][1]
++    return lut
++
++
+ def _load_color_table() -> None:
+     """Parse color_table.csv into LUTs.
+@@ -155,7 +180,7 @@ def _load_color_table() -> None:
+     # avoids the broad pink haze produced by a client-side linear matrix.
+     new_rain[13] = _chetiwa_lut()
+     new_snow[13] = new_rain[13]
+-    new_rain[14] = _chetiwa_lut()
++    new_rain[14] = _chetiwa_crisp_lut()
+     new_snow[14] = new_rain[14]
+ 
+     # Atomic publish: every concurrent reader sees either the empty

@@ -109,6 +109,71 @@ gcloud run jobs execute chetiwa-rain-alerts \
 Les secrets fournisseurs éventuels doivent être liés depuis Secret Manager au
 job Cloud Run ; ne jamais les copier dans le fichier YAML.
 
+### Polling adaptatif sans nouveau service
+
+Le Scheduler continue de réveiller le job toutes les cinq minutes, mais le job
+ne contacte pas aveuglément le fournisseur pour chaque cellule. Il lit le petit
+document Firestore `alertCellSchedules/{cellKey}` et saute les cellules qui ne
+sont pas encore dues :
+
+- pluie dans la fenêtre d'alerte : nouvelle vérification dans 5 minutes ;
+- pluie plus éloignée : nouvelle vérification dans 10 à 30 minutes ;
+- aucune pluie sur un horizon d'au moins 2 h : sommeil de 1 h ;
+- aucune pluie sur un horizon d'au moins 4 h : sommeil de 2 h ;
+- horizon LibreWXR limité à environ 60 minutes : contrôle prudent toutes les
+  15 minutes ;
+- panne fournisseur : retry après 15 minutes.
+
+Le moteur ne crée une cellule que pour une règle active appartenant à un
+appareil valide avec notifications activées. Un changement de lieu remplace la
+règle principale ; l'ancienne cellule n'est donc plus interrogée dès le passage
+suivant. Les calendriers orphelins expirent automatiquement après sept jours via
+le TTL Firestore. Ils ne contiennent aucun token, identifiant d'appareil ni
+coordonnée exacte d'utilisateur.
+
+Ne pas ajouter Redis, une seconde base, un Scheduler par ville ou du batching
+Open-Meteo pour cette V1. Le batching diminue le nombre de connexions HTTP mais
+pas les unités facturées. Il n'existe pas non plus de coupure nocturne globale :
+les heures silencieuses choisies par chaque utilisateur restent autoritaires.
+
+### Estimation Firestore par DAU
+
+Le DAU n'est pas l'unité de coût réelle. Les deux facteurs dominants sont le
+nombre d'utilisateurs ayant activé les alertes et le nombre de cellules de
+`0,05°` distinctes. Le tableau ci-dessous est un budget prudent, pas une
+garantie de facture. Hypothèses : 25 % d'opt-in, trois synchronisations mobiles
+par jour, dix abonnés en moyenne par cellule, horizon LibreWXR court contrôlé au
+maximum toutes les 15 minutes, 30 jours et tarifs Firestore Standard de
+référence en USD (`$0.03/100k` lectures et `$0.09/100k` écritures après le quota
+gratuit quotidien).
+
+| DAU | Alertes actives | Lectures/jour | Écritures/jour | Firestore/mois estimé | Cas dispersé : 1 cellule/utilisateur |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 000 | 250 | 77 400 | 3 900 | environ $0.25 | environ $0.60 |
+| 10 000 | 2 500 | 774 000 | 39 100 | environ $7 | environ $15 |
+| 40 000 | 10 000 | 3 096 000 | 156 500 | environ $31 | environ $62 |
+| 50 000 | 12 500 | 3 870 000 | 195 600 | environ $39 | environ $78 |
+
+Le stockage reste normalement sous le GiB gratuit jusqu'à ces volumes et les
+suppressions/TTL restent négligeables. À 50 000 DAU mais seulement 10 % d'opt-in,
+le même modèle donne environ `$15/mois`. Vérifier chaque semaine le ratio réel
+`alertes actives / DAU`, le nombre d'abonnés par cellule et les opérations dans
+Firestore Usage ; ne jamais extrapoler uniquement depuis le DAU.
+
+Cette estimation montre que le garde-budget de 25 EUR peut être atteint avant
+50 000 DAU. Avant ce palier, optimiser le worker pour interroger d'abord la
+prévision de la cellule et ne charger les documents abonnés que lorsqu'un
+épisode pluvieux doit être évalué ou lors d'un audit périodique d'appartenance.
+Ne pas introduire Redis pour résoudre ce point : il déplacerait le coût sans
+supprimer les lectures inutiles.
+
+Coûts séparés de Firestore : FCM est gratuit ; un seul Cloud Scheduler entre
+dans les trois jobs gratuits ; le Cloud Run Job toutes les cinq minutes coûte
+environ `$3/mois` au minimum avec 1 vCPU/512 MiB à cause de la facturation
+minimum d'une minute par exécution, puis augmente avec sa durée réelle ; et la
+licence commerciale Open-Meteo reste un abonnement distinct. Mesurer Cloud Run
+en shadow mode avant d'en déduire un coût à 10k ou 50k DAU.
+
 ## 4. Valider le shadow mode et activer les envois
 
 Les deux interrupteurs sont indépendants et `false` par défaut :
@@ -142,7 +207,7 @@ backend/deploy/alerts/provision-alert-budget-guard.sh \
   /chemin/absolu/chetiwa-alerts-staging.yaml
 ```
 
-Le premier script crée cinq métriques de logs et le dashboard **Chetiwa —
+Le premier script crée six métriques de logs et le dashboard **Chetiwa —
 Alertes pluie**. Le second déploie un endpoint Cloud Run privé, une souscription
 Pub/Sub authentifiée et un budget mensuel de projet à 50 EUR avec seuils 50 %
 (25 EUR) et 100 % (50 EUR). Les notifications Billing sont des estimations,

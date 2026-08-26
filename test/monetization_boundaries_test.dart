@@ -5,9 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('le MVP local-first ne peut demander ni publicité ni consentement', () {
     expect(const DisabledAdsRepository().canRequestAds, isFalse);
-    expect(
-      const DisabledConsentRepository().canRequestPersonalizedAds,
-      isFalse,
-    );
+    expect(const DisabledConsentRepository().canRequestAds, isFalse);
   });
 }

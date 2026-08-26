@@ -74,7 +74,22 @@ void main() {
         tester.binding.handleAppLifecycleStateChanged(
           AppLifecycleState.resumed,
         );
+        await tester.pump(const Duration(milliseconds: 550));
+        expect((radarBloc.state as RadarReady).isPlaying, isTrue);
+
+        // A second quick lock/unlock is inside the 20 s network throttle but
+        // must still resume playback.
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.inactive,
+        );
         await tester.pump();
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await tester.pump();
+        expect((radarBloc.state as RadarReady).isPlaying, isFalse);
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await tester.pump(const Duration(milliseconds: 550));
         expect((radarBloc.state as RadarReady).isPlaying, isTrue);
       },
     );

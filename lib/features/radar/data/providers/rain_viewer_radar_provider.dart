@@ -37,7 +37,7 @@ final class RainViewerRadarProvider {
                 'arguments': {
                   'lat': coordinates.latitude,
                   'lon': coordinates.longitude,
-                  'minutes': 60,
+                  'minutes': 120,
                 },
               },
             }),

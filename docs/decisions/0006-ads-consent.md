@@ -26,9 +26,16 @@ règles de consentement varient selon région, âge, personnalisation et platefo
 - Publicités de test obligatoires hors production.
 - ATT iOS uniquement si le comportement réel nécessite du tracking inter-app.
 - Feature flag global pour couper la publicité.
+- Ne jamais demander aujourd'hui un consentement destiné à de futures
+  publicités : `ADS_ENABLED=false` signifie aucun formulaire UMP, aucune
+  requête et aucun emplacement visible.
+- Lors de l'activation réelle, UMP décide si un formulaire est requis et
+  `canRequestAds()` reste l'unique autorisation technique de charger une annonce.
+- Un refus de personnalisation n'est jamais converti en achat forcé. Le paywall
+  apparaît seulement après une intention explicite Chetiwa+ ou « retirer les
+  publicités », et seulement si les achats sont réellement disponibles.
 - Mesurer revenu net et impact sur rétention avant d’ajouter un format.
 
 ## Référence
 
 - [Google UMP for Flutter](https://developers.google.com/admob/flutter/privacy)
-

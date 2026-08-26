@@ -78,4 +78,48 @@ void main() {
 
     expect(window.end, model);
   });
+
+  test('keeps every interpolated ten-minute extended forecast frame', () {
+    final observation = DateTime.utc(2026, 8, 23, 20);
+    final frames = <RadarFrame>[
+      RadarFrame(
+        time: observation,
+        progress: 0,
+        kind: WeatherDataKind.radarObservation,
+      ),
+      RadarFrame(
+        time: observation.add(const Duration(minutes: 60)),
+        progress: 0.4,
+        kind: WeatherDataKind.radarNowcast,
+      ),
+      for (var lead = 70; lead <= 120; lead += 10)
+        RadarFrame(
+          time: observation.add(Duration(minutes: lead)),
+          progress: lead / 120,
+          kind: WeatherDataKind.modelForecast,
+        ),
+    ];
+
+    final selected = RadarFramePolicy.normalizeProgress(frames);
+
+    expect(
+      selected
+          .where((frame) => frame.isModelForecast)
+          .map((frame) => frame.time.difference(observation).inMinutes),
+      [70, 80, 90, 100, 110, 120],
+    );
+    expect(selected.first.progress, 0);
+    expect(selected.last.progress, 1);
+  });
+
+  test('playhead remains continuous across the +60 minute boundary', () {
+    final current = DateTime.utc(2026, 8, 26, 1);
+    final next = current.add(const Duration(minutes: 10));
+
+    expect(
+      RadarFramePolicy.interpolateFrameTime(current, next, 0.5),
+      current.add(const Duration(minutes: 5)),
+    );
+    expect(RadarFramePolicy.playbackFrameDuration.inMilliseconds, 2000);
+  });
 }

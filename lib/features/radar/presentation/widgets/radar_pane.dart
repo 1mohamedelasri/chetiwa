@@ -4,16 +4,12 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
-import 'package:latlong2/latlong.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../../../app/theme/chetiwa_tokens.dart';
-import '../../../../core/config/api_config.dart';
 import '../../../../core/l10n/chetiwa_localizations.dart';
-import '../../../../core/maps/open_free_map_layer.dart';
 import '../../../../core/time/weather_clock.dart';
 import '../../../../core/widgets/weather_data_status.dart';
 import '../../../forecast/domain/entities/forecast.dart';
@@ -26,12 +22,60 @@ import '../../data/cache/radar_tile_cache.dart';
 import '../../domain/entities/radar_frame.dart';
 import '../../domain/services/radar_frame_policy.dart';
 
+/// Deterministic native-map controls available only to the opt-in integration
+/// smoke test. Real users and production builds cannot activate these hooks.
+@visibleForTesting
+abstract final class RadarMapSmokeTestBridge {
+  static const _enabled = bool.fromEnvironment('CHETIWA_RADAR_SMOKE_TEST');
+  static GoogleMapController? _controller;
+  static int Function()? _tileOverlayCount;
+  static int _maxTileOverlayCount = 0;
+
+  static void attach(
+    GoogleMapController controller, {
+    required int Function() tileOverlayCount,
+  }) {
+    if (!_enabled) return;
+    _controller = controller;
+    _tileOverlayCount = tileOverlayCount;
+    _maxTileOverlayCount = 0;
+  }
+
+  static void detach(GoogleMapController? controller) {
+    if (!_enabled || !identical(_controller, controller)) return;
+    _controller = null;
+    _tileOverlayCount = null;
+  }
+
+  static Future<bool> zoomTo(double zoom) async {
+    final controller = _controller;
+    if (!_enabled || controller == null) return false;
+    await controller.animateCamera(CameraUpdate.zoomTo(zoom));
+    return true;
+  }
+
+  static int get tileOverlayCount =>
+      _enabled ? _tileOverlayCount?.call() ?? 0 : 0;
+
+  static int get maxTileOverlayCount => _enabled ? _maxTileOverlayCount : 0;
+
+  static void resetMaxTileOverlayCount() {
+    if (!_enabled) return;
+    _maxTileOverlayCount = tileOverlayCount;
+  }
+
+  static void recordTileOverlayCount(int count) {
+    if (_enabled && count > _maxTileOverlayCount) {
+      _maxTileOverlayCount = count;
+    }
+  }
+}
+
 final class RadarPane extends StatelessWidget {
   const RadarPane({
     required this.forecast,
     required this.snapshot,
     this.isActive = true,
-    this.satelliteAvailable = false,
     this.modelForecastLocked = false,
     super.key,
   });
@@ -39,7 +83,6 @@ final class RadarPane extends StatelessWidget {
   final Forecast forecast;
   final ForecastSnapshot snapshot;
   final bool isActive;
-  final bool satelliteAvailable;
   final bool modelForecastLocked;
 
   @override
@@ -47,7 +90,6 @@ final class RadarPane extends StatelessWidget {
     forecast: forecast,
     snapshot: snapshot,
     isActive: isActive,
-    satelliteAvailable: satelliteAvailable,
     modelForecastLocked: modelForecastLocked,
   );
 }
@@ -60,15 +102,12 @@ extension on _RadarBaseMap {
     _RadarBaseMap.satellite => Icons.satellite_alt_outlined,
   };
 
-  String get satelliteTileUrl => switch (this) {
-    _RadarBaseMap.satellite =>
-      'https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=${ApiConfig.arcGisApiKey}',
-    _RadarBaseMap.standard => throw StateError(
-      'The standard basemap is vector-based and has no raster tile URL.',
-    ),
+  MapType get googleMapType => switch (this) {
+    _RadarBaseMap.standard => MapType.normal,
+    // Hybrid keeps place and road labels over the satellite image and is much
+    // easier to orient than raw imagery.
+    _RadarBaseMap.satellite => MapType.hybrid,
   };
-
-  bool get isSatellite => this == _RadarBaseMap.satellite;
 }
 
 final class _RadarMap extends StatefulWidget {
@@ -76,57 +115,81 @@ final class _RadarMap extends StatefulWidget {
     required this.forecast,
     required this.snapshot,
     required this.isActive,
-    required this.satelliteAvailable,
     required this.modelForecastLocked,
   });
 
   final Forecast forecast;
   final ForecastSnapshot snapshot;
   final bool isActive;
-  final bool satelliteAvailable;
   final bool modelForecastLocked;
 
   @override
   State<_RadarMap> createState() => _RadarMapState();
 }
 
-final class _RadarMapState extends State<_RadarMap> {
+final class _RadarMapState extends State<_RadarMap>
+    with TickerProviderStateMixin {
   // Start close enough to answer "is it raining here?" while staying at the
   // provider's native radar resolution.
   static const _regionalZoom = 7.0;
-  static const _cityZoom = 9.0;
+  static const _cityZoom = 11.0;
   static const _minRadarZoom = 5.0;
-  static const _maxNativeRadarZoom = 10;
-  // LibreWXR is generated through z10. One extra display zoom keeps the layer
-  // visible at the end of a pinch without requesting unsupported z11 tiles.
-  static const _maxRadarZoom = 11.0;
+  // LibreWXR is generated through z10. The tile provider crops and scales the
+  // correct z10 ancestor through z14, so city zoom stays geographically exact
+  // instead of disappearing or requesting unsupported server tiles.
+  static const _maxRadarZoom = 14.0;
   static const _timelineHeight = 150.0;
+  static const _tileOverlayIds = <TileOverlayId>[
+    TileOverlayId('chetiwa-radar-a'),
+    TileOverlayId('chetiwa-radar-b'),
+  ];
 
-  final MapController _mapController = MapController();
+  GoogleMapController? _mapController;
   final RadarTileCache _tileCache = RadarTileCache.shared;
   final ValueNotifier<int> _zoomLevel = ValueNotifier<int>(
     _regionalZoom.round(),
   );
+  final ValueNotifier<double?> _timelineScrubFraction = ValueNotifier<double?>(
+    null,
+  );
   late final RadarBloc _radarBloc;
-  _RadarBaseMap _baseMap = _RadarBaseMap.standard;
-  // Preserve geographic context and avoid making weak echoes look more severe
-  // than they are. Users can still raise this from the layer sheet.
-  double _radarOpacity = 0.78;
+  _RadarBaseMap _baseMap = _RadarBaseMap.satellite;
+  // LibreWXR's palette already encodes the correct per-intensity alpha. Keep
+  // the layer itself fully opaque so cells do not appear to fade simply
+  // because the app applies a second transparency multiplier.
+  double _radarOpacity = 1;
   bool _radarVisible = true;
   bool _mapReady = false;
   LatLng? _lastCenter;
+  late final AnimationController _tileTransitionController;
+  late final AnimationController _playheadController;
+  final List<String?> _tileTemplates = List<String?>.filled(2, null);
+  final List<RadarGoogleTileProvider?> _tileProviders =
+      List<RadarGoogleTileProvider?>.filled(2, null);
+  final List<bool> _tileSlotUsesModelSnapshot = List<bool>.filled(2, false);
+  var _frontTileSlot = 0;
+  int? _incomingTileSlot;
+  var _tileTransitionGeneration = 0;
+  var _cameraInteractionGeneration = 0;
   Timer? _prefetchDebounce;
+  Timer? _cameraPlaybackResumeTimer;
+  Timer? _visibleTileWatchdog;
   Timer? _dataRefreshTimer;
   Timer? _preparationRevealTimer;
   var _refreshFailureStreak = 0;
   var _viewportRequestGeneration = 0;
-  var _radarViewportRevision = 0;
-  var _reloadCurrentFrameAfterPan = false;
   var _radarTilesLoading = false;
-  var _radarTilesUnavailable = false;
+  var _visibleTileRetryCount = 0;
   var _userPausedPlayback = false;
   var _autoplayRequested = false;
+  var _playbackBufferReady = false;
+  String? _playbackBufferSignature;
   var _showTilePreparation = false;
+  var _cameraIsMoving = false;
+  var _resumePlaybackAfterCameraMove = false;
+  var _timelineScrubbing = false;
+  var _resumePlaybackAfterTimelineScrub = false;
+  var _visibleTileSuccessBaseline = 0;
   String? _lastReportedMetadataIssue;
   var _tileIssueReported = false;
 
@@ -134,11 +197,23 @@ final class _RadarMapState extends State<_RadarMap> {
   void initState() {
     super.initState();
     _radarBloc = context.read<RadarBloc>();
+    _tileTransitionController =
+        AnimationController(
+            vsync: this,
+            duration: RadarFramePolicy.tileCrossFadeDuration,
+          )
+          ..addListener(_rebuildTileCrossFade)
+          ..addStatusListener(_handleTileCrossFadeStatus);
+    _playheadController = AnimationController(
+      vsync: this,
+      duration: RadarFramePolicy.playbackFrameDuration,
+    );
     _tileCache.beginSession();
     _tileCache.readyTileCount.addListener(_handleReadyRadarTile);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _scheduleDataRefresh(_radarBloc.state);
+        _syncPlayhead(_radarBloc.state);
         _maybeStartAutoplay();
       }
     });
@@ -147,42 +222,55 @@ final class _RadarMapState extends State<_RadarMap> {
   @override
   void didUpdateWidget(covariant _RadarMap oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.satelliteAvailable &&
-        !widget.satelliteAvailable &&
-        _baseMap.isSatellite) {
-      _baseMap = _RadarBaseMap.standard;
-    }
     if (!oldWidget.isActive && widget.isActive) {
+      _radarBloc.add(const RadarPlaybackResumed());
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _maybeStartAutoplay();
       });
+    } else if (oldWidget.isActive && !widget.isActive) {
+      _playheadController
+        ..stop()
+        ..value = 0;
+      _radarBloc.add(const RadarPlaybackSuspended());
     }
   }
 
   @override
   void dispose() {
     _prefetchDebounce?.cancel();
+    _cameraPlaybackResumeTimer?.cancel();
+    _visibleTileWatchdog?.cancel();
     _tileCache.cancelPrefetch();
     _tileCache.readyTileCount.removeListener(_handleReadyRadarTile);
     _dataRefreshTimer?.cancel();
     _preparationRevealTimer?.cancel();
     _radarBloc.add(const RadarPlaybackPaused());
-    _mapController.dispose();
+    RadarMapSmokeTestBridge.detach(_mapController);
+    _mapController?.dispose();
+    _tileTransitionController.dispose();
+    _playheadController.dispose();
+    _timelineScrubFraction.dispose();
     _zoomLevel.dispose();
     super.dispose();
   }
 
   void _handleReadyRadarTile() {
     if (!mounted || _tileCache.readyTileCount.value == 0) return;
+    _visibleTileWatchdog?.cancel();
     _preparationRevealTimer?.cancel();
-    if (_radarTilesLoading || _radarTilesUnavailable || _showTilePreparation) {
+    if (_radarTilesLoading || _showTilePreparation) {
       setState(() {
         _radarTilesLoading = false;
-        _radarTilesUnavailable = false;
         _showTilePreparation = false;
       });
     }
+    _visibleTileRetryCount = 0;
     _tileIssueReported = false;
+    final readyTiles = _tileCache.readyTileCount.value;
+    if (readyTiles == 1 || readyTiles == 4 || readyTiles == 8) {
+      final state = _radarBloc.state;
+      if (state is RadarReady) _schedulePrefetch(state);
+    }
     _maybeStartAutoplay();
   }
 
@@ -224,6 +312,175 @@ final class _RadarMapState extends State<_RadarMap> {
     );
   }
 
+  void _rebuildTileCrossFade() {
+    if (mounted && _incomingTileSlot != null) setState(() {});
+  }
+
+  void _handleTileCrossFadeStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed || !mounted) return;
+    final incoming = _incomingTileSlot;
+    if (incoming == null) return;
+    setState(() {
+      _frontTileSlot = incoming;
+      _incomingTileSlot = null;
+    });
+  }
+
+  double get _tileCrossFadeProgress =>
+      Curves.easeInOutCubic.transform(_tileTransitionController.value);
+
+  void _setTileSlot(int slot, String template, {required bool modelSnapshot}) {
+    _tileTemplates[slot] = template;
+    _tileProviders[slot] = _tileCache.providerFor(template);
+    _tileSlotUsesModelSnapshot[slot] = modelSnapshot;
+  }
+
+  void _initializeFirstTileFrame(
+    String template, {
+    required bool modelSnapshot,
+  }) {
+    if (_tileTemplates[_frontTileSlot] != null) return;
+    _setTileSlot(_frontTileSlot, template, modelSnapshot: modelSnapshot);
+  }
+
+  void _queueTileFrameTransition(
+    String template, {
+    required bool modelSnapshot,
+  }) {
+    if (!mounted || !widget.isActive || _cameraIsMoving) return;
+    if (_tileTemplates[_frontTileSlot] == template &&
+        _incomingTileSlot == null) {
+      return;
+    }
+    final incoming = _incomingTileSlot;
+    if (incoming != null && _tileTemplates[incoming] == template) return;
+    final generation = ++_tileTransitionGeneration;
+    unawaited(
+      _transitionToTileFrame(
+        template,
+        generation,
+        modelSnapshot: modelSnapshot,
+      ),
+    );
+  }
+
+  Future<void> _transitionToTileFrame(
+    String template,
+    int generation, {
+    required bool modelSnapshot,
+  }) async {
+    // A fast timeline scrub can select another frame before the fade elapses.
+    // Promote the already prepared image and reuse the other fixed slot so no
+    // third native overlay is ever allocated.
+    _finishTileTransition(invalidatePending: false);
+    if (!mounted || generation != _tileTransitionGeneration) return;
+    if (_tileTemplates[_frontTileSlot] == template) return;
+
+    final targetSlot = 1 - _frontTileSlot;
+    _setTileSlot(targetSlot, template, modelSnapshot: modelSnapshot);
+    await _clearRadarTileSlot(targetSlot);
+    await _tileCache.prepareVisibleFrame(template, completeOnFirstReady: true);
+    if (!mounted ||
+        generation != _tileTransitionGeneration ||
+        _cameraIsMoving) {
+      return;
+    }
+
+    if (!RadarFramePolicy.opacityCrossFadeEnabled) {
+      // Every target frame was preloaded. Swap it atomically: opacity blending
+      // two rain fields makes real cells look like they fade out and a second
+      // field fade in. The server performs the meteorological optical-flow
+      // interpolation; the app must not add a visual dissolve on top.
+      _tileTransitionController.stop();
+      setState(() {
+        _frontTileSlot = targetSlot;
+        _incomingTileSlot = null;
+      });
+      return;
+    }
+
+    _tileTransitionController.value = 0;
+    setState(() => _incomingTileSlot = targetSlot);
+    // Give the native SDK one frame to request the memory-cached tile bytes.
+    // The old image remains fully visible during this preparation frame.
+    await Future<void>.delayed(const Duration(milliseconds: 34));
+    if (!mounted ||
+        generation != _tileTransitionGeneration ||
+        _incomingTileSlot != targetSlot ||
+        _cameraIsMoving) {
+      return;
+    }
+    unawaited(_tileTransitionController.forward(from: 0));
+  }
+
+  void _finishTileTransition({required bool invalidatePending}) {
+    if (invalidatePending) _tileTransitionGeneration++;
+    _tileTransitionController.stop();
+    final incoming = _incomingTileSlot;
+    if (incoming == null || !mounted) return;
+    setState(() {
+      _frontTileSlot = incoming;
+      _incomingTileSlot = null;
+    });
+  }
+
+  Future<void> _clearRadarTileSlot(int slot) async {
+    final controller = _mapController;
+    if (controller == null) return;
+    try {
+      await controller.clearTileCache(_tileOverlayIds[slot]);
+    } on Object {
+      // The slot may not exist natively yet. Its first insertion is already a
+      // clean cache generation, so this is safe to ignore.
+    }
+  }
+
+  Future<void> _clearRadarTileCaches() async {
+    await Future.wait([_clearRadarTileSlot(0), _clearRadarTileSlot(1)]);
+  }
+
+  Set<TileOverlay> _buildRadarTileOverlays() {
+    if (!_radarVisible) {
+      RadarMapSmokeTestBridge.recordTileOverlayCount(0);
+      return const <TileOverlay>{};
+    }
+    final frontProvider = _tileProviders[_frontTileSlot];
+    if (frontProvider == null) {
+      RadarMapSmokeTestBridge.recordTileOverlayCount(0);
+      return const <TileOverlay>{};
+    }
+    final incoming = _incomingTileSlot;
+    final progress = incoming == null ? 0.0 : _tileCrossFadeProgress;
+
+    TileOverlay overlay(int slot, double contribution, int zIndex) {
+      final effectiveOpacity = (_radarOpacity * contribution).clamp(0.0, 1.0);
+      return TileOverlay(
+        tileOverlayId: _tileOverlayIds[slot],
+        tileProvider: _tileProviders[slot],
+        transparency: 1 - effectiveOpacity,
+        // Native fading removes the remaining pop when a pan or zoom exposes
+        // a tile that was not part of the previous viewport.
+        // Chetiwa preloads every visible frame and controls its own short
+        // nowcast transition. Native fading on top caused a second opacity
+        // animation and made rain cells appear to dissolve.
+        fadeIn: false,
+        zIndex: zIndex,
+      );
+    }
+
+    if (incoming == null || _tileProviders[incoming] == null) {
+      final overlays = <TileOverlay>{overlay(_frontTileSlot, 1, 1)};
+      RadarMapSmokeTestBridge.recordTileOverlayCount(overlays.length);
+      return overlays;
+    }
+    final overlays = <TileOverlay>{
+      overlay(_frontTileSlot, 1 - progress, 1),
+      overlay(incoming, progress, 2),
+    };
+    RadarMapSmokeTestBridge.recordTileOverlayCount(overlays.length);
+    return overlays;
+  }
+
   void _revealPreparationIfStillNeeded() {
     _preparationRevealTimer?.cancel();
     if (_tileCache.readyTileCount.value > 0) return;
@@ -239,6 +496,8 @@ final class _RadarMapState extends State<_RadarMap> {
     if (!mounted ||
         !widget.isActive ||
         _userPausedPlayback ||
+        _timelineScrubbing ||
+        _cameraIsMoving ||
         _autoplayRequested) {
       return;
     }
@@ -247,9 +506,61 @@ final class _RadarMapState extends State<_RadarMap> {
       return;
     }
     final needsNetworkTile = state.selectedFrame.tileUrlTemplate != null;
-    if (needsNetworkTile && _tileCache.readyTileCount.value == 0) return;
+    if (needsNetworkTile &&
+        (_tileCache.readyTileCount.value == 0 || !_playbackBufferReady)) {
+      return;
+    }
     _autoplayRequested = true;
     _radarBloc.add(const RadarPlaybackStarted());
+  }
+
+  void _syncPlayhead(RadarState state) {
+    if (state is! RadarReady ||
+        !widget.isActive ||
+        _timelineScrubbing ||
+        !state.isPlaying ||
+        state.frames.length < 2 ||
+        state.selectedIndex >= state.frames.length - 1) {
+      _playheadController
+        ..stop()
+        ..value = 0;
+      return;
+    }
+    // Every real frame change restarts a linear visual clock. The BLoC uses
+    // the exact same duration, so the cursor reaches the next timestamp at the
+    // instant the corresponding source frame becomes selected.
+    unawaited(_playheadController.forward(from: 0));
+  }
+
+  void _handleTimelineScrubStarted() {
+    if (_timelineScrubbing) return;
+    _timelineScrubbing = true;
+    final state = _radarBloc.state;
+    _resumePlaybackAfterTimelineScrub = state is RadarReady && state.isPlaying;
+    _playheadController
+      ..stop()
+      ..value = 0;
+    if (_resumePlaybackAfterTimelineScrub) {
+      _radarBloc.add(const RadarPlaybackSuspended());
+    }
+  }
+
+  void _handleTimelineScrubEnded() {
+    if (!_timelineScrubbing) return;
+    _timelineScrubFraction.value = null;
+    _timelineScrubbing = false;
+    final shouldResume = _resumePlaybackAfterTimelineScrub;
+    _resumePlaybackAfterTimelineScrub = false;
+    if (!shouldResume) return;
+    scheduleMicrotask(() {
+      if (!mounted ||
+          _timelineScrubbing ||
+          _userPausedPlayback ||
+          !widget.isActive) {
+        return;
+      }
+      _radarBloc.add(const RadarPlaybackResumed());
+    });
   }
 
   void _handleUserPlaybackToggle() {
@@ -295,16 +606,14 @@ final class _RadarMapState extends State<_RadarMap> {
     listener: (_, state) {
       _reportRadarState(state);
       _scheduleDataRefresh(state);
+      _syncPlayhead(state);
       // Only provider/frame changes need speculative next-frame work. Keeping
       // this in the Bloc listener avoids a local loading setState cancelling
       // the current-frame request that triggered it.
-      if (_mapReady &&
-          state is RadarReady &&
-          !_reloadCurrentFrameAfterPan &&
-          !_radarTilesLoading) {
+      if (_mapReady && state is RadarReady && !_radarTilesLoading) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
-          _schedulePrefetch(state, _mapController.camera);
+          _schedulePrefetch(state);
           _maybeStartAutoplay();
         });
       } else if (state is RadarReady) {
@@ -339,119 +648,112 @@ final class _RadarMapState extends State<_RadarMap> {
         );
         if (_mapReady && _lastCenter != null && _lastCenter != center) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _mapController.move(center, _regionalZoom);
+            if (mounted) {
+              unawaited(
+                _mapController?.animateCamera(
+                  CameraUpdate.newLatLngZoom(center, _regionalZoom),
+                ),
+              );
+            }
           });
         }
         _lastCenter = center;
+        final tileUrl = frame.tileUrlTemplate;
+        if (tileUrl != null) {
+          _initializeFirstTileFrame(
+            tileUrl,
+            modelSnapshot: frame.isModelForecast,
+          );
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _queueTileFrameTransition(
+                tileUrl,
+                modelSnapshot: frame.isModelForecast,
+              );
+            }
+          });
+        }
         return ClipRRect(
           borderRadius: BorderRadius.circular(ChetiwaRadius.large),
           child: Stack(
             fit: StackFit.expand,
             children: [
-              if (frame.tileUrlTemplate case final tileUrl?) ...[
-                FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: center,
-                    initialZoom: _regionalZoom,
-                    minZoom: _minRadarZoom,
-                    maxZoom: _maxRadarZoom,
-                    onMapReady: () {
+              if (tileUrl != null) ...[
+                Positioned.fill(
+                  bottom: _timelineHeight,
+                  child: GoogleMap(
+                    key: const Key('chetiwa-google-radar-map'),
+                    initialCameraPosition: CameraPosition(
+                      target: center,
+                      zoom: _regionalZoom,
+                    ),
+                    mapType: _baseMap.googleMapType,
+                    minMaxZoomPreference: const MinMaxZoomPreference(
+                      _minRadarZoom,
+                      _maxRadarZoom,
+                    ),
+                    compassEnabled: false,
+                    mapToolbarEnabled: false,
+                    myLocationButtonEnabled: false,
+                    myLocationEnabled: false,
+                    rotateGesturesEnabled: false,
+                    tiltGesturesEnabled: false,
+                    zoomControlsEnabled: false,
+                    indoorViewEnabled: false,
+                    trafficEnabled: false,
+                    buildingsEnabled: true,
+                    onMapCreated: (controller) {
+                      _mapController = controller;
                       _mapReady = true;
-                      _revealPreparationIfStillNeeded();
-                      // The current frame is the only first-paint priority.
-                      // Retry it immediately while the hidden IndexedStack is
-                      // already warming Radar behind the Graph screen.
-                      _schedulePrefetch(
-                        state,
-                        _mapController.camera,
-                        refreshCurrentFrame: true,
-                        immediate: true,
+                      RadarMapSmokeTestBridge.attach(
+                        controller,
+                        tileOverlayCount: () =>
+                            _incomingTileSlot == null ? 1 : 2,
                       );
+                      _visibleTileSuccessBaseline =
+                          _tileCache.successfulTileResponseCount.value;
+                      _revealPreparationIfStillNeeded();
+                      _armVisibleTileWatchdog(state);
+                      final selectedTemplate =
+                          state.selectedFrame.tileUrlTemplate;
+                      if (selectedTemplate != null) {
+                        _queueTileFrameTransition(
+                          selectedTemplate,
+                          modelSnapshot: state.selectedFrame.isModelForecast,
+                        );
+                      }
                     },
-                    onPositionChanged: (camera, hasGesture) {
-                      final roundedZoom = camera.zoom.round();
+                    onCameraMove: (position) {
+                      final roundedZoom = position.zoom.round();
                       if (_zoomLevel.value != roundedZoom) {
                         _zoomLevel.value = roundedZoom;
                       }
-                      _schedulePrefetch(
-                        state,
-                        camera,
-                        refreshCurrentFrame: hasGesture,
-                      );
                     },
-                    backgroundColor: Colors.transparent,
-                    interactionOptions: const InteractionOptions(
-                      // Keep the useful navigation gestures explicit and avoid
-                      // accidental map rotation on a compact radar surface.
-                      flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-                    ),
+                    onCameraMoveStarted: _handleCameraMoveStarted,
+                    onCameraIdle: _handleCameraIdle,
+                    markers: {
+                      Marker(
+                        markerId: const MarkerId('selected-location'),
+                        position: center,
+                        infoWindow: InfoWindow(
+                          title: widget.forecast.locationName.split(',').first,
+                        ),
+                        icon: BitmapDescriptor.defaultMarkerWithHue(
+                          BitmapDescriptor.hueCyan,
+                        ),
+                        onTap: () => unawaited(
+                          _mapController?.animateCamera(
+                            CameraUpdate.newLatLngZoom(center, _cityZoom),
+                          ),
+                        ),
+                      ),
+                    },
+                    tileOverlays: _buildRadarTileOverlays(),
                   ),
-                  children: [
-                    if (_baseMap == _RadarBaseMap.standard)
-                      const OpenFreeMapLayer()
-                    else
-                      TileLayer(
-                        key: ValueKey(_baseMap),
-                        urlTemplate: _baseMap.satelliteTileUrl,
-                        userAgentPackageName: 'com.chetiwa.chetiwa',
-                        maxNativeZoom: 20,
-                        maxZoom: 20,
-                      ),
-                    if (_radarVisible)
-                      Opacity(
-                        key: const Key('chetiwa-radar-precipitation-tile'),
-                        opacity: _radarOpacity,
-                        // One opacity layer for the complete radar is much
-                        // cheaper than wrapping every individual map tile.
-                        child: TileLayer(
-                          key: const ValueKey('radar-tiles'),
-                          // Keep one TileLayer alive across frames. flutter_map
-                          // detects the URL change and retains previous tiles
-                          // until replacements are decoded.
-                          urlTemplate: tileUrl,
-                          additionalOptions: {
-                            'viewportRevision': '$_radarViewportRevision',
-                          },
-                          userAgentPackageName: 'com.chetiwa.chetiwa',
-                          maxNativeZoom: _maxNativeRadarZoom,
-                          maxZoom: 22,
-                          // One retained ring is enough for short pans; centre
-                          // prefetch below handles long moves.
-                          panBuffer: 0,
-                          keepBuffer: 1,
-                          tileProvider: _tileCache.tileProvider,
-                          tileDisplay: const TileDisplay.fadeIn(
-                            duration: Duration(milliseconds: 120),
-                            reloadStartOpacity: 1,
-                          ),
-                          evictErrorTileStrategy:
-                              EvictErrorTileStrategy.notVisible,
-                        ),
-                      ),
-                    if (_baseMap.isSatellite && widget.satelliteAvailable)
-                      TileLayer(
-                        urlTemplate:
-                            'https://static-map-tiles-api.arcgis.com/arcgis/rest/services/static-basemap-tiles-service/v1/arcgis/imagery/labels/static/tile/{z}/{y}/{x}?token=${ApiConfig.arcGisApiKey}',
-                        userAgentPackageName: 'com.chetiwa.chetiwa',
-                        maxNativeZoom: 20,
-                        maxZoom: 20,
-                      ),
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: center,
-                          width: 52,
-                          height: 52,
-                          child: _UserLocationMarker(
-                            locationName: widget.forecast.locationName,
-                            onDoubleTap: () =>
-                                _mapController.move(center, _cityZoom),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                ),
+                IgnorePointer(
+                  key: const Key('chetiwa-radar-precipitation-tile'),
+                  child: const SizedBox.expand(),
                 ),
               ] else ...[
                 const ColoredBox(color: Color(0xFF162B32)),
@@ -489,10 +791,7 @@ final class _RadarMapState extends State<_RadarMap> {
                     child: IgnorePointer(
                       child: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 220),
-                        child:
-                            _showTilePreparation &&
-                                readyTiles == 0 &&
-                                !_radarTilesUnavailable
+                        child: _showTilePreparation && readyTiles == 0
                             ? const Center(
                                 key: ValueKey('radar-preparation-visible'),
                                 child: _RadarPreparationCard(),
@@ -533,21 +832,6 @@ final class _RadarMapState extends State<_RadarMap> {
                   ],
                 ),
               ),
-              if (_radarTilesUnavailable)
-                Positioned(
-                  left: 60,
-                  right: 60,
-                  top: 112,
-                  child: _RadarTileLoadStatus(
-                    unavailable: _radarTilesUnavailable,
-                    onRetry: () => _schedulePrefetch(
-                      state,
-                      _mapController.camera,
-                      refreshCurrentFrame: true,
-                      immediate: true,
-                    ),
-                  ),
-                ),
               if (frame.tileUrlTemplate == null)
                 Center(
                   child: _UserLocationMarker(
@@ -558,24 +842,22 @@ final class _RadarMapState extends State<_RadarMap> {
               if (frame.tileUrlTemplate != null)
                 Positioned(
                   right: 10,
-                  bottom: _timelineHeight + 12,
+                  // Keep the mandatory Google logo/attribution unobstructed at
+                  // the native map's bottom edge.
+                  bottom: _timelineHeight + 36,
                   child: _RecenterButton(
                     locationName: widget.forecast.locationName,
-                    onPressed: () => _mapController.move(center, _regionalZoom),
+                    onPressed: () => unawaited(
+                      _mapController?.animateCamera(
+                        CameraUpdate.newLatLngZoom(center, _regionalZoom),
+                      ),
+                    ),
                   ),
                 ),
               Positioned(
                 left: 8,
-                bottom: _timelineHeight + 12,
-                child: _RadarLegend(
-                  radarVisible: _radarVisible,
-                  providerName: frame.providerName,
-                ),
-              ),
-              Positioned(
-                left: 8,
-                bottom: _timelineHeight,
-                child: _MapAttribution(baseMap: _baseMap),
+                bottom: _timelineHeight + 36,
+                child: _RadarLegend(radarVisible: _radarVisible, frame: frame),
               ),
               Positioned(
                 left: 0,
@@ -585,9 +867,13 @@ final class _RadarMapState extends State<_RadarMap> {
                   state: state,
                   forecast: widget.forecast,
                   snapshot: widget.snapshot,
+                  playbackProgress: _playheadController,
+                  scrubFraction: _timelineScrubFraction,
                   modelForecastLocked: widget.modelForecastLocked,
                   onPlaybackToggled: _handleUserPlaybackToggle,
                   onPlaybackRestarted: _handleUserPlaybackRestart,
+                  onScrubStarted: _handleTimelineScrubStarted,
+                  onScrubEnded: _handleTimelineScrubEnded,
                 ),
               ),
             ],
@@ -597,88 +883,198 @@ final class _RadarMapState extends State<_RadarMap> {
     ),
   );
 
-  void _schedulePrefetch(
-    RadarReady state,
-    MapCamera camera, {
-    bool refreshCurrentFrame = false,
-    bool immediate = false,
-  }) {
+  void _schedulePrefetch(RadarReady state) {
     if (!_mapReady || state.frames.isEmpty) return;
-    if (refreshCurrentFrame) _reloadCurrentFrameAfterPan = true;
-    final requestGeneration = ++_viewportRequestGeneration;
+    ++_viewportRequestGeneration;
     _prefetchDebounce?.cancel();
-    // Invalidate work for the previous viewport immediately. At most the
-    // small in-flight batch inside RadarTileCache is allowed to finish.
     _tileCache.cancelPrefetch();
-    Future<void> run() async {
+    _prefetchDebounce = Timer(const Duration(milliseconds: 100), () {
       if (!mounted) return;
       final latestState = _radarBloc.state;
       if (latestState is! RadarReady) return;
-      final reloadCurrent = _reloadCurrentFrameAfterPan;
-      _reloadCurrentFrameAfterPan = false;
-      if (reloadCurrent) {
-        if (mounted) {
-          setState(() {
-            _radarTilesLoading = true;
-            _radarTilesUnavailable = false;
-            if (_tileCache.readyTileCount.value == 0) {
-              _showTilePreparation = true;
-            }
-          });
-        }
-        final currentTemplate = latestState.selectedFrame.tileUrlTemplate;
-        if (currentTemplate != null) {
-          final readyTiles = await _tileCache.prefetchNextFrames(
-            camera: camera,
-            frameTemplates: [currentTemplate],
-            // The visible TileLayer is already loading the viewport. One
-            // centre-tile recovery request is sufficient and avoids doubling
-            // cold-origin work during launch.
-            maxTiles: 1,
-            completeOnFirstReady: true,
-          );
-          if (!mounted || requestGeneration != _viewportRequestGeneration) {
-            return;
-          }
-          if (readyTiles == 0) {
-            _reportTileIssue();
-            setState(() {
-              _radarTilesLoading = false;
-              _radarTilesUnavailable = true;
-              _showTilePreparation = false;
-            });
-            return;
-          }
-          // The layer may have completed its first lookup before the cache was
-          // filled. Trigger a non-destructive image reload as soon as the first
-          // central tile is valid; the rest continue warming in background.
-          setState(() {
-            _radarViewportRevision++;
-            _radarTilesLoading = false;
-            _radarTilesUnavailable = false;
-            _showTilePreparation = false;
-          });
-          return;
-        }
-        if (mounted) setState(() => _radarTilesLoading = false);
-      }
-      unawaited(
-        _tileCache.prefetchNextFrames(
-          camera: camera,
-          frameTemplates: _nextFrameTemplates(latestState),
-        ),
-      );
-    }
-
-    _prefetchDebounce = Timer(
-      immediate ? Duration.zero : const Duration(milliseconds: 300),
-      run,
-    );
+      unawaited(_warmPlaybackBuffer(latestState));
+    });
   }
 
-  Iterable<String> _nextFrameTemplates(RadarReady state) sync* {
+  Future<bool> _warmPlaybackBuffer(RadarReady state) async {
+    final templates = _currentAndNextFrameTemplates(
+      state,
+    ).toList(growable: false);
+    if (templates.isEmpty) return false;
+    final signature = templates.join('|');
+    final ready = await _tileCache.prefetchNextFrames(
+      frameTemplates: templates,
+      maxFrames: 3,
+      maxTiles: 18,
+    );
+    if (!mounted || _cameraIsMoving) return false;
+    if (ready > 0) {
+      _playbackBufferReady = true;
+      _playbackBufferSignature = signature;
+      _maybeStartAutoplay();
+      return true;
+    }
+    return _playbackBufferReady && _playbackBufferSignature == signature;
+  }
+
+  void _handleCameraMoveStarted() {
+    _cameraPlaybackResumeTimer?.cancel();
+    _visibleTileWatchdog?.cancel();
+    if (_cameraIsMoving) return;
+    _cameraInteractionGeneration++;
+    _visibleTileRetryCount = 0;
+    _prefetchDebounce?.cancel();
+    _tileCache.beginViewport();
+    _playbackBufferReady = false;
+    _playbackBufferSignature = null;
+    // Never pan a viewport while two timestamps are partially blended. The
+    // prepared incoming frame becomes authoritative before the gesture begins.
+    _finishTileTransition(invalidatePending: true);
+    _cameraIsMoving = true;
+    _visibleTileSuccessBaseline = _tileCache.successfulTileResponseCount.value;
+    final state = _radarBloc.state;
+    final wasPlaying = state is RadarReady && state.isPlaying;
+    _resumePlaybackAfterCameraMove =
+        _resumePlaybackAfterCameraMove || wasPlaying;
+    if (wasPlaying) {
+      _radarBloc.add(const RadarPlaybackSuspended());
+    }
+  }
+
+  void _handleCameraIdle() {
+    _cameraIsMoving = false;
+    final cameraGeneration = _cameraInteractionGeneration;
+    final state = _radarBloc.state;
+    if (state is RadarReady) {
+      _schedulePrefetch(state);
+      _armVisibleTileWatchdog(state);
+      final selectedTemplate = state.selectedFrame.tileUrlTemplate;
+      if (selectedTemplate != null) {
+        _queueTileFrameTransition(
+          selectedTemplate,
+          modelSnapshot: state.selectedFrame.isModelForecast,
+        );
+      }
+    }
+    if (!_resumePlaybackAfterCameraMove) {
+      _maybeStartAutoplay();
+      return;
+    }
+    unawaited(_resumePlaybackWhenViewportReady(state, cameraGeneration));
+  }
+
+  Future<void> _resumePlaybackWhenViewportReady(
+    RadarState state,
+    int cameraGeneration,
+  ) async {
+    if (state is RadarReady) {
+      final template = state.selectedFrame.tileUrlTemplate;
+      if (template != null) {
+        final ready = await _tileCache
+            .prepareVisibleFrame(template, maxTiles: 6)
+            .timeout(const Duration(milliseconds: 1500), onTimeout: () => 0);
+        if (!mounted || cameraGeneration != _cameraInteractionGeneration) {
+          return;
+        }
+        if (ready > 0) {
+          // Google Maps can retain NO_TILE from a request issued mid-gesture.
+          // The bytes are now in Chetiwa's memory cache, so this repaint is
+          // immediate instead of exposing an empty overlay for many seconds.
+          await _clearRadarTileCaches();
+          await _warmPlaybackBuffer(
+            state,
+          ).timeout(const Duration(seconds: 2), onTimeout: () => false);
+        } else {
+          unawaited(_retryVisibleRadar(state));
+        }
+      }
+    }
+    if (!mounted || cameraGeneration != _cameraInteractionGeneration) return;
+    _cameraPlaybackResumeTimer = Timer(const Duration(milliseconds: 80), () {
+      if (!mounted ||
+          cameraGeneration != _cameraInteractionGeneration ||
+          !widget.isActive ||
+          _userPausedPlayback ||
+          _timelineScrubbing ||
+          WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+        return;
+      }
+      _resumePlaybackAfterCameraMove = false;
+      _radarBloc.add(const RadarPlaybackResumed());
+    });
+  }
+
+  void _armVisibleTileWatchdog(RadarReady state) {
+    _visibleTileWatchdog?.cancel();
+    if (!_radarVisible || state.selectedFrame.tileUrlTemplate == null) return;
+    final baseline = _visibleTileSuccessBaseline;
+    _visibleTileWatchdog = Timer(const Duration(seconds: 3), () {
+      if (!mounted ||
+          _cameraIsMoving ||
+          _tileCache.successfulTileResponseCount.value > baseline) {
+        return;
+      }
+      _reportTileIssue();
+      final latest = _radarBloc.state;
+      if (latest is RadarReady) unawaited(_retryVisibleRadar(latest));
+    });
+  }
+
+  Future<void> _retryVisibleRadar(RadarReady state) async {
+    if (!_mapReady || state.selectedFrame.tileUrlTemplate == null) return;
+    final generation = ++_viewportRequestGeneration;
+    setState(() {
+      _radarTilesLoading = true;
+      if (_tileCache.readyTileCount.value == 0) _showTilePreparation = true;
+    });
+    await _clearRadarTileCaches();
+    final ready = await _tileCache.prefetchNextFrames(
+      frameTemplates: [state.selectedFrame.tileUrlTemplate!],
+      maxTiles: 8,
+      completeOnFirstReady: true,
+    );
+    if (!mounted || generation != _viewportRequestGeneration) return;
+    if (ready == 0) {
+      _reportTileIssue();
+      setState(() {
+        _radarTilesLoading = false;
+        _showTilePreparation = false;
+      });
+      // A quick pan invalidates old viewport requests by design. Zero ready
+      // tiles therefore does not prove that LibreWXR is unavailable, and must
+      // never produce an alarming user-facing error. Retry silently at most
+      // twice for this settled viewport; Analytics already records the event.
+      if (!_cameraIsMoving && _visibleTileRetryCount < 2) {
+        _visibleTileRetryCount++;
+        final retryGeneration = _cameraInteractionGeneration;
+        _visibleTileWatchdog = Timer(const Duration(seconds: 2), () {
+          if (!mounted ||
+              _cameraIsMoving ||
+              retryGeneration != _cameraInteractionGeneration) {
+            return;
+          }
+          final latest = _radarBloc.state;
+          if (latest is RadarReady) unawaited(_retryVisibleRadar(latest));
+        });
+      }
+      return;
+    }
+    // A native SDK may cache NO_TILE from the request that raced the network
+    // retry. Clear it once more now that Chetiwa's cache definitely has bytes.
+    await _clearRadarTileCaches();
+    if (!mounted || generation != _viewportRequestGeneration) return;
+    setState(() {
+      _radarTilesLoading = false;
+      _showTilePreparation = false;
+    });
+    _visibleTileRetryCount = 0;
+  }
+
+  Iterable<String> _currentAndNextFrameTemplates(RadarReady state) sync* {
+    final currentTemplate = state.selectedFrame.tileUrlTemplate;
+    if (currentTemplate != null) yield currentTemplate;
     final frameCount = state.frames.length;
-    final maxNextFrames = math.min(1, frameCount - 1);
+    final maxNextFrames = math.min(2, frameCount - 1);
     var index = state.selectedIndex;
     for (var offset = 0; offset < maxNextFrames; offset++) {
       index++;
@@ -689,9 +1085,9 @@ final class _RadarMapState extends State<_RadarMap> {
   }
 
   Future<void> _showLayers() async {
-    final availableMaps = <_RadarBaseMap>[
+    const availableMaps = <_RadarBaseMap>[
+      _RadarBaseMap.satellite,
       _RadarBaseMap.standard,
-      if (widget.satelliteAvailable) _RadarBaseMap.satellite,
     ];
     await showModalBottomSheet<void>(
       context: context,
@@ -932,102 +1328,6 @@ final class _RadarPreparationCard extends StatelessWidget {
   );
 }
 
-final class _RadarTileLoadStatus extends StatelessWidget {
-  const _RadarTileLoadStatus({
-    required this.unavailable,
-    required this.onRetry,
-  });
-
-  final bool unavailable;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    final label = unavailable
-        ? context.l10n.radarTilesUnavailable
-        : context.l10n.loadingRadarTiles;
-    return Semantics(
-      key: const Key('radar-tile-load-status'),
-      liveRegion: true,
-      label: label,
-      child: Material(
-        color: ChetiwaColors.backgroundPrimary.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(ChetiwaRadius.full),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (unavailable)
-                const Icon(
-                  Icons.cloud_off_outlined,
-                  size: 17,
-                  color: ChetiwaColors.textSecondary,
-                )
-              else
-                const SizedBox.square(
-                  dimension: 15,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11),
-                ),
-              ),
-              if (unavailable) ...[
-                const SizedBox(width: 4),
-                TextButton(
-                  key: const Key('radar-tile-retry'),
-                  onPressed: onRetry,
-                  child: Text(context.l10n.retry),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _MapAttribution extends StatelessWidget {
-  const _MapAttribution({required this.baseMap});
-
-  final _RadarBaseMap baseMap;
-
-  @override
-  Widget build(BuildContext context) => Material(
-    color: ChetiwaColors.backgroundPrimary.withValues(alpha: 0.78),
-    borderRadius: BorderRadius.circular(ChetiwaRadius.small),
-    child: InkWell(
-      onTap: () => launchUrl(
-        Uri.parse(
-          baseMap.isSatellite
-              ? 'https://www.esri.com/en-us/legal/terms/full-master-agreement'
-              : OpenFreeMapLayer.homepage,
-        ),
-      ),
-      borderRadius: BorderRadius.circular(ChetiwaRadius.small),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-        child: Text(
-          baseMap.isSatellite
-              ? '© Esri, Maxar, Earthstar · Radar LibreWXR'
-              : '${OpenFreeMapLayer.attribution} · Radar LibreWXR',
-          style: const TextStyle(
-            color: ChetiwaColors.textSecondary,
-            fontSize: 8,
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
 final class _LayersButton extends StatelessWidget {
   const _LayersButton({required this.selectedMap, required this.onPressed});
 
@@ -1083,25 +1383,33 @@ final class _CompactRadarStatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final location = forecast.locationName.split(',').first;
-    final modelRate = forecast.rainPointAt(selectedInstant)?.rateMmPerHour;
+    // Extended LibreWXR frames are advected radar echoes. Prefer their exact
+    // point sample so the status cannot claim it is dry while the tile shows
+    // the same echo crossing the marker. The weather model is only a fallback
+    // when point sampling is temporarily unavailable.
+    final modelRate =
+        frame.pointRainRateMmPerHour ??
+        forecast.rainPointAt(selectedInstant)?.rateMmPerHour;
+    final usesRadarProjection =
+        frame.isModelForecast && frame.pointRainRateMmPerHour != null;
     final modelAtPoint = modelRate == null
         ? (context.l10n.isFrench
               ? '$location · prévision au point indisponible'
               : '$location · point forecast unavailable')
         : modelRate < 0.05
         ? (context.l10n.isFrench
-              ? '$location · modèle sec au point'
-              : '$location · model dry at point')
+              ? '$location · ${usesRadarProjection ? 'projection radar' : 'modèle'} sèche au point'
+              : '$location · ${usesRadarProjection ? 'radar projection' : 'model'} dry at point')
         : (context.l10n.isFrench
-              ? '$location · modèle ${modelRate.toStringAsFixed(1)} mm/h au point'
-              : '$location · model ${modelRate.toStringAsFixed(1)} mm/h at point');
+              ? '$location · ${usesRadarProjection ? 'projection radar' : 'modèle'} ${modelRate.toStringAsFixed(1)} mm/h au point'
+              : '$location · ${usesRadarProjection ? 'radar projection' : 'model'} ${modelRate.toStringAsFixed(1)} mm/h at point');
     final observationDetail = context.l10n.isFrench
         ? '$location · image radar observée'
         : '$location · observed radar image';
     final frameState = frame.isModelForecast
         ? (context.l10n.isFrench
-              ? 'prévision modèle · Chetiwa+'
-              : 'model forecast · Chetiwa+')
+              ? 'prévision étendue · Chetiwa+'
+              : 'extended forecast · Chetiwa+')
         : frame.isNowcast
         ? (context.l10n.isFrench ? 'prévision radar' : 'radar forecast')
         : (context.l10n.isFrench
@@ -1127,7 +1435,11 @@ final class _CompactRadarStatus extends StatelessWidget {
       decoration: BoxDecoration(
         color: ChetiwaColors.backgroundPrimary.withValues(alpha: 0.84),
         borderRadius: BorderRadius.circular(ChetiwaRadius.medium),
-        border: Border.all(color: ChetiwaColors.borderDefault),
+        border: Border.all(
+          color: frame.isModelForecast
+              ? const Color(0xFF7A5AF8).withValues(alpha: 0.7)
+              : ChetiwaColors.borderDefault,
+        ),
       ),
       child: DefaultTextStyle.merge(
         style: const TextStyle(color: ChetiwaColors.textPrimary),
@@ -1135,12 +1447,14 @@ final class _CompactRadarStatus extends StatelessWidget {
           children: [
             Icon(
               frame.isModelForecast
-                  ? Icons.cloud_outlined
+                  ? Icons.query_stats_rounded
                   : frame.isNowcast
                   ? Icons.auto_graph_rounded
                   : Icons.radar_rounded,
               size: 15,
-              color: ChetiwaColors.accentPrimary,
+              color: frame.isModelForecast
+                  ? const Color(0xFF7A5AF8)
+                  : ChetiwaColors.accentPrimary,
             ),
             const SizedBox(width: 7),
             Expanded(
@@ -1236,10 +1550,10 @@ final class _MapStyleOption extends StatelessWidget {
 }
 
 final class _RadarLegend extends StatelessWidget {
-  const _RadarLegend({required this.radarVisible, required this.providerName});
+  const _RadarLegend({required this.radarVisible, required this.frame});
 
   final bool radarVisible;
-  final String providerName;
+  final RadarFrame frame;
 
   @override
   Widget build(BuildContext context) => AnimatedOpacity(
@@ -1251,7 +1565,11 @@ final class _RadarLegend extends StatelessWidget {
       decoration: BoxDecoration(
         color: ChetiwaColors.backgroundPrimary.withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(ChetiwaRadius.small),
-        border: Border.all(color: ChetiwaColors.borderDefault),
+        border: Border.all(
+          color: frame.isModelForecast
+              ? const Color(0xFF7A5AF8).withValues(alpha: 0.65)
+              : ChetiwaColors.borderDefault,
+        ),
       ),
       child: DefaultTextStyle.merge(
         style: const TextStyle(color: ChetiwaColors.textPrimary),
@@ -1265,10 +1583,12 @@ final class _RadarLegend extends StatelessWidget {
                   Expanded(
                     child: Text(
                       radarVisible
-                          ? '${context.l10n.isFrench ? 'ÉCHOS RADAR' : 'RADAR ECHOES'} · ${providerName.toUpperCase()}'
+                          ? frame.isModelForecast
+                                ? '${context.l10n.isFrench ? 'PRÉVISION PLUIE' : 'RAIN FORECAST'} · ${frame.providerName.toUpperCase()}'
+                                : '${context.l10n.isFrench ? 'ÉCHOS RADAR' : 'RADAR ECHOES'} · ${frame.providerName.toUpperCase()}'
                           : (context.l10n.isFrench
-                                ? 'RADAR MASQUÉ'
-                                : 'RADAR HIDDEN'),
+                                ? 'CALQUE MASQUÉ'
+                                : 'LAYER HIDDEN'),
                       style: const TextStyle(
                         fontSize: 8,
                         fontWeight: FontWeight.w800,
@@ -1276,9 +1596,13 @@ final class _RadarLegend extends StatelessWidget {
                     ),
                   ),
                   Tooltip(
-                    message: context.l10n.isFrench
-                        ? 'Gris = écho faible ou incertain, rose = pluie modérée, rouge = pluie forte. Ce calque ne montre pas les nuages.'
-                        : 'Grey = weak or uncertain echo, pink = moderate rain, red = heavy rain. This layer does not show clouds.',
+                    message: frame.isModelForecast
+                        ? (context.l10n.isFrench
+                              ? 'Prévision étendue par extrapolation du déplacement radar. La même cellule est advectée côté serveur ; après 60 min, sa position devient plus incertaine. Ce n’est ni une observation radar ni une carte de nuages.'
+                              : 'Extended forecast extrapolated from radar motion. The same cell is advected on the server; after 60 minutes, its position becomes less certain. This is neither a radar observation nor a cloud map.')
+                        : (context.l10n.isFrench
+                              ? 'Gris = écho faible ou incertain, rose = pluie modérée, rouge = pluie forte. Ce calque ne montre pas les nuages.'
+                              : 'Grey = weak or uncertain echo, pink = moderate rain, red = heavy rain. This layer does not show clouds.'),
                     child: const Icon(Icons.info_outline_rounded, size: 11),
                   ),
                 ],
@@ -1412,18 +1736,26 @@ final class RadarTimeline extends StatelessWidget {
     required this.state,
     required this.forecast,
     required this.snapshot,
+    required this.playbackProgress,
+    this.scrubFraction,
     this.modelForecastLocked = false,
     this.onPlaybackToggled,
     this.onPlaybackRestarted,
+    this.onScrubStarted,
+    this.onScrubEnded,
     super.key,
   });
 
   final RadarReady state;
   final Forecast forecast;
   final ForecastSnapshot snapshot;
+  final Animation<double> playbackProgress;
+  final ValueNotifier<double?>? scrubFraction;
   final bool modelForecastLocked;
   final VoidCallback? onPlaybackToggled;
   final VoidCallback? onPlaybackRestarted;
+  final VoidCallback? onScrubStarted;
+  final VoidCallback? onScrubEnded;
 
   @override
   Widget build(BuildContext context) {
@@ -1452,14 +1784,15 @@ final class RadarTimeline extends StatelessWidget {
     ];
     final selectedPointRate = state.selectedFrame.pointRainRateMmPerHour;
     final selectedModelRate = state.selectedFrame.isModelForecast
-        ? forecast.rainPointAt(state.selectedFrame.time)?.rateMmPerHour
+        ? state.selectedFrame.pointRainRateMmPerHour ??
+              forecast.rainPointAt(state.selectedFrame.time)?.rateMmPerHour
         : null;
     final status = state.selectedFrame.isModelForecast
         ? selectedModelRate == null
               ? (context.l10n.isFrench
-                    ? 'prévision modèle · Chetiwa+'
-                    : 'model forecast · Chetiwa+')
-              : '${selectedModelRate.toStringAsFixed(1)} mm/h · ${context.l10n.isFrench ? 'modèle Chetiwa+' : 'Chetiwa+ model'}'
+                    ? 'prévision étendue · Chetiwa+'
+                    : 'extended forecast · Chetiwa+')
+              : '${selectedModelRate.toStringAsFixed(1)} mm/h · ${context.l10n.isFrench ? 'prévision étendue Chetiwa+' : 'Chetiwa+ extended forecast'}'
         : state.selectedFrame.isNowcast && selectedPointRate != null
         ? RainRateScale.isRain(selectedPointRate)
               ? '${selectedPointRate.toStringAsFixed(1)} mm/h ${context.l10n.isFrench ? 'au point' : 'at point'}'
@@ -1612,55 +1945,72 @@ final class RadarTimeline extends StatelessWidget {
                 builder: (context, constraints) => GestureDetector(
                   key: const Key('radar-time-ruler'),
                   behavior: HitTestBehavior.opaque,
-                  onTapDown: (details) => _selectFrame(
-                    context,
-                    details.localPosition.dx,
-                    constraints.maxWidth,
-                    displayEnd,
-                  ),
-                  onHorizontalDragStart: (details) => _selectFrame(
-                    context,
-                    details.localPosition.dx,
-                    constraints.maxWidth,
-                    displayEnd,
-                  ),
+                  onTapDown: (details) {
+                    onScrubStarted?.call();
+                    _selectFrame(
+                      context,
+                      details.localPosition.dx,
+                      constraints.maxWidth,
+                      displayEnd,
+                    );
+                  },
+                  onTapUp: (_) => _endScrub(),
+                  onTapCancel: _endScrub,
+                  onHorizontalDragStart: (details) {
+                    onScrubStarted?.call();
+                    _selectFrame(
+                      context,
+                      details.localPosition.dx,
+                      constraints.maxWidth,
+                      displayEnd,
+                    );
+                  },
                   onHorizontalDragUpdate: (details) => _selectFrame(
                     context,
                     details.localPosition.dx,
                     constraints.maxWidth,
                     displayEnd,
                   ),
+                  onHorizontalDragEnd: (_) => _endScrub(),
+                  onHorizontalDragCancel: _endScrub,
                   child: Semantics(
                     label: modelForecastLocked
                         ? (context.l10n.isFrench
-                              ? 'Prévision modèle de 60 à 120 minutes réservée à Chetiwa+'
-                              : 'Model forecast from 60 to 120 minutes reserved for Chetiwa+')
+                              ? 'Prévision pluie étendue de 60 à 120 minutes réservée à Chetiwa+'
+                              : 'Extended rain forecast from 60 to 120 minutes reserved for Chetiwa+')
                         : null,
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        CustomPaint(
-                          key: ValueKey(
-                            '${state.frames.any((frame) => frame.isNowcast && frame.pointRainRateMmPerHour != null) ? 'radar-point-profile-visible' : 'radar-point-profile-unavailable'}-${modelForecastLocked ? 'premium-locked' : 'premium-open'}',
+                        AnimatedBuilder(
+                          animation: Listenable.merge(<Listenable>[
+                            playbackProgress,
+                            if (scrubFraction != null) scrubFraction!,
+                          ]),
+                          builder: (context, _) => CustomPaint(
+                            key: ValueKey(
+                              '${state.frames.any((frame) => frame.isNowcast && frame.pointRainRateMmPerHour != null) ? 'radar-point-profile-visible' : 'radar-point-profile-unavailable'}-${modelForecastLocked ? 'premium-locked' : 'premium-open'}',
+                            ),
+                            painter: _RadarTimeRulerPainter(
+                              frames: state.frames,
+                              rainPoints: rainPoints,
+                              cursorTime: _cursorTime(context, displayEnd),
+                              now: nowInstant,
+                              displayEnd: displayEnd,
+                              modelForecastLocked: modelForecastLocked,
+                              colors: timelineColors,
+                            ),
+                            child: const SizedBox.expand(),
                           ),
-                          painter: _RadarTimeRulerPainter(
-                            frames: state.frames,
-                            rainPoints: rainPoints,
-                            selectedIndex: state.selectedIndex,
-                            now: nowInstant,
-                            displayEnd: displayEnd,
-                            modelForecastLocked: modelForecastLocked,
-                            colors: timelineColors,
-                          ),
-                          child: const SizedBox.expand(),
                         ),
-                        if (modelForecastLocked)
-                          const Align(
+                        if (modelForecastLocked ||
+                            state.frames.any((frame) => frame.isModelForecast))
+                          Align(
                             alignment: Alignment.topRight,
-                            child: Padding(
+                            child: const Padding(
                               padding: EdgeInsets.only(top: 6, right: 7),
                               child: Text(
-                                'MODÈLE +60–120 MIN · CHETIWA+',
+                                'PRÉVISION ÉTENDUE · 10 MIN',
                                 style: TextStyle(
                                   color: Color(0xFF7A5AF8),
                                   fontSize: 7,
@@ -1688,6 +2038,8 @@ final class RadarTimeline extends StatelessWidget {
     DateTime displayEnd,
   ) {
     if (state.frames.length < 2 || width <= 0) return;
+    final fraction = (x / width).clamp(0.0, 1.0).toDouble();
+    scrubFraction?.value = fraction;
     final hasForecast = state.hasForecast;
     final startIndex = hasForecast ? state.currentObservationIndex : 0;
     final endIndex = hasForecast
@@ -1699,8 +2051,7 @@ final class RadarTimeline extends StatelessWidget {
     );
     final start = window.start.millisecondsSinceEpoch;
     final end = displayEnd.millisecondsSinceEpoch;
-    final selectedTime =
-        start + ((end - start) * (x / width).clamp(0, 1)).toDouble();
+    final selectedTime = start + ((end - start) * fraction).toDouble();
     if (modelForecastLocked &&
         selectedTime > window.end.millisecondsSinceEpoch) {
       context.push('/subscription');
@@ -1720,13 +2071,51 @@ final class RadarTimeline extends StatelessWidget {
     }
     context.read<RadarBloc>().add(RadarFrameSelected(index));
   }
+
+  void _endScrub() {
+    scrubFraction?.value = null;
+    onScrubEnded?.call();
+  }
+
+  DateTime _cursorTime(BuildContext context, DateTime displayEnd) {
+    final activeScrub = scrubFraction?.value;
+    if (activeScrub != null) {
+      final window = RadarFramePolicy.timelineWindow(
+        state.frames,
+        snapshot.nowUtc,
+      );
+      final elapsedMicroseconds = displayEnd
+          .difference(window.start)
+          .inMicroseconds;
+      if (elapsedMicroseconds <= 0) return window.start;
+      return window.start.add(
+        Duration(microseconds: (elapsedMicroseconds * activeScrub).round()),
+      );
+    }
+    final selected = state.selectedFrame.time;
+    if (!state.isPlaying ||
+        MediaQuery.maybeOf(context)?.disableAnimations == true ||
+        state.selectedIndex >= state.frames.length - 1) {
+      return selected;
+    }
+    final nextFrame = state.frames[state.selectedIndex + 1];
+    // LibreWXR supplies optical-flow-interpolated ten-minute frames across the
+    // complete product. The playhead therefore remains continuous through the
+    // +60-minute boundary without inventing an unsupported image.
+    final next = nextFrame.time;
+    return RadarFramePolicy.interpolateFrameTime(
+      selected,
+      next,
+      playbackProgress.value,
+    );
+  }
 }
 
 final class _RadarTimeRulerPainter extends CustomPainter {
   const _RadarTimeRulerPainter({
     required this.frames,
     required this.rainPoints,
-    required this.selectedIndex,
+    required this.cursorTime,
     required this.now,
     required this.displayEnd,
     required this.modelForecastLocked,
@@ -1735,7 +2124,7 @@ final class _RadarTimeRulerPainter extends CustomPainter {
 
   final List<RadarFrame> frames;
   final List<RainPoint> rainPoints;
-  final int selectedIndex;
+  final DateTime cursorTime;
   final DateTime now;
   final DateTime displayEnd;
   final bool modelForecastLocked;
@@ -1869,10 +2258,9 @@ final class _RadarTimeRulerPainter extends CustomPainter {
       ),
     );
 
-    final selectedTime =
-        hasForecast && frames[selectedIndex].time.isBefore(start)
+    final selectedTime = hasForecast && cursorTime.isBefore(start)
         ? start
-        : frames[selectedIndex].time;
+        : cursorTime;
     final cursorX = xForTime(selectedTime).clamp(0, size.width).toDouble();
     final cursor = Paint()
       ..color = ChetiwaColors.error
@@ -2087,7 +2475,7 @@ final class _RadarTimeRulerPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _RadarTimeRulerPainter oldDelegate) =>
       frames != oldDelegate.frames ||
-      selectedIndex != oldDelegate.selectedIndex ||
+      cursorTime != oldDelegate.cursorTime ||
       rainPoints != oldDelegate.rainPoints ||
       now != oldDelegate.now ||
       displayEnd != oldDelegate.displayEnd ||

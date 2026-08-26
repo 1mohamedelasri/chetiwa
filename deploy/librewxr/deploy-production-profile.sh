@@ -11,6 +11,10 @@ staging_dir=/tmp/chetiwa-librewxr-profile
 ssh "$server" "set -eu; test -f '$remote_dir/docker-compose.yml'; mkdir -p '$staging_dir'"
 scp \
   "$script_dir/hetzner-small.env" \
+  "$script_dir/chetiwa-smooth-120-nowcast.patch" \
+  "$script_dir/chetiwa-opaque-palette-upgrade.patch" \
+  "$script_dir/chetiwa-crisp-presentation.patch" \
+  "$script_dir/chetiwa-crisp-palette-upgrade.patch" \
   "$script_dir/radar-watchdog.sh" \
   "$script_dir/chetiwa-radar-watchdog.service" \
   "$script_dir/chetiwa-radar-watchdog.timer" \
@@ -36,13 +40,57 @@ if ! swapon --noheadings --show=NAME | grep -q .; then
 fi
 backup_env='$remote_dir/.env.backup-'\$(date -u +%Y%m%dT%H%M%SZ)
 cp '$remote_dir/.env' \"\$backup_env\"
+smooth_patch_applied=0
+palette_patch_applied=0
+crisp_patch_applied=0
+crisp_palette_patch_applied=0
 rollback() {
   echo 'Deployment failed; restoring the previous LibreWXR profile.' >&2
   install -m 0600 \"\$backup_env\" '$remote_dir/.env'
+  if [ "\$smooth_patch_applied" -eq 1 ]; then
+    git -C '$remote_dir' apply -R '$staging_dir/chetiwa-smooth-120-nowcast.patch' || true
+  fi
+  if [ "\$palette_patch_applied" -eq 1 ]; then
+    git -C '$remote_dir' apply -R '$staging_dir/chetiwa-opaque-palette-upgrade.patch' || true
+  fi
+  if [ "\$crisp_patch_applied" -eq 1 ]; then
+    git -C '$remote_dir' apply -R '$staging_dir/chetiwa-crisp-presentation.patch' || true
+  fi
+  if [ "\$crisp_palette_patch_applied" -eq 1 ]; then
+    git -C '$remote_dir' apply -R '$staging_dir/chetiwa-crisp-palette-upgrade.patch' || true
+  fi
   docker compose --env-file '$remote_dir/.env' \
-    --project-directory '$remote_dir' up -d --force-recreate || true
+    --project-directory '$remote_dir' up -d --build --force-recreate || true
 }
 trap rollback EXIT HUP INT TERM
+if grep -q 'conservative 45% radar floor' '$remote_dir/src/librewxr/data/nowcast.py'; then
+  echo 'Chetiwa smooth 120-minute nowcast patch already installed.'
+else
+  git -C '$remote_dir' apply --check '$staging_dir/chetiwa-smooth-120-nowcast.patch'
+  git -C '$remote_dir' apply '$staging_dir/chetiwa-smooth-120-nowcast.patch'
+  smooth_patch_applied=1
+fi
+if grep -q '(216, 220, 222, 110)' '$remote_dir/src/librewxr/colors/schemes.py'; then
+  echo 'Chetiwa opaque radar palette already installed.'
+else
+  git -C '$remote_dir' apply --check '$staging_dir/chetiwa-opaque-palette-upgrade.patch'
+  git -C '$remote_dir' apply '$staging_dir/chetiwa-opaque-palette-upgrade.patch'
+  palette_patch_applied=1
+fi
+if grep -q 'Chetiwa Crisp Grey Red' '$remote_dir/src/librewxr/colors/schemes.py'; then
+  echo 'Chetiwa crisp radar presentation patch already installed.'
+else
+  git -C '$remote_dir' apply --check '$staging_dir/chetiwa-crisp-presentation.patch'
+  git -C '$remote_dir' apply '$staging_dir/chetiwa-crisp-presentation.patch'
+  crisp_patch_applied=1
+fi
+if grep -q '_chetiwa_crisp_lut' '$remote_dir/src/librewxr/colors/schemes.py'; then
+  echo 'Chetiwa crisp discrete palette already installed.'
+else
+  git -C '$remote_dir' apply --check '$staging_dir/chetiwa-crisp-palette-upgrade.patch'
+  git -C '$remote_dir' apply '$staging_dir/chetiwa-crisp-palette-upgrade.patch'
+  crisp_palette_patch_applied=1
+fi
 install -m 0600 '$staging_dir/hetzner-small.env' '$remote_dir/.env'
 install -m 0755 '$staging_dir/radar-watchdog.sh' /usr/local/sbin/chetiwa-radar-watchdog
 install -m 0644 '$staging_dir/chetiwa-radar-watchdog.service' /etc/systemd/system/chetiwa-radar-watchdog.service
@@ -62,7 +110,7 @@ chmod 0600 /etc/chetiwa-radar-watchdog.env
 docker compose --env-file '$remote_dir/.env' \
   --project-directory '$remote_dir' config --quiet
 docker compose --env-file '$remote_dir/.env' \
-  --project-directory '$remote_dir' up -d --force-recreate
+  --project-directory '$remote_dir' up -d --build --force-recreate
 systemctl daemon-reload
 systemctl enable --now chetiwa-radar-watchdog.timer
 attempt=1

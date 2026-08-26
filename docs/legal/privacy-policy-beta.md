@@ -36,8 +36,10 @@ applicatifs.
 - **Localisation** : facultative ; la recherche manuelle et la carte restent
   disponibles sans GPS.
 - **Notifications** : demandées uniquement lors de l'activation des alertes.
-- **Statistiques et crashs** : désactivés par défaut, activables et révocables
-  dans Réglages.
+- **Statistiques et rapports de panne** : désactivés par défaut. Un choix
+  facultatif peut être présenté une seule fois lorsque le flag correspondant
+  est actif ; un refus est mémorisé sans relance répétée. Le choix reste
+  modifiable dans Réglages.
 - **Publicité et Chetiwa+** : désactivés au lancement par feature flags. Toute
   activation exige une mise à jour des déclarations, du consentement et de cette
   politique avant exposition aux utilisateurs.

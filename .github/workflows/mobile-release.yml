@@ -39,6 +39,12 @@ jobs:
             printf 'storeFile=../upload-keystore.jks\n'
           } > android/key.properties
       - run: flutter pub get
+      - name: Configure restricted Google Maps Android key
+        env:
+          MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
+        run: |
+          test -n "$MAPS_API_KEY"
+          printf '\nMAPS_API_KEY=%s\n' "$MAPS_API_KEY" >> android/local.properties
       - name: Build signed Android App Bundle
         env:
           API_BASE_URL: ${{ secrets.CHETIWA_API_BASE_URL }}
@@ -66,6 +72,12 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: Configure restricted Google Maps iOS key
+        env:
+          MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_IOS_API_KEY }}
+        run: |
+          test -n "$MAPS_API_KEY"
+          printf 'GOOGLE_MAPS_API_KEY=%s\n' "$MAPS_API_KEY" > ios/Flutter/GoogleMaps.xcconfig
       - name: Build unsigned iOS archive candidate
         env:
           API_BASE_URL: ${{ secrets.CHETIWA_API_BASE_URL }}

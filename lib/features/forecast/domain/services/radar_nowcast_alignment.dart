@@ -2,7 +2,7 @@ import '../../../radar/domain/entities/radar_frame.dart';
 import '../entities/forecast.dart';
 import 'rain_rate_scale.dart';
 
-/// Replaces model values only inside LibreWXR's sampled nowcast window.
+/// Replaces model values inside LibreWXR's complete sampled radar projection.
 ///
 /// Both Graph and Radar consume this function so they always display the same
 /// rain episodes for the selected point.
@@ -15,7 +15,7 @@ Forecast alignForecastWithRadarNowcast(
       radarFrames
           .where(
             (frame) =>
-                frame.isNowcast &&
+                frame.isForecast &&
                 frame.pointRainRateMmPerHour != null &&
                 frame.time.isAfter(nowUtc),
           )

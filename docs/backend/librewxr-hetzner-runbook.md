@@ -18,16 +18,60 @@ active :
 
 - radar OPERA Europe ;
 - couche de précipitations mondiale RRQPE/IFS à résolution moindre ;
-- nowcast radar expérimental de 60 minutes, puis six trames de prévision
-  modèle jusqu'à +120 minutes ;
+- prévision étendue de douze trames à cadence de 10 minutes, obtenue par
+  advection optique persistante du dernier radar jusqu'à +120 minutes ;
 - six frames d'historique ;
 - ni satellite, ni alertes, ni modèles régionaux lourds.
 
 Le graphe Chetiwa reste la référence explicitement nommée pour la prévision au
-point de maintenant à +2 h. Les tuiles +60–120 min sont étiquetées « prévision
-modèle », activées uniquement avec `PREMIUM_RADAR_MODEL_ENABLED` et filtrées
+point de maintenant à +2 h. Les tuiles +60–120 min sont présentées comme une
+prévision étendue par déplacement radar à cadence de 10 minutes, activées uniquement avec
+`PREMIUM_RADAR_MODEL_ENABLED` et filtrées
 sur mobile sans entitlement Chetiwa+. Ne jamais les présenter comme une mesure
 radar terrestre, notamment là où LibreWXR ne dispose pas de composite natif.
+
+`LIBREWXR_NOWCAST_BLEND_MODE=radar` conserve le champ radar advecté sur les
+douze trames. `LIBREWXR_NOWCAST_COARSEN_ENABLED=false` évite que le lissage de
+longue échéance dissolve progressivement les cellules. Le patch AGPL
+`chetiwa-smooth-120-nowcast.patch` maintient la fenêtre complète à douze trames
+et permet de revenir ultérieurement à un mélange progressif sans coupure à
++60 minutes. ECMWF reste chargé pour la couverture hors composites radar et
+pour les autres produits météo, mais ne dilue plus un écho OPERA couvert.
+
+## Activation progressive de +60–120 min
+
+Le profil LibreWXR produit déjà les six trames étendues. Le drapeau API contrôle
+leur publication et l'application contrôle leur affichage selon l'entitlement :
+
+1. staging : `PREMIUM_RADAR_MODEL_ENABLED=true`, achats sandbox uniquement ;
+2. production fermée : publier le segment verrouillé avec
+   `PREMIUM_RADAR_MODEL_ENABLED=true`, tout en gardant
+   `PREMIUM_ENABLED=false` ;
+3. après validation des produits stores : déployer avec
+   `PREMIUM_ENABLED=true`, `PREMIUM_ROLLOUT_PERCENT=5`, puis augmenter
+   progressivement 5 → 25 → 100 après vérification des erreurs et des coûts.
+
+Le script Cloud Run accepte ces valeurs par variables d'environnement et les
+valide avant toute mutation :
+
+```bash
+PREMIUM_ENABLED=true \
+PREMIUM_ROLLOUT_PERCENT=5 \
+PREMIUM_RADAR_MODEL_ENABLED=true \
+backend/deploy/cloud-run/deploy-api.sh \
+  chetiwa europe-west1 IMAGE RUNTIME_SERVICE_ACCOUNT \
+  https://chetiwa-api.ezplatforms.com
+```
+
+Ne pas activer `PREMIUM_ENABLED` avant que les produits Android/iOS et la
+restauration d'achat aient été validés dans leurs sandboxes respectives.
+
+Le filtrage mobile actuel protège l'expérience produit, mais il ne constitue
+pas une frontière d'autorisation contre un client modifié qui appellerait
+directement l'API publique. Avant le lancement payant, l'API doit valider le
+reçu Store côté serveur et n'inclure les trames modèle qu'avec un entitlement
+signé et encore valide. Tant que cette validation n'est pas déployée,
+`PREMIUM_ENABLED` reste obligatoirement à `false` en production.
 
 ## Installation contrôlée
 
@@ -105,15 +149,17 @@ radar terrestre, notamment là où LibreWXR ne dispose pas de composite natif.
 
    ```text
    RADAR_METADATA_URL=https://radar.ezplatforms.com/public/weather-maps.json
-   RADAR_TILE_URL_TEMPLATE=https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/13/1_0.png
+   RADAR_TILE_URL_TEMPLATE=https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2
    PUBLIC_BASE_URL=https://api.<domaine>
    ```
 
 L'APK continue d'appeler le backend Chetiwa : elle ne connaît jamais
 l'URL privée de l'origine, ni aucun jeton d'infrastructure.
 
-La palette `13` est la LUT Chetiwa gris-vers-rouge appliquée par
-`chetiwa-drops-palette.patch`. Elle laisse les faibles échos en gris avec une
+La palette versionnée `14` est la LUT Chetiwa gris-vers-rouge appliquée par
+`chetiwa-drops-palette.patch` puis rendue sans second flou RGBA par
+`chetiwa-crisp-presentation.patch`. Son nouvel identifiant invalide les
+anciennes tuiles Cloudflare sans purge globale. Elle laisse les faibles échos en gris avec une
 opacité progressive et réserve le rouge aux noyaux de précipitation. Le patch
 est conservé avec le code de déploiement pour que la modification AGPL reste
 reproductible et publiable avec le reste des sources du service.

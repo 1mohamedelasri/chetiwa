@@ -23,6 +23,7 @@ import 'preferences/app_preferences_controller.dart';
 import '../features/alerts/application/alert_preferences_controller.dart';
 import '../features/analytics/application/analytics_consent_controller.dart';
 import '../features/analytics/application/analytics_tracker.dart';
+import '../features/analytics/presentation/analytics_consent_prompt_gate.dart';
 import '../features/monetization/domain/ads_repository.dart';
 import '../features/monetization/domain/consent_repository.dart';
 import '../features/monetization/application/saved_places_controller.dart';
@@ -35,6 +36,7 @@ final class ChetiwaApp extends StatefulWidget {
   const ChetiwaApp({
     this.dependencies,
     this.analyticsConsent = false,
+    this.analyticsConsentDecided = false,
     this.initialLocation = '/weather',
     this.initialWeatherSection = WeatherSection.graph,
     super.key,
@@ -42,6 +44,7 @@ final class ChetiwaApp extends StatefulWidget {
 
   final ChetiwaDependencies? dependencies;
   final bool analyticsConsent;
+  final bool analyticsConsentDecided;
   final String initialLocation;
   final WeatherSection initialWeatherSection;
 
@@ -53,10 +56,15 @@ final class _ChetiwaAppState extends State<ChetiwaApp> {
   late final ChetiwaDependencies _dependencies =
       widget.dependencies ?? ChetiwaDependencies.live();
   late final AnalyticsConsentController _analyticsConsentController =
-      AnalyticsConsentController(initiallyEnabled: widget.analyticsConsent);
+      AnalyticsConsentController(
+        initiallyEnabled: widget.analyticsConsent,
+        initiallyDecided: widget.analyticsConsentDecided,
+      );
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   late final GoRouter _router = createAppRouter(
     initialLocation: widget.initialLocation,
     initialWeatherSection: widget.initialWeatherSection,
+    navigatorKey: _navigatorKey,
   );
 
   @override
@@ -162,7 +170,10 @@ final class _ChetiwaAppState extends State<ChetiwaApp> {
                         ? Brightness.dark
                         : Brightness.light,
                   ),
-                  child: child ?? const SizedBox.shrink(),
+                  child: AnalyticsConsentPromptGate(
+                    navigatorKey: _navigatorKey,
+                    child: child ?? const SizedBox.shrink(),
+                  ),
                 );
               },
               locale: preferences.locale,

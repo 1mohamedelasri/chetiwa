@@ -5,9 +5,9 @@ import 'package:chetiwa/features/radar/domain/services/radar_usage_policy.dart';
 void main() {
   test('free and premium policies expose visible limits', () {
     expect(RadarUsagePolicy.freeDefault.maxFrames, 12);
-    expect(RadarUsagePolicy.freeDefault.maxZoom, 10);
+    expect(RadarUsagePolicy.freeDefault.maxZoom, 14);
     expect(RadarUsagePolicy.premiumDefault.maxFrames, 24);
-    expect(RadarUsagePolicy.premiumDefault.maxZoom, 12);
+    expect(RadarUsagePolicy.premiumDefault.maxZoom, 14);
   });
 
   test('frame selection keeps the latest observation and bounded nowcast', () {

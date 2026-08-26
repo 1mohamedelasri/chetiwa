@@ -1,0 +1,43 @@
+diff --git a/src/librewxr/data/nowcast.py b/src/librewxr/data/nowcast.py
+index 1303917..9c250c1 100644
+--- a/src/librewxr/data/nowcast.py
++++ b/src/librewxr/data/nowcast.py
+@@ -910,25 +910,25 @@ class NowcastGenerator:
+         for step in range(1, n_steps + 1):
+             nowcast_ts = latest_ts + step * interval
+             # Blend weight controls how much radar extrapolation vs IFS
+             # forecast is used.  1.0 = pure radar, 0.0 = pure IFS.
+-            # Beyond 60 min, always fall back to pure IFS regardless of
+-            # mode because radar extrapolation becomes too inaccurate.
+-            max_blend_steps = max(1, 3600 // interval)  # 6 at 10-min cadence
+-            if step > max_blend_steps:
+-                blend_weight = 0.0
+-            elif blend_mode == "radar":
++            # Chetiwa's two-hour product keeps the optical-flow field present
++            # across the whole configured horizon.  An abrupt pure-model cut
++            # at T+60 made hourly IFS cells freeze, dissolve, then jump.  A
++            # conservative 45% radar floor preserves coherent cell motion and
++            # intensity while the model still contributes development and
++            # dissipation increasingly toward T+120.
++            max_blend_steps = max(1, n_steps)
++            if blend_mode == "radar":
+                 blend_weight = 1.0
+             elif blend_mode == "model":
+                 blend_weight = 0.0
+             else:  # "blended" (default)
+-                # Tuned for HRRR's native-resolution, dBZ-matched output.
+-                # Starts at ~82% radar at T+10 for a smooth transition off
+-                # the live frame, crosses to model-dominant by T+40, lands
+-                # at 80% HRRR by T+60.  When the chain falls back to IFS
+-                # (outside HRRR's CONUS domain) the same curve still
+-                # applies — radar dominance early, model dominance late.
++                # Starts near the observed radar field and reaches a 45%
++                # extrapolated-radar / 55% model blend at the final frame.
++                # Keeping a non-zero radar floor avoids non-physical opacity
++                # loss when the coarser model is dry at the advected cell.
+                 t = step / max_blend_steps
+-                blend_weight = 0.20 + 0.80 * (1.0 - t) ** 1.4
++                blend_weight = 0.45 + 0.55 * (1.0 - t) ** 1.4
+ 
+             # Lead-time coarsening of the extrapolated field: as the
+             # forecast ages, Gaussian-smooth the warp output with a sigma

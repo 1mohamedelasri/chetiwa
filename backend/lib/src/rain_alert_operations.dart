@@ -32,6 +32,7 @@ final class RainAlertRunMetric {
     required this.status,
     required this.activeAlerts,
     required this.cellsEvaluated,
+    this.cellsSkipped = 0,
     required this.providerFailures,
     required this.alertsEvaluated,
     required this.deliveriesProposed,
@@ -50,6 +51,7 @@ final class RainAlertRunMetric {
   final String status;
   final int activeAlerts;
   final int cellsEvaluated;
+  final int cellsSkipped;
   final int providerFailures;
   final int alertsEvaluated;
   final int deliveriesProposed;

@@ -38,6 +38,23 @@ void main() {
     );
   });
 
+  test('persists an explicit refusal without enabling the SDK', () async {
+    final calls = <bool>[];
+    final controller = AnalyticsConsentController(
+      initiallyEnabled: false,
+      updateCollection: (enabled) async => calls.add(enabled),
+    );
+
+    final changed = await controller.setEnabled(false);
+
+    expect(changed, isTrue);
+    expect(controller.isEnabled, isFalse);
+    expect(controller.hasRecordedChoice, isTrue);
+    expect(calls, isEmpty);
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getBool(AnalyticsConsentController.storageKey), isFalse);
+  });
+
   test(
     'clearing local data revokes analytics and removes the stored choice',
     () async {
@@ -47,12 +64,14 @@ void main() {
       final calls = <bool>[];
       final controller = AnalyticsConsentController(
         initiallyEnabled: true,
+        initiallyDecided: true,
         updateCollection: (enabled) async => calls.add(enabled),
       );
 
       await controller.clear();
 
       expect(controller.isEnabled, isFalse);
+      expect(controller.hasRecordedChoice, isFalse);
       expect(calls, [false]);
       final preferences = await SharedPreferences.getInstance();
       expect(

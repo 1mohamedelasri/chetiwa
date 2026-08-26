@@ -53,9 +53,9 @@ void main() {
       final data = body['data'] as Map<String, Object?>;
       expect(data['features'], <String, Object?>{
         'premium': false,
-        'premiumSatellite': false,
         'premiumRadarModel': false,
         'ads': false,
+        'analyticsConsentPrompt': false,
       });
     },
   );
@@ -64,9 +64,9 @@ void main() {
     config = RuntimeConfig.fromEnvironment(const <String, String>{
       'PREMIUM_ENABLED': 'true',
       'PREMIUM_ROLLOUT_PERCENT': '100',
-      'PREMIUM_SATELLITE_ENABLED': 'true',
       'PREMIUM_RADAR_MODEL_ENABLED': 'true',
       'ADS_ENABLED': 'true',
+      'ANALYTICS_CONSENT_PROMPT_ENABLED': 'true',
       'ARCGIS_API_KEY': 'test-key',
     });
     final app = appWith(MockClient((_) async => http.Response('{}', 200)));
@@ -84,9 +84,9 @@ void main() {
     final data = body['data'] as Map<String, Object?>;
     expect(data['features'], <String, Object?>{
       'premium': true,
-      'premiumSatellite': true,
       'premiumRadarModel': true,
       'ads': true,
+      'analyticsConsentPrompt': true,
     });
   });
 
@@ -250,7 +250,18 @@ void main() {
               ],
               'nowcast': <Object?>[
                 <String, Object?>{'time': 1776708000, 'path': '/future'},
-                <String, Object?>{'time': 1776711600, 'path': '/future-model'},
+                <String, Object?>{
+                  'time': 1776711600,
+                  'path': '/future-model-70',
+                },
+                <String, Object?>{
+                  'time': 1776712800,
+                  'path': '/future-model-90',
+                },
+                <String, Object?>{
+                  'time': 1776714600,
+                  'path': '/future-model-120',
+                },
               ],
             },
           }),
@@ -272,13 +283,24 @@ void main() {
     final frames = data['frames'] as List<Object?>;
 
     expect(response.statusCode, 200);
-    expect(frames, hasLength(3));
+    expect(frames, hasLength(5));
     expect((frames.first as Map<String, Object?>)['kind'], 'observation');
     expect((frames[1] as Map<String, Object?>)['kind'], 'nowcast');
-    expect((frames.last as Map<String, Object?>)['kind'], 'model');
+    expect(
+      frames.whereType<Map<String, Object?>>().where(
+        (frame) => frame['kind'] == 'model',
+      ),
+      hasLength(3),
+    );
+    expect(
+      frames.whereType<Map<String, Object?>>().any(
+        (frame) => (frame['tileUrlTemplate'] as String).contains('model-70'),
+      ),
+      isTrue,
+    );
     expect(
       (frames[1] as Map<String, Object?>)['tileUrlTemplate'],
-      'https://radar.ezplatforms.com/future/256/{z}/{x}/{y}/13/1_0.png',
+      'https://radar.ezplatforms.com/future/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2',
     );
     expect((data['provider'] as Map<String, Object?>)['id'], 'librewxr');
   });
@@ -455,7 +477,7 @@ void main() {
         final arguments = params['arguments'] as Map<String, dynamic>;
         expect(arguments['lat'], 48.8566);
         expect(arguments['lon'], 2.3522);
-        expect(arguments['minutes'], 60);
+        expect(arguments['minutes'], 120);
         return http.Response(
           'event: message\n'
           'data: ${jsonEncode(<String, Object?>{

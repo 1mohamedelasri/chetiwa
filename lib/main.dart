@@ -1,46 +1,21 @@
-import 'dart:ui';
-
-import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:firebase_crashlytics/firebase_crashlytics.dart';
-import 'package:flutter/widgets.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:timezone/data/latest.dart' as tz;
+import 'package:flutter/material.dart';
 
-import 'app/app.dart';
-import 'firebase_options.dart';
-import 'features/analytics/application/analytics_consent_controller.dart';
+import 'app/bootstrap/chetiwa_bootstrap.dart';
 import 'core/notifications/firebase_push_messaging.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Radar frames are large. A bounded process-wide image cache prevents a
+  // long animation session from forcing Android/iOS into memory pressure.
+  PaintingBinding.instance.imageCache
+    ..maximumSize = 180
+    ..maximumSizeBytes = 64 * 1024 * 1024;
   FirebaseMessaging.onBackgroundMessage(
     chetiwaFirebaseMessagingBackgroundHandler,
   );
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  final preferences = await SharedPreferences.getInstance();
-  final analyticsConsent =
-      preferences.getBool(AnalyticsConsentController.storageKey) ?? false;
-  // Analytics remains opt-in and this setting is applied before the UI starts.
-  await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(
-    analyticsConsent,
-  );
-  await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(
-    analyticsConsent,
-  );
-  FlutterError.onError = (details) {
-    FlutterError.presentError(details);
-    if (AnalyticsConsentController.runtimeCollectionEnabled) {
-      FirebaseCrashlytics.instance.recordFlutterFatalError(details);
-    }
-  };
-  PlatformDispatcher.instance.onError = (error, stack) {
-    if (AnalyticsConsentController.runtimeCollectionEnabled) {
-      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
-    }
-    return false;
-  };
-  tz.initializeTimeZones();
-  runApp(ChetiwaApp(analyticsConsent: analyticsConsent));
+  // Render a branded first frame immediately. Firebase and preferences are
+  // initialized behind it with a timeout instead of leaving a native white
+  // window on slow starts.
+  runApp(const ChetiwaBootstrap());
 }

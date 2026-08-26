@@ -112,6 +112,12 @@ void main() {
     final active = await store.listActiveAlerts();
     expect(active, hasLength(1));
     expect(active.single.state.rainExpected, isFalse);
+    final dueCells = await store.listDueCellSchedules(now: instant);
+    expect(dueCells, hasLength(1));
+    final activeInCell = await store.listActiveAlertsForCell(
+      dueCells.single.cellKey,
+    );
+    expect(activeInCell, hasLength(1));
     await store.saveState(
       RainAlertState(
         ownerHash: owner,
@@ -141,6 +147,38 @@ void main() {
     expect(pending, hasLength(1));
     expect(pending.single.pushToken, 'private-token');
     expect(pending.single.draft.eventId, 'event-1');
+  });
+
+  test('persists adaptive polling state without device coordinates', () async {
+    final fake = _FakeFirestore();
+    final store = FirestoreDeviceAlertStore(
+      api: firestore.FirestoreApi(
+        MockClient(fake.handle),
+        rootUrl: 'https://firestore.test/',
+      ),
+      projectId: 'chetiwa-test',
+      now: () => instant,
+    );
+    const cellKey = '0.050:2777:3647';
+    final schedule = RainAlertCellSchedule(
+      cellKey: cellKey,
+      latitude: 48.875,
+      longitude: 2.375,
+      lastCheckedAt: instant,
+      nextCheckAt: instant.add(const Duration(hours: 2)),
+      mode: RainAlertPollingMode.dry,
+    );
+
+    await store.saveCellSchedule(schedule);
+    final restored = await store.listDueCellSchedules(
+      now: instant.add(const Duration(hours: 3)),
+    );
+
+    expect(restored.single.mode, RainAlertPollingMode.dry);
+    expect(restored.single.nextCheckAt, schedule.nextCheckAt);
+    final encoded = jsonEncode(fake.documents.values.toList());
+    expect(encoded, isNot(contains('private-token')));
+    expect(encoded, isNot(contains('48.8566')));
   });
 
   test(
@@ -261,8 +299,10 @@ final class _FakeFirestore {
           ?.cast<String, dynamic>();
       final fieldPath =
           ((fieldFilter?['field'] as Map?)?['fieldPath']) as String?;
+      final operator = fieldFilter?['op'] as String? ?? 'EQUAL';
       final expected = fieldFilter?['value'];
-      final matches = documents.entries
+      final limit = query['limit'] as int?;
+      final matchingEntries = documents.entries
           .where((entry) {
             final segments = entry.key.split('/');
             final inCollection =
@@ -271,8 +311,20 @@ final class _FakeFirestore {
             if (!inCollection) return false;
             if (fieldPath == null) return true;
             final fields = entry.value['fields'] as Map<String, dynamic>?;
-            return jsonEncode(fields?[fieldPath]) == jsonEncode(expected);
+            final actual = fields?[fieldPath];
+            if (operator == 'LESS_THAN_OR_EQUAL') {
+              final actualTime = DateTime.parse(
+                (actual as Map<String, dynamic>)['timestampValue'] as String,
+              );
+              final expectedTime = DateTime.parse(
+                (expected as Map<String, dynamic>)['timestampValue'] as String,
+              );
+              return !actualTime.isAfter(expectedTime);
+            }
+            return jsonEncode(actual) == jsonEncode(expected);
           })
+          .take(limit ?? documents.length);
+      final matches = matchingEntries
           .map(
             (entry) => <String, Object?>{
               'document': <String, Object?>{'name': entry.key, ...entry.value},

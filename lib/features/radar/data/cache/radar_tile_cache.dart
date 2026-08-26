@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 
 final class RadarTileMetricsSnapshot {
@@ -37,11 +39,7 @@ final class RadarTileMetrics {
   void beginSession() => _sessionTiles.clear();
 
   void recordCacheLookup(String url, {required bool hit}) {
-    if (hit) {
-      _cacheHits++;
-    } else {
-      _cacheMisses++;
-    }
+    hit ? _cacheHits++ : _cacheMisses++;
     _sessionTiles.add(url);
   }
 
@@ -60,146 +58,233 @@ final class RadarTileMetrics {
   );
 }
 
-/// Chetiwa's single tile cache for a radar session.
+final class _RadarDownloadWaiter {
+  const _RadarDownloadWaiter({
+    required this.generation,
+    required this.completer,
+  });
+
+  final int? generation;
+  final Completer<bool> completer;
+}
+
+/// Shared LibreWXR cache used by Google Maps tile overlays on Android and iOS.
 ///
-/// flutter_map supplies the memory cache and cancellable request lifecycle;
-/// its built-in provider supplies the native disk cache and LRU size reducer.
-/// This wrapper keeps those behaviours in one place and records anonymous
-/// cache/cost metrics without storing coordinates.
+/// The Google basemap is rendered by the native SDK. Radar bytes still flow
+/// through Chetiwa so a CDN error page can never reach a platform image decoder.
 final class RadarTileCache {
-  static const _cacheSchemaVersion = 'v3';
-  static const _maxProviderZoom = 10;
+  static const _cacheSchemaVersion = 'v7-crisp-bands-persistent-radar';
+  static const _maxNativeZoom = 10;
+  static const _maxDisplayZoom = 14;
+  static const _maxConcurrentDownloads = 6;
+  static const _maxConcurrentRenders = 2;
+  static const _maxDiskBytes = 128 * 1024 * 1024;
+  static const _maxMemoryBytes = 16 * 1024 * 1024;
+  static const _freshAge = Duration(hours: 6);
+  static const _tileRequestTimeout = Duration(milliseconds: 2500);
+  static const _retryDelay = Duration(milliseconds: 120);
   static const _smokeTestEnabled = bool.fromEnvironment(
     'CHETIWA_RADAR_SMOKE_TEST',
   );
 
-  /// Removes only Chetiwa's regenerable Radar tile cache before a smoke run.
-  /// Normal builds cannot invoke the deletion because the compile-time gate is
-  /// false.
   static Future<bool> clearDiskCacheForSmokeTest() async {
     if (!_smokeTestEnabled) return false;
-    final directory = Directory(
-      '${Directory.systemTemp.path}/chetiwa-radar-tiles-$_cacheSchemaVersion',
-    );
+    final directory = _defaultDirectory();
     if (await directory.exists()) await directory.delete(recursive: true);
     return true;
   }
 
-  RadarTileCache._({http.Client? client})
+  RadarTileCache._({http.Client? client, Directory? directory})
     : this._withClient(
         client ?? http.Client(),
         _RadarSmokeController(enabled: _smokeTestEnabled),
+        directory ?? _defaultDirectory(),
       );
 
-  RadarTileCache._withClient(http.Client delegate, this._smokeController)
-    : metrics = RadarTileMetrics(),
-      _client = _RadarSmokeClient(delegate, _smokeController),
-      _disk = BuiltInMapCachingProvider.getOrCreateInstance(
-        // A versioned, app-specific directory prevents old responses (such
-        // as an HTML error body cached as a tile) from surviving an upgrade.
-        cacheDirectory:
-            '${Directory.systemTemp.path}/chetiwa-radar-tiles-$_cacheSchemaVersion',
-        maxCacheSize: 128 * 1024 * 1024,
-        overrideFreshAge: const Duration(hours: 6),
-      ) {
-    tileProvider = NetworkTileProvider(
-      abortObsoleteRequests: true,
-      httpClient: _client,
-      cachingProvider: _instrumentedDisk,
-      // A CDN error page is never a valid radar image. Do not pass its body to
-      // Android's image decoder; silently retry/skip it instead.
-      attemptDecodeOfHttpErrorResponses: false,
-      silenceExceptions: true,
-    );
+  RadarTileCache._withClient(
+    http.Client delegate,
+    this._smokeController,
+    this._directory,
+  ) : metrics = RadarTileMetrics(),
+      _client = _RadarSmokeClient(delegate, _smokeController) {
+    unawaited(_prepareDirectory());
   }
+
+  @visibleForTesting
+  factory RadarTileCache.forTesting({
+    required http.Client client,
+    required Directory directory,
+  }) => RadarTileCache._(client: client, directory: directory);
 
   static final RadarTileCache shared = RadarTileCache._();
 
+  static Directory _defaultDirectory() => Directory(
+    '${Directory.systemTemp.path}/chetiwa-radar-tiles-$_cacheSchemaVersion',
+  );
+
   final http.Client _client;
-  final BuiltInMapCachingProvider _disk;
+  final Directory _directory;
   final _RadarSmokeController _smokeController;
   final RadarTileMetrics metrics;
   final ValueNotifier<int> readyTileCount = ValueNotifier<int>(0);
+  final ValueNotifier<int> successfulTileResponseCount = ValueNotifier<int>(0);
   ValueListenable<int> get simulatedFailureCount =>
       _smokeController.failureCount;
-  late final NetworkTileProvider tileProvider;
-  late final MapCachingProvider _instrumentedDisk = _MetricsCachingProvider(
-    delegate: _disk,
-    metrics: metrics,
-    onValidTile: () => readyTileCount.value++,
-    smokeController: _smokeController,
-  );
-  final Map<String, Future<bool>> _prefetches = <String, Future<bool>>{};
+
+  final LinkedHashMap<String, Uint8List> _memory =
+      LinkedHashMap<String, Uint8List>();
+  final Map<String, Future<Uint8List?>> _inFlight =
+      <String, Future<Uint8List?>>{};
+  final Map<String, Future<Uint8List?>> _derivedInFlight =
+      <String, Future<Uint8List?>>{};
+  final Queue<_RadarDownloadWaiter> _downloadWaiters =
+      Queue<_RadarDownloadWaiter>();
+  final Queue<Completer<void>> _renderWaiters = Queue<Completer<void>>();
+  final LinkedHashSet<RadarTileCoordinate> _recentCoordinates =
+      LinkedHashSet<RadarTileCoordinate>();
+  final Set<String> _readySessionTiles = <String>{};
+  var _memoryBytes = 0;
+  var _activeDownloads = 0;
+  var _activeRenders = 0;
   var _prefetchGeneration = 0;
+  var _viewportGeneration = 0;
 
   void beginSession() {
     metrics.beginSession();
+    _readySessionTiles.clear();
+    _recentCoordinates.clear();
     readyTileCount.value = 0;
+    successfulTileResponseCount.value = 0;
     _smokeController.resetFailures();
+    beginViewport();
   }
 
-  /// Arms one HTTP 502 for the physical-device smoke test. It is a no-op in
-  /// normal builds and therefore cannot alter production traffic accidentally.
-  bool simulateNext502ForSmokeTest() => _smokeController.arm();
+  /// Invalidates queued work from the previous camera viewport. Downloads
+  /// already on the wire may finish and populate the cache, but they cannot
+  /// retry or keep newer visible requests trapped behind an obsolete queue.
+  int beginViewport() {
+    _viewportGeneration++;
+    cancelPrefetch();
+    _recentCoordinates.clear();
+    while (_downloadWaiters.isNotEmpty) {
+      _downloadWaiters.removeFirst().completer.complete(false);
+    }
+    return _viewportGeneration;
+  }
 
-  /// Performs a smoke-only origin probe through the same guarded HTTP client
-  /// as visible tiles. This makes 502 recovery deterministic without treating
-  /// a legitimate pan-buffer cache hit as a failed network request.
+  RadarGoogleTileProvider providerFor(String template) =>
+      RadarGoogleTileProvider(cache: this, template: template);
+
+  bool simulateNext502ForSmokeTest({String? url}) =>
+      _smokeController.arm(url: url);
+
   Future<bool> fetchTileForSmokeTest(String url) async {
     if (!_smokeTestEnabled) return false;
-    try {
-      final response = await _client
-          .get(Uri.parse(url))
-          .timeout(const Duration(seconds: 8));
-      return response.statusCode == 200 &&
-          isSupportedImageBytes(response.bodyBytes);
-    } on Object {
-      return false;
-    }
+    return await _getBytes(url, forceNetwork: true, requestGeneration: null) !=
+        null;
   }
 
-  /// Invalidates speculative work for a viewport that is no longer visible.
-  /// HTTP package requests cannot be interrupted after they are sent, so the
-  /// bounded in-flight batch may finish; no later batch is started.
   void cancelPrefetch() => _prefetchGeneration++;
 
+  /// Warms the same geographic tiles the native SDK most recently requested.
+  /// This avoids speculative rings and keeps origin traffic bounded on pans.
   Future<int> prefetchNextFrames({
-    required MapCamera camera,
     required Iterable<String> frameTemplates,
     int maxFrames = 1,
-    int maxTiles = 8,
+    int maxTiles = 6,
     bool completeOnFirstReady = false,
   }) async {
     final generation = ++_prefetchGeneration;
+    final viewportGeneration = _viewportGeneration;
+    final coordinates = _recentCoordinates.toList(growable: false).reversed;
     final templates = frameTemplates.take(maxFrames).toList(growable: false);
-    if (templates.isEmpty) return 0;
-    final urls = TileViewport.visibleTileUrls(
-      camera,
-      templates,
-      margin: 1,
-      maxTiles: maxTiles,
-      maxZoom: _maxProviderZoom,
-    );
-    // Two speculative requests are enough to make animation responsive while
-    // leaving connection/origin capacity for the current visible TileLayer.
-    var readyTiles = 0;
-    for (var index = 0; index < urls.length; index += 2) {
-      if (generation != _prefetchGeneration) return 0;
-      final end = math.min(index + 2, urls.length);
-      final operations = urls.sublist(index, end).map(_prefetchOne).toList();
-      if (completeOnFirstReady && await firstReady(operations)) {
-        return generation == _prefetchGeneration ? 1 : 0;
+    final requests = <({String template, RadarTileCoordinate coordinate})>[];
+    // Interleave frames so the current frame cannot consume the whole budget
+    // before the next animation frame gets warmed.
+    for (final coordinate in coordinates) {
+      for (final template in templates) {
+        if (requests.length >= maxTiles) break;
+        requests.add((template: template, coordinate: coordinate));
       }
-      final results = completeOnFirstReady
-          ? const <bool>[]
-          : await Future.wait(operations, eagerError: false);
-      readyTiles += results.where((ready) => ready).length;
+      if (requests.length >= maxTiles) break;
+    }
+    if (requests.isEmpty) return 0;
+    var readyTiles = 0;
+    // Only two speculative operations run at once. A pan/zoom can therefore
+    // cancel the remaining old viewport work while four network slots stay
+    // available for the tiles the user is actively looking at.
+    for (var index = 0; index < requests.length; index += 2) {
+      if (generation != _prefetchGeneration) return 0;
+      final end = math.min(index + 2, requests.length);
+      final operations = requests
+          .sublist(index, end)
+          .map((request) async {
+            if (generation != _prefetchGeneration) return false;
+            return await _tileBytes(
+                  request.template,
+                  request.coordinate,
+                  recordReady: false,
+                  requestGeneration: viewportGeneration,
+                ) !=
+                null;
+          })
+          .toList(growable: false);
+      if (completeOnFirstReady) {
+        if (await firstReady(operations)) {
+          return generation == _prefetchGeneration ? 1 : 0;
+        }
+      } else {
+        final values = await Future.wait(operations, eagerError: false);
+        readyTiles += values.where((value) => value).length;
+      }
     }
     return generation == _prefetchGeneration ? readyTiles : 0;
   }
 
-  /// Resolves as soon as one operation succeeds. Slow siblings deliberately
-  /// continue warming the disk cache without delaying the visible repaint.
+  /// Makes the selected frame immediately available to a second native tile
+  /// overlay before the UI starts a cross-fade. Unlike speculative prefetch,
+  /// this foreground operation is not cancelled when the following frame is
+  /// scheduled: it represents what the user is about to see.
+  Future<int> prepareVisibleFrame(
+    String frameTemplate, {
+    int maxTiles = 12,
+    bool completeOnFirstReady = false,
+  }) async {
+    final viewportGeneration = _viewportGeneration;
+    final coordinates = _recentCoordinates
+        .toList(growable: false)
+        .reversed
+        .take(maxTiles)
+        .toList(growable: false);
+    if (coordinates.isEmpty) return 0;
+
+    var readyTiles = 0;
+    // Four foreground operations are enough to fill a typical phone viewport
+    // quickly while leaving two download slots for native Google Maps calls.
+    for (var index = 0; index < coordinates.length; index += 4) {
+      final end = math.min(index + 4, coordinates.length);
+      final operations = coordinates
+          .sublist(index, end)
+          .map(
+            (coordinate) async =>
+                await _tileBytes(
+                  frameTemplate,
+                  coordinate,
+                  recordReady: false,
+                  requestGeneration: viewportGeneration,
+                ) !=
+                null,
+          )
+          .toList(growable: false);
+      if (completeOnFirstReady) {
+        return await firstReady(operations) ? 1 : 0;
+      }
+      final values = await Future.wait(operations, eagerError: false);
+      readyTiles += values.where((value) => value).length;
+    }
+    return readyTiles;
+  }
+
   @visibleForTesting
   static Future<bool> firstReady(Iterable<Future<bool>> operations) {
     final pending = operations.toList(growable: false);
@@ -221,52 +306,364 @@ final class RadarTileCache {
     return completer.future;
   }
 
-  Future<bool> _prefetchOne(String url) {
-    final existing = _prefetches[url];
+  void _recordRequested(RadarTileCoordinate coordinate) {
+    _recentCoordinates.remove(coordinate);
+    _recentCoordinates.add(coordinate);
+    while (_recentCoordinates.length > 16) {
+      _recentCoordinates.remove(_recentCoordinates.first);
+    }
+  }
+
+  Future<Uint8List?> _tileBytes(
+    String template,
+    RadarTileCoordinate requestedCoordinate, {
+    bool recordReady = true,
+    int? requestGeneration,
+  }) async {
+    if (requestedCoordinate.zoom > _maxDisplayZoom) return null;
+    final effectiveGeneration = requestGeneration ?? _viewportGeneration;
+    if (effectiveGeneration != _viewportGeneration) return null;
+    _recordRequested(requestedCoordinate);
+    final sourceCoordinate = requestedCoordinate.ancestorAt(_maxNativeZoom);
+    final sourceUrl = sourceCoordinate.resolve(template);
+    final sourceBytes = await _getBytes(
+      sourceUrl,
+      requestGeneration: effectiveGeneration,
+    );
+    if (sourceBytes == null) return null;
+
+    final bytes = requestedCoordinate.zoom <= _maxNativeZoom
+        ? sourceBytes
+        : await _overzoomBytes(
+            sourceBytes: sourceBytes,
+            sourceUrl: sourceUrl,
+            sourceCoordinate: sourceCoordinate,
+            requestedCoordinate: requestedCoordinate,
+          );
+    final readyKey =
+        '${requestedCoordinate.zoom}/'
+        '${requestedCoordinate.x}/${requestedCoordinate.y}:$sourceUrl';
+    if (recordReady && bytes != null) {
+      successfulTileResponseCount.value++;
+      if (_readySessionTiles.add(readyKey)) readyTileCount.value++;
+    }
+    return bytes;
+  }
+
+  Future<Uint8List?> _overzoomBytes({
+    required Uint8List sourceBytes,
+    required String sourceUrl,
+    required RadarTileCoordinate sourceCoordinate,
+    required RadarTileCoordinate requestedCoordinate,
+  }) {
+    final cacheKey =
+        'overzoom:${requestedCoordinate.zoom}/'
+        '${requestedCoordinate.x}/${requestedCoordinate.y}:$sourceUrl';
+    final cached = _takeMemory(cacheKey);
+    if (cached != null) return Future<Uint8List?>.value(cached);
+    final existing = _derivedInFlight[cacheKey];
     if (existing != null) return existing;
-    final operation = _downloadAndCache(url);
-    _prefetches[url] = operation;
-    operation.whenComplete(() => _prefetches.remove(url));
+    final operation = () async {
+      await _acquireRenderSlot();
+      try {
+        final bytes = await _renderOverzoomTile(
+          sourceBytes: sourceBytes,
+          sourceCoordinate: sourceCoordinate,
+          requestedCoordinate: requestedCoordinate,
+        );
+        if (bytes != null) _putMemory(cacheKey, bytes);
+        return bytes;
+      } finally {
+        _releaseRenderSlot();
+      }
+    }();
+    _derivedInFlight[cacheKey] = operation;
+    operation.whenComplete(() => _derivedInFlight.remove(cacheKey));
     return operation;
   }
 
-  Future<bool> _downloadAndCache(String url) async {
-    final cached = await _disk.getTile(url);
-    if (cached != null &&
-        !cached.metadata.isStale &&
-        isSupportedImageBytes(cached.bytes)) {
-      metrics.recordCacheLookup(url, hit: true);
-      return true;
-    }
-    metrics.recordCacheLookup(url, hit: false);
+  static Future<Uint8List?> _renderOverzoomTile({
+    required Uint8List sourceBytes,
+    required RadarTileCoordinate sourceCoordinate,
+    required RadarTileCoordinate requestedCoordinate,
+  }) async {
+    ui.Codec? codec;
+    ui.Image? sourceImage;
+    ui.Image? outputImage;
+    ui.Picture? picture;
     try {
-      final response = await _client
-          .get(Uri.parse(url))
-          .timeout(const Duration(seconds: 8));
-      if (response.statusCode != 200 ||
-          !isSupportedImageBytes(response.bodyBytes)) {
-        return false;
+      final delta = requestedCoordinate.zoom - sourceCoordinate.zoom;
+      if (delta <= 0) return sourceBytes;
+      final scale = 1 << delta;
+      final childX = requestedCoordinate.x - (sourceCoordinate.x << delta);
+      final childY = requestedCoordinate.y - (sourceCoordinate.y << delta);
+      if (childX < 0 || childX >= scale || childY < 0 || childY >= scale) {
+        return null;
       }
-      final bytes = Uint8List.fromList(response.bodyBytes);
-      await _disk.putTile(
-        url: url,
-        metadata: CachedMapTileMetadata(
-          staleAt: DateTime.timestamp().add(const Duration(hours: 6)),
-          lastModified: null,
-          etag: response.headers['etag'],
+
+      codec = await ui.instantiateImageCodec(sourceBytes);
+      final frame = await codec.getNextFrame();
+      sourceImage = frame.image;
+      final sourceWidth = sourceImage.width / scale;
+      final sourceHeight = sourceImage.height / scale;
+      if (sourceWidth < 1 || sourceHeight < 1) return null;
+
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      canvas.drawImageRect(
+        sourceImage,
+        ui.Rect.fromLTWH(
+          childX * sourceWidth,
+          childY * sourceHeight,
+          sourceWidth,
+          sourceHeight,
         ),
-        bytes: bytes,
+        const ui.Rect.fromLTWH(0, 0, 256, 256),
+        // Radar is categorical raster data. Nearest-neighbour preserves echo
+        // boundaries and avoids inventing blended intensity at tile edges.
+        ui.Paint()..filterQuality = ui.FilterQuality.none,
       );
-      metrics.recordDownload(url, bytes.length);
-      return true;
+      picture = recorder.endRecording();
+      outputImage = await picture.toImage(256, 256);
+      final data = await outputImage.toByteData(format: ui.ImageByteFormat.png);
+      return data?.buffer.asUint8List();
     } on Object {
-      // The visible TileLayer remains the source of truth if prefetch fails.
-      return false;
+      return null;
+    } finally {
+      outputImage?.dispose();
+      sourceImage?.dispose();
+      picture?.dispose();
+      codec?.dispose();
     }
   }
 
-  /// Reject non-image responses before Flutter sends them to Android's image
-  /// decoder. Platform decoding still validates the full image afterwards.
+  Future<Uint8List?> _getBytes(
+    String url, {
+    bool forceNetwork = false,
+    required int? requestGeneration,
+  }) {
+    final inFlightKey = '${requestGeneration ?? 'smoke'}:$url';
+    final existing = _inFlight[inFlightKey];
+    if (existing != null) return existing;
+    final operation = _loadBytes(
+      url,
+      forceNetwork: forceNetwork,
+      requestGeneration: requestGeneration,
+    );
+    _inFlight[inFlightKey] = operation;
+    operation.whenComplete(() => _inFlight.remove(inFlightKey));
+    return operation;
+  }
+
+  Future<Uint8List?> _loadBytes(
+    String url, {
+    required bool forceNetwork,
+    required int? requestGeneration,
+  }) async {
+    if (!forceNetwork && !_smokeController.shouldBypassCacheFor(url)) {
+      final memory = _takeMemory(url);
+      if (memory != null) {
+        metrics.recordCacheLookup(url, hit: true);
+        return memory;
+      }
+      final disk = await _readDisk(url);
+      if (disk != null) {
+        metrics.recordCacheLookup(url, hit: true);
+        _putMemory(url, disk);
+        return disk;
+      }
+    }
+    metrics.recordCacheLookup(url, hit: false);
+    if (!await _acquireDownloadSlot(requestGeneration)) return null;
+    try {
+      final attempts = forceNetwork && _smokeController.enabled ? 1 : 2;
+      for (var attempt = 0; attempt < attempts; attempt++) {
+        try {
+          final response = await _client
+              .get(Uri.parse(url))
+              .timeout(_tileRequestTimeout);
+          if (response.statusCode == 200) {
+            if (isSupportedImageBytes(response.bodyBytes)) {
+              final bytes = Uint8List.fromList(response.bodyBytes);
+              _putMemory(url, bytes);
+              metrics.recordDownload(url, bytes.length);
+              unawaited(_writeDisk(url, bytes));
+              return bytes;
+            }
+            // Some edge proxies return an HTML error page with HTTP 200. Treat
+            // it as transient once, but never hand those bytes to the decoder.
+          } else if (!_isRetryableStatus(response.statusCode)) {
+            return null;
+          }
+        } on TimeoutException {
+          // Retry once below. A missing tile must never block the map UI.
+        } on SocketException {
+          // Mobile networks frequently change while the user is panning.
+        } on http.ClientException {
+          // Retry one transient transport failure, then return NO_TILE.
+        }
+        if (requestGeneration != null &&
+            requestGeneration != _viewportGeneration) {
+          return null;
+        }
+        if (attempt + 1 < attempts) await Future<void>.delayed(_retryDelay);
+      }
+      return null;
+    } on Object {
+      return null;
+    } finally {
+      _releaseDownloadSlot();
+    }
+  }
+
+  static bool _isRetryableStatus(int statusCode) =>
+      statusCode == 408 ||
+      statusCode == 425 ||
+      statusCode == 429 ||
+      statusCode >= 500;
+
+  Future<bool> _acquireDownloadSlot(int? requestGeneration) async {
+    if (requestGeneration != null && requestGeneration != _viewportGeneration) {
+      return false;
+    }
+    if (_activeDownloads < _maxConcurrentDownloads) {
+      _activeDownloads++;
+      return true;
+    }
+    final waiter = _RadarDownloadWaiter(
+      generation: requestGeneration,
+      completer: Completer<bool>(),
+    );
+    _downloadWaiters.addLast(waiter);
+    return waiter.completer.future;
+  }
+
+  void _releaseDownloadSlot() {
+    while (_downloadWaiters.isNotEmpty) {
+      final waiter = _downloadWaiters.removeFirst();
+      if (waiter.generation != null &&
+          waiter.generation != _viewportGeneration) {
+        waiter.completer.complete(false);
+        continue;
+      }
+      // Transfer this active slot directly to the next current request.
+      waiter.completer.complete(true);
+      return;
+    }
+    _activeDownloads--;
+  }
+
+  Future<void> _acquireRenderSlot() async {
+    if (_activeRenders < _maxConcurrentRenders) {
+      _activeRenders++;
+      return;
+    }
+    final waiter = Completer<void>();
+    _renderWaiters.addLast(waiter);
+    await waiter.future;
+  }
+
+  void _releaseRenderSlot() {
+    if (_renderWaiters.isNotEmpty) {
+      _renderWaiters.removeFirst().complete();
+      return;
+    }
+    _activeRenders--;
+  }
+
+  Uint8List? _takeMemory(String url) {
+    final value = _memory.remove(url);
+    if (value != null) _memory[url] = value;
+    return value;
+  }
+
+  void _putMemory(String url, Uint8List bytes) {
+    final previous = _memory.remove(url);
+    if (previous != null) _memoryBytes -= previous.length;
+    _memory[url] = bytes;
+    _memoryBytes += bytes.length;
+    while (_memoryBytes > _maxMemoryBytes && _memory.isNotEmpty) {
+      final first = _memory.remove(_memory.keys.first);
+      if (first != null) _memoryBytes -= first.length;
+    }
+  }
+
+  Future<void> _prepareDirectory() async {
+    await _directory.create(recursive: true);
+    await _trimDiskCache();
+  }
+
+  File _fileFor(String url) =>
+      File('${_directory.path}/${_stableHash(url)}.tile');
+
+  Future<Uint8List?> _readDisk(String url) async {
+    try {
+      final file = _fileFor(url);
+      final stat = await file.stat();
+      if (stat.type != FileSystemEntityType.file ||
+          DateTime.now().difference(stat.modified) > _freshAge) {
+        return null;
+      }
+      final bytes = await file.readAsBytes();
+      if (!isSupportedImageBytes(bytes)) {
+        unawaited(file.delete());
+        return null;
+      }
+      return bytes;
+    } on FileSystemException {
+      return null;
+    }
+  }
+
+  Future<void> _writeDisk(String url, Uint8List bytes) async {
+    try {
+      await _directory.create(recursive: true);
+      final file = _fileFor(url);
+      final temporary = File(
+        '${file.path}.tmp-${DateTime.now().microsecondsSinceEpoch}',
+      );
+      await temporary.writeAsBytes(bytes, flush: false);
+      await temporary.rename(file.path);
+    } on FileSystemException {
+      // Cache writes are opportunistic and must never block visible Radar.
+    }
+  }
+
+  Future<void> _trimDiskCache() async {
+    try {
+      final files = await _directory
+          .list()
+          .where((entry) => entry is File && entry.path.endsWith('.tile'))
+          .cast<File>()
+          .toList();
+      final entries = <({File file, FileStat stat})>[];
+      var total = 0;
+      for (final file in files) {
+        final stat = await file.stat();
+        total += stat.size;
+        entries.add((file: file, stat: stat));
+      }
+      if (total <= _maxDiskBytes) return;
+      entries.sort((a, b) => a.stat.modified.compareTo(b.stat.modified));
+      for (final entry in entries) {
+        if (total <= _maxDiskBytes * 0.85) break;
+        await entry.file.delete();
+        total -= entry.stat.size;
+      }
+    } on FileSystemException {
+      // The operating system may evict its cache concurrently.
+    }
+  }
+
+  static String _stableHash(String value) {
+    var hash = 0xcbf29ce484222325;
+    for (final unit in value.codeUnits) {
+      hash ^= unit;
+      hash = (hash * 0x100000001b3) & 0x7FFFFFFFFFFFFFFF;
+    }
+    return hash.toRadixString(16).padLeft(16, '0');
+  }
+
   static bool isSupportedImageBytes(List<int> bytes) {
     if (bytes.length < 12) return false;
     final png =
@@ -292,50 +689,132 @@ final class RadarTileCache {
   }
 }
 
-final class _MetricsCachingProvider implements MapCachingProvider {
-  const _MetricsCachingProvider({
-    required this.delegate,
-    required this.metrics,
-    required this.onValidTile,
-    required this.smokeController,
+final class RadarGoogleTileProvider implements TileProvider {
+  const RadarGoogleTileProvider({required this.cache, required this.template});
+
+  final RadarTileCache cache;
+  final String template;
+
+  @override
+  Future<Tile> getTile(int x, int y, int? zoom) async {
+    if (zoom == null || zoom < 0) return TileProvider.noTile;
+    final world = 1 << zoom;
+    if (y < 0 || y >= world) return TileProvider.noTile;
+    final coordinate = RadarTileCoordinate(
+      x: ((x % world) + world) % world,
+      y: y,
+      zoom: zoom,
+    );
+    final bytes = await cache._tileBytes(template, coordinate);
+    return bytes == null ? TileProvider.noTile : Tile(256, 256, bytes);
+  }
+}
+
+@immutable
+final class RadarTileCoordinate {
+  const RadarTileCoordinate({
+    required this.x,
+    required this.y,
+    required this.zoom,
   });
 
-  final MapCachingProvider delegate;
-  final RadarTileMetrics metrics;
-  final VoidCallback onValidTile;
-  final _RadarSmokeController smokeController;
+  final int x;
+  final int y;
+  final int zoom;
 
-  @override
-  bool get isSupported => delegate.isSupported;
-
-  @override
-  Future<CachedMapTile?> getTile(String url) async {
-    if (smokeController.shouldBypassCache) return null;
-    final value = await delegate.getTile(url);
-    if (value != null && !RadarTileCache.isSupportedImageBytes(value.bytes)) {
-      metrics.recordCacheLookup(url, hit: false);
-      return null;
-    }
-    metrics.recordCacheLookup(
-      url,
-      hit: value != null && !value.metadata.isStale,
-    );
-    if (value != null) onValidTile();
-    return value;
+  RadarTileCoordinate ancestorAt(int maxZoom) {
+    if (zoom <= maxZoom) return this;
+    final delta = zoom - maxZoom;
+    return RadarTileCoordinate(x: x >> delta, y: y >> delta, zoom: maxZoom);
   }
 
+  String resolve(String template) => template
+      .replaceAll('{z}', '$zoom')
+      .replaceAll('{x}', '$x')
+      .replaceAll('{y}', '$y');
+
   @override
-  Future<void> putTile({
-    required String url,
-    required CachedMapTileMetadata metadata,
-    Uint8List? bytes,
-  }) async {
-    if (bytes != null && !RadarTileCache.isSupportedImageBytes(bytes)) return;
-    await delegate.putTile(url: url, metadata: metadata, bytes: bytes);
-    if (bytes != null) {
-      metrics.recordDownload(url, bytes.length);
-      onValidTile();
+  bool operator ==(Object other) =>
+      other is RadarTileCoordinate &&
+      x == other.x &&
+      y == other.y &&
+      zoom == other.zoom;
+
+  @override
+  int get hashCode => Object.hash(x, y, zoom);
+}
+
+/// Platform-independent viewport math retained for unit tests and diagnostics.
+final class TileViewport {
+  const TileViewport._();
+
+  static List<String> visibleTileUrls({
+    required double centerLatitude,
+    required double centerLongitude,
+    required double north,
+    required double south,
+    required double east,
+    required double west,
+    required double zoom,
+    required Iterable<String> templates,
+    int margin = 1,
+    int maxTiles = 24,
+    int maxZoom = 10,
+  }) {
+    final tileZoom = zoom.floor().clamp(0, maxZoom).toInt();
+    final world = 1 << tileZoom;
+    final minX = _longitudeToX(west, world).floor() - margin;
+    final maxX = _longitudeToX(east, world).ceil() + margin;
+    final minY = (_latitudeToY(north, world).floor() - margin).clamp(
+      0,
+      world - 1,
+    );
+    final maxY = (_latitudeToY(south, world).ceil() + margin).clamp(
+      0,
+      world - 1,
+    );
+    final centerX = _longitudeToX(centerLongitude, world);
+    final centerY = _latitudeToY(centerLatitude, world);
+    final coordinates = <RadarTileCoordinate>[];
+    for (var y = minY; y <= maxY; y++) {
+      for (var x = minX; x <= maxX; x++) {
+        coordinates.add(
+          RadarTileCoordinate(
+            x: ((x % world) + world) % world,
+            y: y,
+            zoom: tileZoom,
+          ),
+        );
+      }
     }
+    coordinates.sort((a, b) {
+      final ad =
+          math.pow(a.x + 0.5 - centerX, 2) + math.pow(a.y + 0.5 - centerY, 2);
+      final bd =
+          math.pow(b.x + 0.5 - centerX, 2) + math.pow(b.y + 0.5 - centerY, 2);
+      return ad.compareTo(bd);
+    });
+    final urls = <String>[];
+    for (final template in templates) {
+      for (final coordinate in coordinates) {
+        if (urls.length >= maxTiles) break;
+        urls.add(coordinate.resolve(template));
+      }
+      if (urls.length >= maxTiles) break;
+    }
+    return urls.toSet().toList(growable: false);
+  }
+
+  static double _longitudeToX(double longitude, int world) =>
+      ((longitude + 180) / 360) * world;
+
+  static double _latitudeToY(double latitude, int world) {
+    final clamped = latitude.clamp(-85.05112878, 85.05112878);
+    final radians = clamped * math.pi / 180;
+    return (1 -
+            (math.log(math.tan(radians) + 1 / math.cos(radians)) / math.pi)) /
+        2 *
+        world;
   }
 }
 
@@ -345,24 +824,29 @@ final class _RadarSmokeController {
   final bool enabled;
   final ValueNotifier<int> failureCount = ValueNotifier<int>(0);
   bool _armed = false;
+  String? _targetUrl;
 
-  bool get shouldBypassCache => enabled && _armed;
+  bool shouldBypassCacheFor(String url) =>
+      enabled && _armed && (_targetUrl == null || _targetUrl == url);
 
-  bool arm() {
+  bool arm({String? url}) {
     if (!enabled) return false;
     _armed = true;
+    _targetUrl = url;
     return true;
   }
 
-  bool consumeFailure() {
-    if (!_armed) return false;
+  bool consumeFailure(String url) {
+    if (!_armed || (_targetUrl != null && _targetUrl != url)) return false;
     _armed = false;
+    _targetUrl = null;
     failureCount.value++;
     return true;
   }
 
   void resetFailures() {
     _armed = false;
+    _targetUrl = null;
     failureCount.value = 0;
   }
 }
@@ -375,7 +859,7 @@ final class _RadarSmokeClient extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) {
-    if (_controller.consumeFailure()) {
+    if (_controller.consumeFailure(request.url.toString())) {
       return Future<http.StreamedResponse>.value(
         http.StreamedResponse(
           const Stream<List<int>>.empty(),
@@ -391,75 +875,4 @@ final class _RadarSmokeClient extends http.BaseClient {
 
   @override
   void close() => _delegate.close();
-}
-
-final class TileViewport {
-  const TileViewport._();
-
-  static List<String> visibleTileUrls(
-    MapCamera camera,
-    Iterable<String> templates, {
-    int margin = 1,
-    int maxTiles = 24,
-    int? maxZoom,
-  }) {
-    final zoom = maxZoom == null
-        ? camera.zoom.floor()
-        : camera.zoom.floor().clamp(0, maxZoom).toInt();
-    final world = 1 << zoom;
-    final bounds = camera.visibleBounds;
-    final west = _longitudeToX(bounds.west, world);
-    final east = _longitudeToX(bounds.east, world);
-    final north = _latitudeToY(bounds.north, world);
-    final south = _latitudeToY(bounds.south, world);
-    final minX = west.floor() - margin;
-    final maxX = east.ceil() + margin;
-    final minY = (north.floor() - margin).clamp(0, world - 1);
-    final maxY = (south.ceil() + margin).clamp(0, world - 1);
-    final centerX = _longitudeToX(camera.center.longitude, world);
-    final centerY = _latitudeToY(camera.center.latitude, world);
-    final coordinates = <({int x, int y})>[];
-    for (var y = minY; y <= maxY; y++) {
-      for (var x = minX; x <= maxX; x++) {
-        coordinates.add((x: x, y: y));
-      }
-    }
-    // Load the tile under the crosshair first, then expand outwards. The old
-    // top-left scan could spend the complete first batch on pan-buffer tiles
-    // that were not actually visible to the user.
-    coordinates.sort((a, b) {
-      final aDistance =
-          math.pow(a.x + 0.5 - centerX, 2) + math.pow(a.y + 0.5 - centerY, 2);
-      final bDistance =
-          math.pow(b.x + 0.5 - centerX, 2) + math.pow(b.y + 0.5 - centerY, 2);
-      return aDistance.compareTo(bDistance);
-    });
-    final tiles = <String>[];
-    for (final template in templates) {
-      for (final coordinate in coordinates) {
-        if (tiles.length >= maxTiles) break;
-        final wrappedX = ((coordinate.x % world) + world) % world;
-        tiles.add(
-          template
-              .replaceAll('{z}', '$zoom')
-              .replaceAll('{x}', '$wrappedX')
-              .replaceAll('{y}', '${coordinate.y}'),
-        );
-      }
-      if (tiles.length >= maxTiles) break;
-    }
-    return tiles.toSet().toList(growable: false);
-  }
-
-  static double _longitudeToX(double longitude, int world) =>
-      ((longitude + 180) / 360) * world;
-
-  static double _latitudeToY(double latitude, int world) {
-    final clamped = latitude.clamp(-85.05112878, 85.05112878);
-    final radians = clamped * 3.141592653589793 / 180;
-    return (1 -
-            (math.log(math.tan(radians) + 1 / math.cos(radians)) / math.pi)) /
-        2 *
-        world;
-  }
 }

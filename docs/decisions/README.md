@@ -8,7 +8,7 @@ explique pourquoi elle est remplacée.
 | --- | --- | --- |
 | [0001](0001-weather-provider.md) | Open-Meteo pour les prévisions générales | Accepté |
 | [0002](0002-radar-provider.md) | Rainbow pour le radar de production | Accepté |
-| [0003](0003-basemap-provider.md) | OpenFreeMap par défaut, Esri satellite Premium | Accepté |
+| [0003](0003-basemap-provider.md) | Google Maps satellite hybride pour tous | Remplacé le 2026-08-25 |
 | [0004](0004-backend-platform.md) | Monolithe modulaire sur Cloud Run/Firebase | Accepté |
 | [0005](0005-purchases-entitlements.md) | RevenueCat derrière `SubscriptionRepository` | Accepté |
 | [0006](0006-ads-consent.md) | AdMob + UMP derrière repositories | Accepté |

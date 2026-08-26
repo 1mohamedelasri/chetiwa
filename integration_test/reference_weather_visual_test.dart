@@ -50,11 +50,11 @@ void main() {
 
       await tester.tap(find.text('Radar'));
       await _waitFor(tester, find.byKey(const Key('radar-local-time')));
-      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 400));
       await binding.takeScreenshot('${_platformName}_${scenario.name}_radar');
 
       await tester.tap(find.text('Prévisions'));
-      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('PRÉVISIONS HEURE PAR HEURE'), findsOneWidget);
       await binding.takeScreenshot(
         '${_platformName}_${scenario.name}_forecast',

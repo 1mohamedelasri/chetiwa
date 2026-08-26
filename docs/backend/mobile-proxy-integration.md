@@ -61,7 +61,8 @@ dans les configurations de publication.
 - `integration_test/backend_proxy_smoke_test.dart` : Graph, Radar et Prévisions
   chargés via le backend réel, fallback coupé ; il vide uniquement le cache de
   tuiles Radar, attend une vraie image décodée, déplace la carte dans quatre
-  directions, vérifie le zoom 7→10, parcourt toute l'animation utile et injecte
+  directions, vérifie le zoom 7→14 (sur-zoom local exact au-delà de z10),
+  parcourt toute l'animation utile et injecte
   un unique HTTP 502 avant de vérifier la récupération ;
 - parcours validé sur Android Emulator et iOS Simulator ;
 - compilation Android release et iOS avec configuration `production` HTTPS.

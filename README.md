@@ -34,13 +34,47 @@ Sans `CHETIWA_API_BASE_URL`, le profil développement conserve provisoirement
 les appels directs existants. Ce fallback est automatiquement interdit lorsque
 `CHETIWA_ENV=production`.
 
-The free app uses OpenFreeMap. Esri World Imagery is an optional Chetiwa+
-feature and stays disabled unless the remote cost switch and a licensed Esri
-key are both configured:
+### Tester la prévision modèle Premium jusqu'à +120 min
+
+Dans Android Studio ou IntelliJ, sélectionner
+**Chetiwa Premium +120 (debug)** dans la liste des configurations puis démarrer
+sur un téléphone ou un simulateur. La configuration JetBrains partagée se
+trouve dans `.run/Chetiwa_Premium_120_debug.run.xml`. Elle utilise les données
+LibreWXR réelles, active localement Chetiwa+ et affiche les trames modèle après
++60 min. Elle ne simule pas un achat Store et ne peut jamais activer Premium
+lorsque `CHETIWA_ENV=production`.
+
+L'équivalent en terminal est :
 
 ```sh
-flutter run --dart-define=ARCGIS_API_KEY=your_key
+flutter run \
+  --dart-define=CHETIWA_ENV=development \
+  --dart-define=CHETIWA_PREMIUM_RADAR_TEST_MODE=true \
+  --dart-define=CHETIWA_ALLOW_DIRECT_PROVIDER_FALLBACK=true
 ```
+
+Le test automatisé équivalent, exécutable directement depuis IntelliJ sur un
+iPhone ou Android réel, est
+`integration_test/premium_radar_120_smoke_test.dart`. Il vérifie que la dernière
+trame est réellement classée modèle, atteint au moins +120 min et s'affiche.
+
+Radar uses the native Google Maps SDK on Android and iOS. Hybrid satellite is
+the default for every user; the standard Google map remains selectable. Use
+separate API-restricted and application-restricted keys:
+
+```sh
+# Android (gitignored file)
+printf '\nMAPS_API_KEY=your_android_key\n' >> android/local.properties
+
+# iOS (copy the committed template, then replace its placeholder)
+cp ios/Flutter/GoogleMaps.xcconfig.example ios/Flutter/GoogleMaps.xcconfig
+```
+
+Enable **Maps SDK for Android** and **Maps SDK for iOS** in the Google Cloud
+project. No Google map ID is configured.
+
+The release workflow also requires the GitHub Actions secrets
+`GOOGLE_MAPS_ANDROID_API_KEY` and `GOOGLE_MAPS_IOS_API_KEY`.
 
 ## Verify
 

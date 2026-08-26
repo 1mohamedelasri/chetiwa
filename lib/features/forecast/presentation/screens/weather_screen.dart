@@ -9,12 +9,10 @@ import '../../../../core/time/weather_clock.dart';
 import '../../../../core/location/location_repository.dart';
 import '../../../../core/location/active_location_controller.dart';
 import '../../../../core/l10n/chetiwa_localizations.dart';
-import '../../../../core/config/api_config.dart';
 import '../../../../core/notifications/rain_alert_navigation_controller.dart';
 import '../../../../core/widgets/weather_data_status.dart';
 import '../../../radar/application/radar_bloc.dart';
 import '../../../radar/domain/repositories/radar_repository.dart';
-import '../../../radar/domain/services/radar_basemap_policy.dart';
 import '../../../radar/presentation/widgets/radar_pane.dart';
 import '../../../analytics/application/analytics_tracker.dart';
 import '../../../alerts/application/local_rain_alert_coordinator.dart';
@@ -85,9 +83,12 @@ final class _WeatherViewState extends State<_WeatherView>
   Coordinates? _radarCoordinates;
   Timer? _resumeForecastTimer;
   Timer? _resumeRadarTimer;
+  Timer? _resumePlaybackTimer;
   Timer? _resumeAlertTimer;
   Timer? _initialRadarTimer;
+  Timer? _radarWarmupTimer;
   DateTime? _lastResumeRefreshAt;
+  bool _radarSurfaceWarmed = false;
 
   @override
   void initState() {
@@ -121,6 +122,12 @@ final class _WeatherViewState extends State<_WeatherView>
           }
         });
       }
+      // The native map and radar decoders stay out of the first interactive
+      // second. Selecting Radar still mounts it immediately.
+      _radarWarmupTimer = Timer(const Duration(milliseconds: 1200), () {
+        if (!mounted || _radarSurfaceWarmed) return;
+        setState(() => _radarSurfaceWarmed = true);
+      });
     });
   }
 
@@ -128,8 +135,10 @@ final class _WeatherViewState extends State<_WeatherView>
   void dispose() {
     _resumeForecastTimer?.cancel();
     _resumeRadarTimer?.cancel();
+    _resumePlaybackTimer?.cancel();
     _resumeAlertTimer?.cancel();
     _initialRadarTimer?.cancel();
+    _radarWarmupTimer?.cancel();
     _activeLocationController.removeListener(_syncRadarLocation);
     _alertNavigationController.removeListener(_openRainAlert);
     _entitlementController.removeListener(_syncRadarPremiumAccess);
@@ -180,11 +189,19 @@ final class _WeatherViewState extends State<_WeatherView>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!mounted) return;
     if (state == AppLifecycleState.resumed) {
-      // Resume the already-buffered animation immediately. Network, decoding
-      // and alert work are then staggered after the first responsive frame.
-      context.read<RadarBloc>().add(const RadarPlaybackResumed());
+      // Give the resumed app one responsive frame before restarting raster
+      // decoding. Network and alert work are staggered behind playback.
       final now = DateTime.timestamp();
       final lastRefresh = _lastResumeRefreshAt;
+      _resumePlaybackTimer?.cancel();
+      // Playback must resume after every wake, including a quick lock/unlock.
+      // Only the network refreshes are throttled; returning early here used to
+      // leave an otherwise healthy Radar permanently paused.
+      _resumePlaybackTimer = Timer(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          context.read<RadarBloc>().add(const RadarPlaybackResumed());
+        }
+      });
       if (lastRefresh != null &&
           now.difference(lastRefresh) < const Duration(seconds: 20)) {
         return;
@@ -198,14 +215,14 @@ final class _WeatherViewState extends State<_WeatherView>
           context.read<ForecastBloc>().add(const ForecastRefreshed());
         }
       });
-      _resumeRadarTimer = Timer(const Duration(milliseconds: 450), () {
+      _resumeRadarTimer = Timer(const Duration(milliseconds: 1400), () {
         if (mounted) {
           // A silent refresh preserves the visible frames and avoids a second
           // disk-cache read that RadarRequested performed on every resume.
           context.read<RadarBloc>().add(const RadarRefreshed());
         }
       });
-      _resumeAlertTimer = Timer(const Duration(milliseconds: 900), () {
+      _resumeAlertTimer = Timer(const Duration(milliseconds: 2200), () {
         if (mounted) {
           unawaited(context.read<LocalRainAlertCoordinator>().sync());
         }
@@ -213,6 +230,12 @@ final class _WeatherViewState extends State<_WeatherView>
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
+      // A quick lock/unlock can otherwise leave delayed refreshes running while
+      // the process is already backgrounded.
+      _resumeForecastTimer?.cancel();
+      _resumeRadarTimer?.cancel();
+      _resumePlaybackTimer?.cancel();
+      _resumeAlertTimer?.cancel();
       context.read<RadarBloc>().add(const RadarPlaybackSuspended());
     }
   }
@@ -300,10 +323,8 @@ final class _WeatherViewState extends State<_WeatherView>
               Expanded(
                 child: BlocBuilder<WeatherSectionCubit, WeatherSection>(
                   builder: (context, section) => IndexedStack(
-                    // Radar is a primary surface. Keep it laid out behind
-                    // Graph so flutter_map can load the current viewport while
-                    // the user reads the forecast instead of starting every
-                    // network request only after the first Radar tap.
+                    // Radar is a primary surface. Keep the native map warm
+                    // behind Graph so its first visible frame is immediate.
                     index: section.index,
                     children: [
                       BlocBuilder<RadarBloc, RadarState>(
@@ -316,31 +337,23 @@ final class _WeatherViewState extends State<_WeatherView>
                               : const [],
                         ),
                       ),
-                      RadarPane(
-                        key: const ValueKey('radar'),
-                        forecast: forecast,
-                        snapshot: state.snapshot,
-                        isActive: section == WeatherSection.radar,
-                        satelliteAvailable:
-                            RadarBasemapPolicy.canUsePremiumSatellite(
-                              isPremium: context
-                                  .watch<EntitlementController>()
-                                  .isPremium,
-                              premiumSatelliteEnabled: context
+                      if (_radarSurfaceWarmed ||
+                          section == WeatherSection.radar)
+                        RadarPane(
+                          key: const ValueKey('radar'),
+                          forecast: forecast,
+                          snapshot: state.snapshot,
+                          isActive: section == WeatherSection.radar,
+                          modelForecastLocked:
+                              context
                                   .watch<AppFeatureFlagController>()
-                                  .premiumSatelliteAvailable,
-                              arcGisConfigured:
-                                  ApiConfig.arcGisApiKey.isNotEmpty,
-                            ),
-                        modelForecastLocked:
-                            context
-                                .watch<AppFeatureFlagController>()
-                                .premiumAvailable &&
-                            context
-                                .watch<AppFeatureFlagController>()
-                                .premiumRadarModelAvailable &&
-                            !context.watch<EntitlementController>().isPremium,
-                      ),
+                                  .premiumRadarModelAvailable &&
+                              !context.watch<EntitlementController>().isPremium,
+                        )
+                      else
+                        const SizedBox.expand(
+                          key: ValueKey('radar-warmup-deferred'),
+                        ),
                       ForecastPane(
                         key: const ValueKey('forecast'),
                         forecast: forecast,

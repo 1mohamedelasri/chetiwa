@@ -12,16 +12,16 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('free Radar exposes only the OpenFreeMap standard basemap', (
+  testWidgets('satellite and standard Google basemaps are available to all', (
     tester,
   ) async {
-    await _pumpRadar(tester, satelliteAvailable: false);
+    await _pumpRadar(tester);
 
     await tester.tap(find.byKey(const Key('radar-layers-button')));
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.text('Standard'), findsOneWidget);
-    expect(find.text('Satellite'), findsNothing);
+    expect(find.text('Satellite'), findsOneWidget);
     Navigator.of(tester.element(find.text('Standard'))).pop();
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpWidget(const SizedBox.shrink());
@@ -29,10 +29,7 @@ void main() {
   });
 }
 
-Future<void> _pumpRadar(
-  WidgetTester tester, {
-  required bool satelliteAvailable,
-}) async {
+Future<void> _pumpRadar(WidgetTester tester) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -63,11 +60,7 @@ Future<void> _pumpRadar(
       home: Scaffold(
         body: BlocProvider.value(
           value: radarBloc,
-          child: RadarPane(
-            forecast: forecast,
-            snapshot: snapshot,
-            satelliteAvailable: satelliteAvailable,
-          ),
+          child: RadarPane(forecast: forecast, snapshot: snapshot),
         ),
       ),
     ),

@@ -12,8 +12,10 @@ typedef AnalyticsCollectionUpdater = Future<void> Function(bool enabled);
 final class AnalyticsConsentController extends ChangeNotifier {
   AnalyticsConsentController({
     required bool initiallyEnabled,
+    bool initiallyDecided = false,
     AnalyticsCollectionUpdater? updateCollection,
   }) : _enabled = initiallyEnabled,
+       _hasRecordedChoice = initiallyDecided,
        _updateCollection = updateCollection ?? _setFirebaseCollectionEnabled {
     _runtimeCollectionEnabled = initiallyEnabled;
   }
@@ -23,8 +25,10 @@ final class AnalyticsConsentController extends ChangeNotifier {
 
   final AnalyticsCollectionUpdater _updateCollection;
   bool _enabled;
+  bool _hasRecordedChoice;
 
   bool get isEnabled => _enabled;
+  bool get hasRecordedChoice => _hasRecordedChoice;
   static bool get runtimeCollectionEnabled => _runtimeCollectionEnabled;
 
   static Future<void> _setFirebaseCollectionEnabled(bool enabled) async {
@@ -36,15 +40,15 @@ final class AnalyticsConsentController extends ChangeNotifier {
 
   /// Returns false only when enabling the SDK itself failed.
   Future<bool> setEnabled(bool enabled) async {
-    if (_enabled == enabled) return true;
+    if (_enabled == enabled && _hasRecordedChoice) return true;
 
-    if (enabled) {
+    if (enabled != _enabled && enabled) {
       try {
         await _updateCollection(true);
       } catch (_) {
         return false;
       }
-    } else {
+    } else if (enabled != _enabled) {
       // A local opt-out must take effect even if the SDK is temporarily
       // unavailable. The next launch reads the persisted false value first.
       try {
@@ -55,6 +59,7 @@ final class AnalyticsConsentController extends ChangeNotifier {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setBool(storageKey, enabled);
     _enabled = enabled;
+    _hasRecordedChoice = true;
     _runtimeCollectionEnabled = enabled;
     notifyListeners();
     return true;
@@ -67,9 +72,10 @@ final class AnalyticsConsentController extends ChangeNotifier {
     } catch (_) {}
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove(storageKey);
-    if (!_enabled) return;
+    final changed = _enabled || _hasRecordedChoice;
     _enabled = false;
+    _hasRecordedChoice = false;
     _runtimeCollectionEnabled = false;
-    notifyListeners();
+    if (changed) notifyListeners();
   }
 }

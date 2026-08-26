@@ -47,10 +47,13 @@ void main() {
       find.byKey(const Key('selected-navigation-indicator')),
       findsOneWidget,
     );
-    // Radar stays mounted offstage so its current viewport is warm before the
-    // first navigation tap.
+    // Heavy map decoding is kept out of the first interactive second.
     expect(
       find.byKey(const ValueKey('radar'), skipOffstage: false),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('radar-warmup-deferred'), skipOffstage: false),
       findsOneWidget,
     );
     final radarBloc = tester
@@ -70,7 +73,7 @@ void main() {
 
     await tester.tap(find.text('Radar'));
     await tester.pump();
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(dependencies.usageQuotaController.radarSessions.used, 1);
     await tester.tap(find.text('Radar'));
     await tester.pump();
@@ -83,6 +86,57 @@ void main() {
         .read<WeatherSectionCubit>();
     expect(section.state, WeatherSection.radar);
     expect((radarBloc.state as RadarReady).isPlaying, isTrue);
+    final playheadPaint = find.descendant(
+      of: find.byKey(const Key('radar-time-ruler')),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is CustomPaint &&
+            widget.painter.runtimeType.toString() == '_RadarTimeRulerPainter',
+      ),
+    );
+    DateTime cursorTime() =>
+        (tester.widget<CustomPaint>(playheadPaint).painter as dynamic)
+                .cursorTime
+            as DateTime;
+    final selectedBeforeMotion = (radarBloc.state as RadarReady).selectedIndex;
+    final cursorBeforeMotion = cursorTime();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(cursorTime().isAfter(cursorBeforeMotion), isTrue);
+    expect(
+      (radarBloc.state as RadarReady).selectedIndex,
+      selectedBeforeMotion,
+      reason: 'The playhead must move before the next discrete Radar frame',
+    );
+    final scrubGesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('radar-time-ruler'))),
+    );
+    await tester.pump();
+    final cursorAtTouch = cursorTime();
+    // Cross Flutter's drag slop while staying well inside the same 10-minute
+    // source-frame interval.
+    await scrubGesture.moveBy(const Offset(-20, 0));
+    await tester.pump();
+    expect(cursorTime(), isNot(cursorAtTouch));
+    expect(
+      cursorTime(),
+      isNot((radarBloc.state as RadarReady).selectedFrame.time),
+      reason:
+          'The red cursor must follow the finger between discrete 10-minute Radar frames',
+    );
+    await scrubGesture.moveBy(const Offset(-90, 0));
+    await tester.pump();
+    expect((radarBloc.state as RadarReady).isPlaying, isFalse);
+    final userSelectedIndex = (radarBloc.state as RadarReady).selectedIndex;
+    await tester.pump(const Duration(seconds: 3));
+    expect(
+      (radarBloc.state as RadarReady).selectedIndex,
+      userSelectedIndex,
+      reason: 'Autoplay must never compete with an active timeline drag',
+    );
+    await scrubGesture.up();
+    await tester.pump();
+    await tester.pump();
+    expect((radarBloc.state as RadarReady).isPlaying, isTrue);
     expect(find.byKey(const Key('radar-city-pin')), findsOneWidget);
     expect(find.byKey(const Key('radar-time-ruler')), findsOneWidget);
     expect(find.byKey(const Key('radar-reset-button')), findsOneWidget);
@@ -90,17 +144,17 @@ void main() {
     expect(find.textContaining('dernière observation'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('radar-layers-button')));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Couches de la carte'), findsOneWidget);
     expect(find.text('Standard'), findsOneWidget);
-    expect(find.text('Satellite'), findsNothing);
+    expect(find.text('Satellite'), findsOneWidget);
     expect(find.text('Radar de précipitations'), findsOneWidget);
     expect(
       find.byKey(const Key('radar-precipitation-explanation')),
       findsOneWidget,
     );
     Navigator.of(tester.element(find.text('Standard'))).pop();
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 400));
 
     await tester.tap(find.byKey(const Key('radar-city-pin')));
     await tester.pump(const Duration(milliseconds: 80));

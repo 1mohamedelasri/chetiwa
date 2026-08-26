@@ -228,6 +228,7 @@ void main() {
                       state: radarState,
                       forecast: forecast,
                       snapshot: snapshot,
+                      playbackProgress: const AlwaysStoppedAnimation(0),
                     ),
                   ),
                   SizedBox(

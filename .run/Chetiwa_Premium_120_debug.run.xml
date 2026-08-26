@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Chetiwa Premium +120 (debug)" type="FlutterRunConfigurationType" factoryName="Flutter">
+    <option name="additionalArgs" value="--dart-define=CHETIWA_ENV=development --dart-define=CHETIWA_PREMIUM_RADAR_TEST_MODE=true --dart-define=CHETIWA_ALLOW_DIRECT_PROVIDER_FALLBACK=true" />
+    <option name="filePath" value="$PROJECT_DIR$/lib/main.dart" />
+    <method v="2" />
+  </configuration>
+</component>

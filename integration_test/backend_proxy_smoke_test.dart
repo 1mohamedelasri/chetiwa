@@ -1,10 +1,13 @@
 import 'package:chetiwa/app/app.dart';
+import 'package:chetiwa/core/config/api_config.dart';
 import 'package:chetiwa/features/radar/application/radar_bloc.dart';
 import 'package:chetiwa/features/radar/data/cache/radar_tile_cache.dart';
+import 'package:chetiwa/features/radar/domain/services/radar_frame_policy.dart';
+import 'package:chetiwa/features/radar/presentation/widgets/radar_pane.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:timezone/data/latest.dart' as tz;
 
@@ -23,7 +26,6 @@ void main() {
     );
     await tester.pumpWidget(const ChetiwaApp());
     await _waitFor(tester, find.byKey(const Key('rain-chart')));
-    expect(find.text('Paris, France'), findsOneWidget);
 
     await tester.tap(find.text('Radar'));
     await tester.pump();
@@ -34,9 +36,30 @@ void main() {
       timeout: const Duration(seconds: 45),
     );
 
-    final map = find.byType(FlutterMap);
+    final map = find.byType(GoogleMap);
     expect(map, findsOneWidget);
     final tileCache = RadarTileCache.shared;
+    final radarBloc = BlocProvider.of<RadarBloc>(
+      tester.element(find.byKey(const Key('radar-local-time'))),
+    );
+    if (ApiConfig.premiumRadarTestMode) {
+      final premiumRadar = radarBloc.state as RadarReady;
+      final latestObservation = premiumRadar.frames
+          .where((frame) => frame.isObservation)
+          .last;
+      expect(
+        premiumRadar.frames.any((frame) => frame.isModelForecast),
+        isTrue,
+        reason: 'Premium debug mode did not expose any model frame.',
+      );
+      expect(
+        premiumRadar.frames.last.time
+            .difference(latestObservation.time)
+            .inMinutes,
+        greaterThanOrEqualTo(120),
+        reason: 'The Premium model timeline does not reach +120 minutes.',
+      );
+    }
     for (final movement in const <Offset>[
       Offset(-180, 0),
       Offset(0, -180),
@@ -56,25 +79,57 @@ void main() {
       );
     }
 
-    for (var zoom = 8; zoom <= 10; zoom++) {
-      final mapCenter = tester.getCenter(map) + const Offset(80, 0);
-      await tester.tapAt(mapCenter);
-      await tester.pump(const Duration(milliseconds: 60));
-      await tester.tapAt(mapCenter);
+    // LibreWXR is native through z10. City zooms 11-14 must keep rendering
+    // the exact locally cropped ancestor while the Google basemap zooms.
+    for (var zoom = 8; zoom <= 14; zoom++) {
+      expect(await RadarMapSmokeTestBridge.zoomTo(zoom.toDouble()), isTrue);
       await _waitFor(
         tester,
         find.byKey(ValueKey('radar-zoom-$zoom')),
         timeout: const Duration(seconds: 15),
       );
-      // Keep consecutive gestures outside Android's double-tap timeout so a
-      // tap from the next loop cannot merge with the previous gesture and skip
-      // an intermediate zoom level.
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 250));
     }
 
-    final radarBloc = BlocProvider.of<RadarBloc>(
-      tester.element(find.byKey(const Key('radar-local-time'))),
+    final tilesBeforeZoomOut = tileCache.successfulTileResponseCount.value;
+    expect(await RadarMapSmokeTestBridge.zoomTo(5), isTrue);
+    await _waitFor(
+      tester,
+      find.byKey(const ValueKey('radar-zoom-5')),
+      timeout: const Duration(seconds: 5),
     );
+    await _waitForCondition(
+      tester,
+      () => tileCache.successfulTileResponseCount.value > tilesBeforeZoomOut,
+      reason: 'Radar tiles did not recover promptly after a large zoom-out',
+      timeout: const Duration(seconds: 5),
+    );
+    await _waitForCondition(
+      tester,
+      () => (radarBloc.state as RadarReady).isPlaying,
+      reason: 'Rapid consecutive zooms left Radar playback suspended',
+      timeout: const Duration(seconds: 3),
+    );
+
+    radarBloc.add(const RadarPlaybackPaused());
+    await tester.pump();
+    final beforeSwap = radarBloc.state as RadarReady;
+    final swapIndex = (beforeSwap.selectedIndex + 1) % beforeSwap.frames.length;
+    RadarMapSmokeTestBridge.resetMaxTileOverlayCount();
+    radarBloc.add(RadarFrameSelected(swapIndex));
+    await _waitForCondition(
+      tester,
+      () => RadarMapSmokeTestBridge.tileOverlayCount == 1,
+      reason: 'The preloaded Radar frame was not swapped into view',
+    );
+    expect(
+      RadarMapSmokeTestBridge.maxTileOverlayCount,
+      1,
+      reason: 'Radar animation used a two-layer opacity dissolve.',
+    );
+
+    radarBloc.add(const RadarPlaybackRestarted());
+    await tester.pump();
     final initialRadar = radarBloc.state as RadarReady;
     final expectedPlaybackIndices = <int>{
       for (
@@ -85,10 +140,11 @@ void main() {
         index,
     };
     final visitedPlaybackIndices = <int>{initialRadar.playbackStartIndex};
-    await tester.tap(find.byKey(const Key('radar-playback-button')));
-    await tester.pump();
     for (var index = 0; index < expectedPlaybackIndices.length; index++) {
-      await tester.pump(const Duration(milliseconds: 1550));
+      await tester.pump(
+        RadarFramePolicy.playbackFrameDuration +
+            const Duration(milliseconds: 50),
+      );
       final state = radarBloc.state as RadarReady;
       visitedPlaybackIndices.add(state.selectedIndex);
     }
@@ -100,17 +156,17 @@ void main() {
     await tester.tap(find.byKey(const Key('radar-playback-button')));
     await tester.pump();
 
+    final probeUrl = initialRadar.selectedFrame.tileUrlTemplate!
+        .replaceAll('{z}', '7')
+        .replaceAll('{x}', '64')
+        .replaceAll('{y}', '44');
     expect(
-      tileCache.simulateNext502ForSmokeTest(),
+      tileCache.simulateNext502ForSmokeTest(url: probeUrl),
       isTrue,
       reason:
           'Run with --dart-define=CHETIWA_RADAR_SMOKE_TEST=true to exercise recovery.',
     );
     final failuresBefore = tileCache.simulatedFailureCount.value;
-    final probeUrl = initialRadar.selectedFrame.tileUrlTemplate!
-        .replaceAll('{z}', '7')
-        .replaceAll('{x}', '64')
-        .replaceAll('{y}', '44');
     expect(
       await tileCache.fetchTileForSmokeTest(probeUrl),
       isFalse,
@@ -129,6 +185,19 @@ void main() {
     await _waitFor(tester, find.byKey(const Key('forecast-pane')));
     expect(find.text('PRÉVISIONS HEURE PAR HEURE'), findsOneWidget);
   });
+}
+
+Future<void> _waitForCondition(
+  WidgetTester tester,
+  bool Function() condition, {
+  required String reason,
+  Duration timeout = const Duration(seconds: 8),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!condition() && DateTime.now().isBefore(deadline)) {
+    await tester.pump(const Duration(milliseconds: 16));
+  }
+  expect(condition(), isTrue, reason: reason);
 }
 
 Future<void> _waitFor(

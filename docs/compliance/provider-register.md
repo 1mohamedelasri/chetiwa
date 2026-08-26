@@ -12,8 +12,7 @@ avant monétisation.
 | LibreWXR auto-hébergé | Radar et point-nowcast actuels | Bêta contrôlée après stabilité origine/CDN ; validation des données amont avant public | Capacité mesurée, VM Hetzner et Cloudflare ; pas de quota utilisateur fournisseur unique | Licence du code et droits/attributions de chaque donnée amont à archiver | Cache mobile, stale CDN et kill switch |
 | RainViewer | Ancien radar prototype | Non utilisé dans la configuration de production actuelle | API publique sans SLA commercial public | Attribution obligatoire ; autorisation commerciale écrite manquante | LibreWXR |
 | Rainbow | Radar Tiles et nowcast cible | Production après validation contrat | 30 k tiles/mois puis 0,20 $/1 k ; nowcast 5 k puis 0,10 $/1 k selon page officielle actuelle | Conditions, attribution, cache et DPA à archiver | Limiter frames + cache + désactivation |
-| OpenFreeMap | Fond vectoriel standard Radar et sélecteur de lieu | Production initiale autorisée selon les conditions publiques, sans SLA | Instance publique annoncée gratuite sans limite | Attribution OpenFreeMap/OpenMapTiles/OpenStreetMap visible | Cache disque, fond minimal ou PMTiles self-hosted |
-| Esri | Satellite Chetiwa+ optionnel | Désactivé par défaut ; activer après compte, token, budget et validation des achats | 2 M tuiles gratuites puis 0,15 $/1 k selon tarification actuelle | Token et attribution Esri/data | OpenFreeMap standard ; kill switch `PREMIUM_SATELLITE_ENABLED` |
+| Google Maps Platform | Fond satellite hybride Radar et carte standard du sélecteur, pour tous | Production après activation des SDK, facturation et clés restreintes | SKU SDK mobile sans Map ID ; surveiller la tarification et les quotas officiels | Conditions Google Maps, logo/attributions natifs, clés Android/iOS séparées | Graph/Prévisions restent utilisables ; désactivation Radar par configuration si incident |
 | Google Cloud/Firebase | API, devices, push, config, observabilité | Staging/prod après DPA et région UE | Free tiers + pay-as-you-go, budgets et max instances | DPA, sous-traitants et rétention à archiver | Cache mobile, runbook panne |
 | RevenueCat | Entitlements abonnements | Sandbox puis production | Gratuit jusqu’au seuil MTR officiel, puis pourcentage actuel | DPA, webhooks et politique de données | Validation store directe future |
 | Google AdMob/UMP | Ads et consentement | Production après consentement/config stores | Pas de coût fournisseur fixe attendu ; revenu variable | CMP, ATT si requis, Data Safety/App Privacy | Ads désactivées |
@@ -36,8 +35,7 @@ avant monétisation.
 - [RainViewer API](https://www.rainviewer.com/api.html)
 - [LibreWXR source](https://github.com/JoshuaKimsey/LibreWXR)
 - [Rainbow developer](https://developer.rainbow.ai/)
-- [OpenFreeMap](https://openfreemap.org/)
-- [OpenFreeMap terms](https://openfreemap.org/tos/)
-- [Esri basemap pricing](https://developers.arcgis.com/rest/static-basemap-tiles/)
+- [Google Maps Platform pricing](https://mapsplatform.google.com/pricing/)
+- [Google Maps Platform terms](https://cloud.google.com/maps-platform/terms)
 - [Firebase pricing](https://firebase.google.com/pricing)
 - [RevenueCat pricing](https://www.revenuecat.com/pricing)

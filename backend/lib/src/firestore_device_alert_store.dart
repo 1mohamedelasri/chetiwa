@@ -27,6 +27,7 @@ final class FirestoreDeviceAlertStore
     String Function()? idGenerator,
     this.maximumAlertsPerDevice = 5,
     this.inactiveDeviceTtl = const Duration(days: 180),
+    this.rainAlertCellSizeDegrees = 0.05,
     http.Client? ownedClient,
   }) : _api = api,
        _database = 'projects/$projectId/databases/$databaseId',
@@ -38,6 +39,7 @@ final class FirestoreDeviceAlertStore
   static Future<FirestoreDeviceAlertStore> connect({
     required String projectId,
     String databaseId = '(default)',
+    double rainAlertCellSizeDegrees = 0.05,
   }) async {
     final client = await clientViaApplicationDefaultCredentials(
       scopes: const <String>[firestore.FirestoreApi.datastoreScope],
@@ -46,6 +48,7 @@ final class FirestoreDeviceAlertStore
       api: firestore.FirestoreApi(client),
       projectId: projectId,
       databaseId: databaseId,
+      rainAlertCellSizeDegrees: rainAlertCellSizeDegrees,
       ownedClient: client,
     );
   }
@@ -58,6 +61,7 @@ final class FirestoreDeviceAlertStore
   final http.Client? _ownedClient;
   final int maximumAlertsPerDevice;
   final Duration inactiveDeviceTtl;
+  final double rainAlertCellSizeDegrees;
 
   Future<void> close() async => _ownedClient?.close();
 
@@ -85,6 +89,7 @@ final class FirestoreDeviceAlertStore
               'status': _string(metric.status),
               'activeAlerts': _integer(metric.activeAlerts),
               'cellsEvaluated': _integer(metric.cellsEvaluated),
+              'cellsSkipped': _integer(metric.cellsSkipped),
               'providerFailures': _integer(metric.providerFailures),
               'alertsEvaluated': _integer(metric.alertsEvaluated),
               'deliveriesProposed': _integer(metric.deliveriesProposed),
@@ -241,9 +246,15 @@ final class FirestoreDeviceAlertStore
       collectionId: 'alerts',
       allDescendants: true,
       field: 'enabled',
-      equals: _boolean(true),
+      value: _boolean(true),
     );
     final rules = alertDocuments.map(_alertRecord).toList(growable: false);
+    return _activeAlertsForRules(rules);
+  });
+
+  Future<List<ActiveRainAlert>> _activeAlertsForRules(
+    List<AlertRuleRecord> rules,
+  ) async {
     final names = <String>{
       for (final rule in rules) _deviceName(rule.ownerHash),
       for (final rule in rules) _stateName(rule.ownerHash, rule.id),
@@ -266,6 +277,73 @@ final class FirestoreDeviceAlertStore
       );
     }
     return active;
+  }
+
+  @override
+  Future<List<RainAlertCellSchedule>> listDueCellSchedules({
+    required DateTime now,
+    int limit = 500,
+  }) => _translate(() async {
+    final documents = await _query(
+      collectionId: 'alertCellSchedules',
+      field: 'nextCheckAt',
+      operator: 'LESS_THAN_OR_EQUAL',
+      value: _timestamp(now),
+      limit: limit,
+    );
+    return documents.map(_cellSchedule).toList(growable: false);
+  });
+
+  @override
+  Future<List<ActiveRainAlert>> listActiveAlertsForCell(String cellKey) =>
+      _translate(() async {
+        final documents = await _query(
+          collectionId: 'alerts',
+          allDescendants: true,
+          field: 'cellKey',
+          value: _string(cellKey),
+        );
+        final rules = documents
+            .map(_alertRecord)
+            .where((rule) => rule.enabled)
+            .toList(growable: false);
+        return _activeAlertsForRules(rules);
+      });
+
+  @override
+  Future<void> saveCellSchedule(RainAlertCellSchedule schedule) =>
+      _translate(() async {
+        final name = _cellScheduleName(schedule.cellKey);
+        await _api.projects.databases.documents.patch(
+          firestore.Document(
+            name: name,
+            fields: <String, firestore.Value>{
+              'cellKey': _string(schedule.cellKey),
+              'latitude': _double(schedule.latitude),
+              'longitude': _double(schedule.longitude),
+              'nextCheckAt': _timestamp(schedule.nextCheckAt),
+              'lastCheckedAt': _timestamp(schedule.lastCheckedAt),
+              'mode': _string(schedule.mode.name),
+              // Firestore TTL removes state shortly after a cell no longer has
+              // an active rule. The engine itself never polls inactive cells.
+              'expiresAt': _timestamp(
+                schedule.lastCheckedAt.add(const Duration(days: 7)),
+              ),
+            },
+          ),
+          name,
+        );
+      });
+
+  @override
+  Future<void> deleteCellSchedule(String cellKey) => _translate(() async {
+    try {
+      await _api.projects.databases.documents.delete(
+        _cellScheduleName(cellKey),
+      );
+    } on firestore.DetailedApiRequestError catch (error) {
+      if (error.status != 404) rethrow;
+    }
   });
 
   @override
@@ -299,7 +377,7 @@ final class FirestoreDeviceAlertStore
         final deliveryDocuments = await _query(
           collectionId: 'alertDeliveries',
           field: 'status',
-          equals: _string(AlertDeliveryStatus.pending.name),
+          value: _string(AlertDeliveryStatus.pending.name),
           limit: limit,
         );
         final drafts = deliveryDocuments
@@ -420,10 +498,19 @@ final class FirestoreDeviceAlertStore
   Future<bool> _deleteDevice(String ownerHash) async {
     if (await _device(ownerHash) == null) return false;
     final alerts = await _listAlertDocuments(ownerHash);
+    final affectedCellKeys = alerts
+        .map(_alertRecord)
+        .map(
+          (alert) => RainAlertCell.fromLocation(
+            alert.location,
+            sizeDegrees: rainAlertCellSizeDegrees,
+          ).key,
+        )
+        .toSet();
     final deliveries = await _query(
       collectionId: 'alertDeliveries',
       field: 'ownerHash',
-      equals: _string(ownerHash),
+      value: _string(ownerHash),
     );
     final names = <String>[
       ...alerts.map((document) => document.name).whereType<String>(),
@@ -446,6 +533,11 @@ final class FirestoreDeviceAlertStore
         ),
         _database,
       );
+    }
+    for (final cellKey in affectedCellKeys) {
+      if ((await listActiveAlertsForCell(cellKey)).isEmpty) {
+        await deleteCellSchedule(cellKey);
+      }
     }
     return true;
   }
@@ -501,6 +593,9 @@ final class FirestoreDeviceAlertStore
           'alerts',
           documentId: id,
         );
+        if (record.enabled) {
+          await _makeCellDue(record.location, instant);
+        }
         return record;
       } on firestore.DetailedApiRequestError catch (error) {
         if (error.status != 409 || attempt == 2) rethrow;
@@ -536,6 +631,27 @@ final class FirestoreDeviceAlertStore
       createdAt: existing.createdAt,
       updatedAt: _now().toUtc(),
     );
+    final existingCell = RainAlertCell.fromLocation(
+      existing.location,
+      sizeDegrees: rainAlertCellSizeDegrees,
+    );
+    final nextCell = RainAlertCell.fromLocation(
+      record.location,
+      sizeDegrees: rainAlertCellSizeDegrees,
+    );
+    final pollingRelevantChange =
+        !(existingDocument.fields?.containsKey('cellKey') ?? false) ||
+        existingCell.key != nextCell.key ||
+        existing.leadMinutes != record.leadMinutes ||
+        existing.minimumIntensity != record.minimumIntensity ||
+        (!existing.enabled && record.enabled);
+    final scheduleMissing =
+        record.enabled &&
+        !pollingRelevantChange &&
+        await _getOrNull(_cellScheduleName(nextCell.key)) == null;
+    if (record.enabled && (pollingRelevantChange || scheduleMissing)) {
+      await _makeCellDue(record.location, record.updatedAt);
+    }
     await _api.projects.databases.documents.patch(
       _alertDocument(record),
       _alertName(ownerHash, alertId),
@@ -562,6 +678,23 @@ final class FirestoreDeviceAlertStore
       _database,
     );
     return true;
+  }
+
+  Future<void> _makeCellDue(AlertLocation location, DateTime now) {
+    final cell = RainAlertCell.fromLocation(
+      location,
+      sizeDegrees: rainAlertCellSizeDegrees,
+    );
+    return saveCellSchedule(
+      RainAlertCellSchedule(
+        cellKey: cell.key,
+        latitude: cell.latitude,
+        longitude: cell.longitude,
+        nextCheckAt: now,
+        lastCheckedAt: now,
+        mode: RainAlertPollingMode.retry,
+      ),
+    );
   }
 
   Future<T> _translate<T>(Future<T> Function() operation) async {
@@ -627,15 +760,16 @@ final class FirestoreDeviceAlertStore
     required String collectionId,
     bool allDescendants = false,
     String? field,
-    firestore.Value? equals,
+    String operator = 'EQUAL',
+    firestore.Value? value,
     int? limit,
   }) async {
-    final filter = field != null && equals != null
+    final filter = field != null && value != null
         ? firestore.Filter(
             fieldFilter: firestore.FieldFilter(
               field: firestore.FieldReference(fieldPath: field),
-              op: 'EQUAL',
-              value: equals,
+              op: operator,
+              value: value,
             ),
           )
         : null;
@@ -729,6 +863,18 @@ final class FirestoreDeviceAlertStore
     );
   }
 
+  RainAlertCellSchedule _cellSchedule(firestore.Document document) {
+    final fields = document.fields ?? const <String, firestore.Value>{};
+    return RainAlertCellSchedule(
+      cellKey: _readString(fields, 'cellKey'),
+      latitude: _readDouble(fields, 'latitude'),
+      longitude: _readDouble(fields, 'longitude'),
+      nextCheckAt: _readTimestamp(fields, 'nextCheckAt'),
+      lastCheckedAt: _readTimestamp(fields, 'lastCheckedAt'),
+      mode: RainAlertPollingMode.values.byName(_readString(fields, 'mode')),
+    );
+  }
+
   firestore.Document _deliveryDocument(AlertDeliveryDraft delivery) =>
       firestore.Document(
         name: _deliveryName(delivery.eventId),
@@ -806,6 +952,12 @@ final class FirestoreDeviceAlertStore
         name: _alertName(record.ownerHash, record.id),
         fields: <String, firestore.Value>{
           'ownerHash': _string(record.ownerHash),
+          'cellKey': _string(
+            RainAlertCell.fromLocation(
+              record.location,
+              sizeDegrees: rainAlertCellSizeDegrees,
+            ).key,
+          ),
           'location': _map(<String, firestore.Value>{
             'label': _string(record.location.label),
             'latitude': _double(record.location.latitude),
@@ -882,6 +1034,9 @@ final class FirestoreDeviceAlertStore
 
   String _deliveryName(String eventId) =>
       '$_documents/alertDeliveries/$eventId';
+
+  String _cellScheduleName(String cellKey) =>
+      '$_documents/alertCellSchedules/$cellKey';
 
   String get _runtimeControlName => '$_documents/alertControl/runtime';
 

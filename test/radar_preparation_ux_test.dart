@@ -38,7 +38,7 @@ void main() {
     expect(find.byKey(const Key('rain-chart')), findsOneWidget);
     expect(find.byKey(const Key('radar-preparing-surface')), findsNothing);
     expect(
-      find.byKey(const Key('radar-preparing-surface'), skipOffstage: false),
+      find.byKey(const ValueKey('radar-warmup-deferred'), skipOffstage: false),
       findsOneWidget,
     );
 

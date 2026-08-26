@@ -50,6 +50,13 @@ gcloud firestore fields ttls update expiresAt \
   --enable-ttl \
   --quiet
 
+gcloud firestore fields ttls update expiresAt \
+  --project="${project_id}" \
+  --database="${database_id}" \
+  --collection-group=alertCellSchedules \
+  --enable-ttl \
+  --quiet
+
 gcloud projects add-iam-policy-binding "${project_id}" \
   --member="serviceAccount:${service_account}" \
   --role="roles/datastore.user" \

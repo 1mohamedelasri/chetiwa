@@ -104,9 +104,9 @@ Handler createApp({
         return _dataResponse(<String, Object?>{
           'features': <String, Object?>{
             'premium': premiumEligible,
-            'premiumSatellite': config.premiumSatelliteEnabled,
             'premiumRadarModel': config.premiumRadarModelEnabled,
             'ads': config.adsEnabled,
+            'analyticsConsentPrompt': config.analyticsConsentPromptEnabled,
           },
         }, now: clock);
       } on ApiException catch (error) {

@@ -47,7 +47,7 @@ interne uniquement après approbation explicite.
 
 - Radar animé et nombre de frames.
 - Rainbow Nowcast/Alerts.
-- Esri satellite.
+- Quotas/erreurs Google Maps Platform.
 - Publicités.
 - Nouveau pays/zone de Smart Alerts.
 - Fournisseur forecast primaire.

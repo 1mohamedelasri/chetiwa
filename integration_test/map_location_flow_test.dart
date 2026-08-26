@@ -106,7 +106,11 @@ Future<void> _activateNavigation(WidgetTester tester, String label) async {
   );
   expect(inkWell, findsOneWidget);
   tester.widget<InkWell>(inkWell).onTap!.call();
-  await tester.pumpAndSettle();
+  if (label == 'Radar') {
+    await tester.pump(const Duration(milliseconds: 400));
+  } else {
+    await tester.pumpAndSettle();
+  }
 }
 
 final class _MapSelectionLocationRepository implements LocationRepository {

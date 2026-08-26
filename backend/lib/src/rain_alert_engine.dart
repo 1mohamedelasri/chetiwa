@@ -57,6 +57,32 @@ final class RainAlertCell {
   final double longitude;
 }
 
+enum RainAlertPollingMode { highFrequency, approaching, dry, retry }
+
+/// Shared polling state for one geographic alert cell.
+///
+/// Cloud Run Jobs are stateless, so this small record lets the five-minute
+/// scheduler wake cheaply while provider calls are skipped until they are
+/// meteorologically useful. The record contains no device identifier or exact
+/// user coordinate.
+final class RainAlertCellSchedule {
+  const RainAlertCellSchedule({
+    required this.cellKey,
+    required this.latitude,
+    required this.longitude,
+    required this.nextCheckAt,
+    required this.lastCheckedAt,
+    required this.mode,
+  });
+
+  final String cellKey;
+  final double latitude;
+  final double longitude;
+  final DateTime nextCheckAt;
+  final DateTime lastCheckedAt;
+  final RainAlertPollingMode mode;
+}
+
 abstract interface class RainAlertNowcastProvider {
   Future<List<RainNowcastSample>> nowcast(RainAlertCell cell);
 }
@@ -170,6 +196,17 @@ abstract interface class RainAlertEngineStore {
 
   Future<List<ActiveRainAlert>> listActiveAlerts();
 
+  Future<List<RainAlertCellSchedule>> listDueCellSchedules({
+    required DateTime now,
+    int limit = 500,
+  });
+
+  Future<List<ActiveRainAlert>> listActiveAlertsForCell(String cellKey);
+
+  Future<void> saveCellSchedule(RainAlertCellSchedule schedule);
+
+  Future<void> deleteCellSchedule(String cellKey);
+
   Future<void> saveState(RainAlertState state);
 
   /// Returns false when the deterministic event already exists.
@@ -204,7 +241,6 @@ final class RainAlertEngine {
     required RainAlertNowcastProvider provider,
     required LocalTimeResolver localTime,
     DateTime Function()? now,
-    this.cellSizeDegrees = 0.05,
     this.maximumConcurrentCells = 8,
     this.cooldown = const Duration(minutes: 120),
     this.maximumAlertsPerLocalDay = 6,
@@ -218,7 +254,6 @@ final class RainAlertEngine {
   final RainAlertNowcastProvider _provider;
   final LocalTimeResolver _localTime;
   final DateTime Function() _now;
-  final double cellSizeDegrees;
   final int maximumConcurrentCells;
   final Duration cooldown;
   final int maximumAlertsPerLocalDay;
@@ -238,29 +273,40 @@ final class RainAlertEngine {
     }
 
     var cellsEvaluated = 0;
+    var cellsSkipped = 0;
     var providerFailures = 0;
     var alertsEvaluated = 0;
     var deliveriesProposed = 0;
     var deliveriesEnqueued = 0;
     try {
-      final alerts = await _store.listActiveAlerts();
+      final dueSchedules = await _store.listDueCellSchedules(now: startedAt);
       final byCell =
           <String, ({RainAlertCell cell, List<ActiveRainAlert> alerts})>{};
-      for (final alert in alerts) {
-        if (!alert.device.notificationsEnabled ||
-            alert.device.pushToken == null ||
-            alert.device.pushToken!.isEmpty) {
+      var activeAlerts = 0;
+      for (final schedule in dueSchedules) {
+        final alerts = await _store.listActiveAlertsForCell(schedule.cellKey);
+        final eligible = alerts
+            .where(
+              (alert) =>
+                  alert.device.notificationsEnabled &&
+                  alert.device.expiresAt.isAfter(startedAt) &&
+                  alert.device.pushToken != null &&
+                  alert.device.pushToken!.isNotEmpty,
+            )
+            .toList(growable: false);
+        if (eligible.isEmpty) {
+          await _store.deleteCellSchedule(schedule.cellKey);
           continue;
         }
-        final cell = RainAlertCell.fromLocation(
-          alert.rule.location,
-          sizeDegrees: cellSizeDegrees,
+        activeAlerts += eligible.length;
+        byCell[schedule.cellKey] = (
+          cell: RainAlertCell(
+            key: schedule.cellKey,
+            latitude: schedule.latitude,
+            longitude: schedule.longitude,
+          ),
+          alerts: eligible,
         );
-        final bucket = byCell.putIfAbsent(
-          cell.key,
-          () => (cell: cell, alerts: <ActiveRainAlert>[]),
-        );
-        bucket.alerts.add(alert);
       }
 
       final groups = byCell.values.toList(growable: false);
@@ -288,14 +334,47 @@ final class RainAlertEngine {
                 if (decision.proposed) proposed += 1;
                 if (decision.enqueued) enqueued += 1;
               }
+              final schedule = _nextCellSchedule(
+                group.cell,
+                alerts: group.alerts,
+                samples: samples,
+                now: startedAt,
+              );
+              try {
+                await _store.saveCellSchedule(schedule);
+              } on Object {
+                // Polling state is a cost optimization, never a reason to
+                // suppress an otherwise valid alert evaluation.
+              }
               return (
                 failed: false,
                 evaluated: evaluated,
                 proposed: proposed,
                 enqueued: enqueued,
+                deferred: _deferredCronRuns(schedule, startedAt),
               );
             } on Object {
-              return (failed: true, evaluated: 0, proposed: 0, enqueued: 0);
+              try {
+                await _store.saveCellSchedule(
+                  RainAlertCellSchedule(
+                    cellKey: group.cell.key,
+                    latitude: group.cell.latitude,
+                    longitude: group.cell.longitude,
+                    lastCheckedAt: startedAt,
+                    nextCheckAt: startedAt.add(const Duration(minutes: 15)),
+                    mode: RainAlertPollingMode.retry,
+                  ),
+                );
+              } on Object {
+                // A failed retry-state write only causes an earlier retry.
+              }
+              return (
+                failed: true,
+                evaluated: 0,
+                proposed: 0,
+                enqueued: 0,
+                deferred: 2,
+              );
             }
           }),
         );
@@ -313,12 +392,14 @@ final class RainAlertEngine {
           0,
           (sum, result) => sum + result.enqueued,
         );
+        cellsSkipped += results.fold(0, (sum, result) => sum + result.deferred);
       }
 
       return RainAlertRunReport(
         runId: runId,
-        activeAlerts: alerts.length,
+        activeAlerts: activeAlerts,
         cellsEvaluated: cellsEvaluated,
+        cellsSkipped: cellsSkipped,
         providerFailures: providerFailures,
         alertsEvaluated: alertsEvaluated,
         deliveriesProposed: deliveriesProposed,
@@ -327,6 +408,99 @@ final class RainAlertEngine {
     } finally {
       await _store.releaseLease(runId);
     }
+  }
+
+  RainAlertCellSchedule _nextCellSchedule(
+    RainAlertCell cell, {
+    required List<ActiveRainAlert> alerts,
+    required List<RainNowcastSample> samples,
+    required DateTime now,
+  }) {
+    final usable =
+        samples
+            .where(
+              (sample) => !sample.time.isBefore(
+                now.subtract(const Duration(minutes: 2)),
+              ),
+            )
+            .toList(growable: false)
+          ..sort((left, right) => left.time.compareTo(right.time));
+    if (usable.isEmpty) {
+      return RainAlertCellSchedule(
+        cellKey: cell.key,
+        latitude: cell.latitude,
+        longitude: cell.longitude,
+        lastCheckedAt: now,
+        nextCheckAt: now.add(const Duration(minutes: 15)),
+        mode: RainAlertPollingMode.retry,
+      );
+    }
+
+    final maximumLeadMinutes = alerts.fold<int>(
+      5,
+      (value, alert) => max(value, alert.rule.leadMinutes),
+    );
+    final minimumIntensity = alerts.fold<AlertRainIntensity>(
+      AlertRainIntensity.heavy,
+      (value, alert) {
+        final candidate = AlertRainIntensity.parse(alert.rule.minimumIntensity);
+        return candidate.index < value.index ? candidate : value;
+      },
+    );
+    final firstRain = usable.cast<RainNowcastSample?>().firstWhere(
+      (sample) => sample!.intensity.index >= minimumIntensity.index,
+      orElse: () => null,
+    );
+
+    if (firstRain != null) {
+      final untilRain = firstRain.time.difference(now);
+      final highFrequencyWindow = Duration(minutes: maximumLeadMinutes + 10);
+      if (untilRain <= highFrequencyWindow) {
+        return RainAlertCellSchedule(
+          cellKey: cell.key,
+          latitude: cell.latitude,
+          longitude: cell.longitude,
+          lastCheckedAt: now,
+          nextCheckAt: now.add(const Duration(minutes: 5)),
+          mode: RainAlertPollingMode.highFrequency,
+        );
+      }
+      final desiredDelay = untilRain - highFrequencyWindow;
+      final delay = desiredDelay < const Duration(minutes: 10)
+          ? const Duration(minutes: 10)
+          : desiredDelay > const Duration(minutes: 30)
+          ? const Duration(minutes: 30)
+          : desiredDelay;
+      return RainAlertCellSchedule(
+        cellKey: cell.key,
+        latitude: cell.latitude,
+        longitude: cell.longitude,
+        lastCheckedAt: now,
+        nextCheckAt: now.add(delay),
+        mode: RainAlertPollingMode.approaching,
+      );
+    }
+
+    final horizon = usable.last.time.difference(now);
+    final delay = switch (horizon) {
+      >= const Duration(hours: 4) => const Duration(hours: 2),
+      >= const Duration(hours: 2) => const Duration(hours: 1),
+      >= const Duration(minutes: 55) => const Duration(minutes: 15),
+      _ => const Duration(minutes: 10),
+    };
+    return RainAlertCellSchedule(
+      cellKey: cell.key,
+      latitude: cell.latitude,
+      longitude: cell.longitude,
+      lastCheckedAt: now,
+      nextCheckAt: now.add(delay),
+      mode: RainAlertPollingMode.dry,
+    );
+  }
+
+  static int _deferredCronRuns(RainAlertCellSchedule schedule, DateTime now) {
+    final slots = schedule.nextCheckAt.difference(now).inMinutes ~/ 5;
+    return max(0, slots - 1);
   }
 
   Future<({bool proposed, bool enqueued})> _evaluate(
@@ -412,18 +586,26 @@ final class RainAlertEngine {
       }
     }
 
-    await _store.saveState(
-      alert.state.copyWith(
-        rainExpected: rainExpected,
-        lastIntensity: rainExpected ? strongest : AlertRainIntensity.none,
-        lastSentAt: lastSentAt,
-        dailyDate: dailyDate,
-        dailyCount: dailyCount,
-        updatedAt: now,
-      ),
+    final nextState = alert.state.copyWith(
+      rainExpected: rainExpected,
+      lastIntensity: rainExpected ? strongest : AlertRainIntensity.none,
+      lastSentAt: lastSentAt,
+      dailyDate: enqueued ? dailyDate : alert.state.dailyDate,
+      dailyCount: enqueued ? dailyCount : alert.state.dailyCount,
+      updatedAt: now,
     );
+    if (_stateChanged(alert.state, nextState)) {
+      await _store.saveState(nextState);
+    }
     return (proposed: maySend, enqueued: enqueued);
   }
+
+  static bool _stateChanged(RainAlertState before, RainAlertState after) =>
+      before.rainExpected != after.rainExpected ||
+      before.lastIntensity != after.lastIntensity ||
+      before.lastSentAt != after.lastSentAt ||
+      before.dailyDate != after.dailyDate ||
+      before.dailyCount != after.dailyCount;
 
   String _eventId(
     ActiveRainAlert alert, {
@@ -556,6 +738,7 @@ final class RainAlertRunReport {
     this.skippedBecauseLocked = false,
     this.activeAlerts = 0,
     this.cellsEvaluated = 0,
+    this.cellsSkipped = 0,
     this.providerFailures = 0,
     this.alertsEvaluated = 0,
     this.deliveriesProposed = 0,
@@ -566,6 +749,7 @@ final class RainAlertRunReport {
   final bool skippedBecauseLocked;
   final int activeAlerts;
   final int cellsEvaluated;
+  final int cellsSkipped;
   final int providerFailures;
   final int alertsEvaluated;
   final int deliveriesProposed;

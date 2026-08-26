@@ -15,9 +15,9 @@ void main() {
     expect(config.radarPremiumSessions, 200);
     expect(config.premiumEnabled, isFalse);
     expect(config.premiumRolloutPercent, 0);
-    expect(config.premiumSatelliteEnabled, isFalse);
     expect(config.premiumRadarModelEnabled, isFalse);
     expect(config.adsEnabled, isFalse);
+    expect(config.analyticsConsentPromptEnabled, isFalse);
     expect(config.rainAlertsEnabled, isFalse);
     expect(config.rainAlertsSendEnabled, isFalse);
     expect(config.rainAlertSoftBudgetCents, 2500);
@@ -109,16 +109,16 @@ void main() {
     final config = RuntimeConfig.fromEnvironment(const <String, String>{
       'PREMIUM_ENABLED': 'true',
       'PREMIUM_ROLLOUT_PERCENT': '25',
-      'PREMIUM_SATELLITE_ENABLED': 'true',
       'PREMIUM_RADAR_MODEL_ENABLED': 'true',
       'ADS_ENABLED': 'true',
+      'ANALYTICS_CONSENT_PROMPT_ENABLED': 'true',
     });
 
     expect(config.premiumEnabled, isTrue);
     expect(config.premiumRolloutPercent, 25);
-    expect(config.premiumSatelliteEnabled, isTrue);
     expect(config.premiumRadarModelEnabled, isTrue);
     expect(config.adsEnabled, isTrue);
+    expect(config.analyticsConsentPromptEnabled, isTrue);
     expect(
       () => RuntimeConfig.fromEnvironment(const <String, String>{
         'PREMIUM_ROLLOUT_PERCENT': '101',

@@ -92,3 +92,10 @@ utilisent l’enveloppe `{data, meta}` commune et `Cache-Control: no-store`.
 4. Ajouter App Check/attestation avant une ouverture publique importante.
 5. Tester silencieusement les faux positifs/faux négatifs avant toute alerte
    utilisateur.
+
+Le worker mutualise les règles actives par cellule d'environ 5 km et conserve
+dans Firestore uniquement leur prochaine échéance de vérification. Cette donnée
+partagée permet le polling adaptatif sans Redis ni nouvelle base facturée. Les
+métriques `cellsEvaluated` et `cellsSkipped` mesurent respectivement les appels
+réellement nécessaires et les passages Cron futurs différés par la décision
+adaptative.

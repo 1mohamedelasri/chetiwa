@@ -2,19 +2,19 @@ import 'package:chetiwa/features/monetization/application/app_feature_flag_contr
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('parses the Premium satellite cost switch independently', () {
+  test('parses rollout flags without gating the Google basemap', () {
     final flags = AppFeatureFlags.fromApi(<String, dynamic>{
       'features': <String, dynamic>{
         'premium': false,
-        'premiumSatellite': true,
         'premiumRadarModel': true,
         'ads': false,
+        'analyticsConsentPrompt': true,
       },
     });
 
     expect(flags.premiumAvailable, isFalse);
-    expect(flags.premiumSatelliteAvailable, isTrue);
     expect(flags.premiumRadarModelAvailable, isTrue);
+    expect(flags.analyticsConsentPromptEnabled, isTrue);
   });
 
   test('fails closed before the first valid server response', () {
@@ -23,7 +23,7 @@ void main() {
 
     expect(controller.premiumAvailable, isFalse);
     expect(controller.adsEnabled, isFalse);
-    expect(controller.premiumSatelliteAvailable, isFalse);
+    expect(controller.analyticsConsentPromptEnabled, isFalse);
     expect(controller.premiumRadarModelAvailable, isFalse);
   });
 
@@ -33,7 +33,7 @@ void main() {
         AppFeatureFlags(
           premiumAvailable: true,
           adsEnabled: true,
-          premiumSatelliteAvailable: true,
+          analyticsConsentPromptEnabled: true,
           premiumRadarModelAvailable: true,
         ),
       ),
@@ -45,7 +45,7 @@ void main() {
 
     expect(controller.premiumAvailable, isTrue);
     expect(controller.adsEnabled, isTrue);
-    expect(controller.premiumSatelliteAvailable, isTrue);
+    expect(controller.analyticsConsentPromptEnabled, isTrue);
     expect(controller.premiumRadarModelAvailable, isTrue);
   });
 

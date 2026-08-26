@@ -15,6 +15,36 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test(
+    'requests point samples for the complete 120-minute projection',
+    () async {
+      final client = MockClient((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        final params = body['params'] as Map<String, dynamic>;
+        final arguments = params['arguments'] as Map<String, dynamic>;
+        expect(arguments['minutes'], 120);
+        return http.Response(
+          'event: message\n'
+          'data: ${jsonEncode({
+            'jsonrpc': '2.0',
+            'id': 1,
+            'result': {
+              'structuredContent': {'result': <Object?>[]},
+            },
+          })}\n\n',
+          200,
+        );
+      });
+
+      final samples = await RainViewerRadarProvider(
+        client,
+      ).fetchPointNowcast(Coordinates.paris);
+
+      expect(samples, isEmpty);
+      client.close();
+    },
+  );
+
   test('keeps LibreWXR observations and nowcast frames', () async {
     final client = MockClient(
       (request) async => request.method == 'POST'
@@ -40,6 +70,7 @@ void main() {
                 'radar': {
                   'colorSchemes': [
                     {'id': 13, 'name': 'Chetiwa Grey Red'},
+                    {'id': 14, 'name': 'Chetiwa Crisp Grey Red'},
                   ],
                   'past': [
                     {'time': 1787008800, 'path': '/v2/radar/observed'},
@@ -70,7 +101,7 @@ void main() {
     );
     expect(
       frames.first.tileUrlTemplate,
-      contains('/256/{z}/{x}/{y}/13/1_0.png'),
+      contains('/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2'),
     );
     expect(frames.last.kind, WeatherDataKind.radarNowcast);
     expect(frames.last.pointRainRateMmPerHour, 1.4);

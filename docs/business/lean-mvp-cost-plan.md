@@ -12,14 +12,14 @@ valider Chetiwa avant d'engager des coûts récurrents.
 | Localisation | GPS sur action, ou recherche manuelle | Pas de suivi permanent |
 | Cache météo | Cache disque existant | Réduit les appels et garde une app utile hors ligne |
 | Alertes | Réglages et explication seulement | Pas de promesse push tant que la précision n'est pas validée |
-| Carte standard | Fond autorisé avec attribution | Éviter satellite et tuiles premium |
+| Cartographie | SDK Google Maps natif, sans Map ID | Un moteur Android/iOS, attribution native et clés restreintes |
 | Analyse bêta | Feedback volontaire, tests et métriques locales minimales | Pas de SDK de tracking avant nécessité |
 
 ## Ce que nous ne payons pas maintenant
 
 - Firestore, Remote Config, Crashlytics/Analytics, APNs/FCM, RevenueCat et
   AdMob ne sont pas des prérequis du MVP.
-- Esri Satellite reste désactivé.
+- Le satellite hybride Google est inclus pour tous ; aucun fournisseur Esri/OpenFreeMap.
 - Le moteur serveur Smart Rain Alerts et le nowcast commercial restent différés.
 - Aucun abonnement fournisseur n'est souscrit tant que sa licence, son quota et
   son coût par session réelle ne sont pas vérifiés.

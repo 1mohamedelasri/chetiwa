@@ -9,19 +9,19 @@ final class AppFeatureFlags {
   const AppFeatureFlags({
     required this.premiumAvailable,
     required this.adsEnabled,
-    this.premiumSatelliteAvailable = false,
+    this.analyticsConsentPromptEnabled = false,
     this.premiumRadarModelAvailable = false,
   });
 
   const AppFeatureFlags.disabled()
     : premiumAvailable = false,
       adsEnabled = false,
-      premiumSatelliteAvailable = false,
+      analyticsConsentPromptEnabled = false,
       premiumRadarModelAvailable = false;
 
   final bool premiumAvailable;
   final bool adsEnabled;
-  final bool premiumSatelliteAvailable;
+  final bool analyticsConsentPromptEnabled;
   final bool premiumRadarModelAvailable;
 
   factory AppFeatureFlags.fromApi(Map<String, dynamic> data) {
@@ -32,7 +32,7 @@ final class AppFeatureFlags {
     return AppFeatureFlags(
       premiumAvailable: features['premium'] == true,
       adsEnabled: features['ads'] == true,
-      premiumSatelliteAvailable: features['premiumSatellite'] == true,
+      analyticsConsentPromptEnabled: features['analyticsConsentPrompt'] == true,
       premiumRadarModelAvailable: features['premiumRadarModel'] == true,
     );
   }
@@ -66,7 +66,8 @@ final class AppFeatureFlagController extends ChangeNotifier {
 
   static const _premiumKey = 'feature-flags:premium:v1';
   static const _adsKey = 'feature-flags:ads:v1';
-  static const _premiumSatelliteKey = 'feature-flags:premium-satellite:v1';
+  static const _analyticsConsentPromptKey =
+      'feature-flags:analytics-consent-prompt:v1';
   static const _premiumRadarModelKey = 'feature-flags:premium-radar-model:v1';
 
   final AppFeatureFlagGateway? _gateway;
@@ -77,7 +78,8 @@ final class AppFeatureFlagController extends ChangeNotifier {
   AppFeatureFlags get flags => _flags;
   bool get premiumAvailable => _flags.premiumAvailable;
   bool get adsEnabled => _flags.adsEnabled;
-  bool get premiumSatelliteAvailable => _flags.premiumSatelliteAvailable;
+  bool get analyticsConsentPromptEnabled =>
+      _flags.analyticsConsentPromptEnabled;
   bool get premiumRadarModelAvailable => _flags.premiumRadarModelAvailable;
 
   Future<void> initialize() async {
@@ -87,17 +89,19 @@ final class AppFeatureFlagController extends ChangeNotifier {
       final preferences = await SharedPreferences.getInstance();
       final premium = preferences.getBool(_premiumKey);
       final ads = preferences.getBool(_adsKey);
-      final premiumSatellite = preferences.getBool(_premiumSatelliteKey);
+      final analyticsConsentPrompt = preferences.getBool(
+        _analyticsConsentPromptKey,
+      );
       final premiumRadarModel = preferences.getBool(_premiumRadarModelKey);
       if (premium != null &&
           ads != null &&
-          premiumSatellite != null &&
+          analyticsConsentPrompt != null &&
           premiumRadarModel != null) {
         _setFlags(
           AppFeatureFlags(
             premiumAvailable: premium,
             adsEnabled: ads,
-            premiumSatelliteAvailable: premiumSatellite,
+            analyticsConsentPromptEnabled: analyticsConsentPrompt,
             premiumRadarModelAvailable: premiumRadarModel,
           ),
         );
@@ -118,8 +122,8 @@ final class AppFeatureFlagController extends ChangeNotifier {
           preferences.setBool(_premiumKey, remote.premiumAvailable),
           preferences.setBool(_adsKey, remote.adsEnabled),
           preferences.setBool(
-            _premiumSatelliteKey,
-            remote.premiumSatelliteAvailable,
+            _analyticsConsentPromptKey,
+            remote.analyticsConsentPromptEnabled,
           ),
           preferences.setBool(
             _premiumRadarModelKey,
@@ -135,7 +139,8 @@ final class AppFeatureFlagController extends ChangeNotifier {
   void _setFlags(AppFeatureFlags value) {
     if (_flags.premiumAvailable == value.premiumAvailable &&
         _flags.adsEnabled == value.adsEnabled &&
-        _flags.premiumSatelliteAvailable == value.premiumSatelliteAvailable &&
+        _flags.analyticsConsentPromptEnabled ==
+            value.analyticsConsentPromptEnabled &&
         _flags.premiumRadarModelAvailable == value.premiumRadarModelAvailable) {
       return;
     }

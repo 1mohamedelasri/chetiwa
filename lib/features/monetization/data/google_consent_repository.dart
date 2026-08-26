@@ -11,7 +11,7 @@ final class GoogleConsentRepository implements ConsentRepository {
   bool _initialized = false;
 
   @override
-  bool get canRequestPersonalizedAds => _canRequestAds;
+  bool get canRequestAds => _canRequestAds;
 
   bool get privacyOptionsRequired => _privacyOptionsRequired;
 

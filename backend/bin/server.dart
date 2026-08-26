@@ -36,6 +36,7 @@ Future<void> main(List<String> arguments) async {
       : await FirestoreDeviceAlertStore.connect(
           projectId: config.googleCloudProject!,
           databaseId: config.firestoreDatabaseId,
+          rainAlertCellSizeDegrees: config.rainAlertCellSizeDegrees,
         );
   final server = await shelf_io.serve(
     createApp(config: config, deviceAlertStore: persistentAlerts),

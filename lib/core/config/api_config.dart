@@ -17,8 +17,11 @@ abstract final class ApiConfig {
     'CHETIWA_ALLOW_DIRECT_PROVIDER_FALLBACK',
     defaultValue: true,
   );
+  static const _premiumRadarTestRequested = bool.fromEnvironment(
+    'CHETIWA_PREMIUM_RADAR_TEST_MODE',
+    defaultValue: false,
+  );
   static const openMeteoApiKey = String.fromEnvironment('OPEN_METEO_API_KEY');
-  static const arcGisApiKey = String.fromEnvironment('ARCGIS_API_KEY');
 
   static String get openMeteoHost => openMeteoApiKey.isEmpty
       ? 'api.open-meteo.com'
@@ -42,6 +45,12 @@ abstract final class ApiConfig {
   static bool get usesChetiwaBackend => chetiwaApiBaseUrl.trim().isNotEmpty;
   static bool get allowsDirectProviderFallback =>
       !isProduction && _directFallbackRequested;
+
+  /// Developer-only entitlement used to inspect the real +60–120 minute
+  /// LibreWXR model frames before store products are available. A production
+  /// build always ignores the define, even if it is accidentally supplied.
+  static bool get premiumRadarTestMode =>
+      !isProduction && _premiumRadarTestRequested;
 
   static Uri requireChetiwaApiBaseUri() {
     final value = chetiwaApiBaseUrl.trim();

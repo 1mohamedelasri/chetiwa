@@ -1,15 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../../../app/theme/chetiwa_tokens.dart';
 import '../../../../core/l10n/chetiwa_localizations.dart';
 import '../../../../core/location/coordinates.dart';
 import '../../../../core/location/location_repository.dart';
 import '../../../../core/location/location_preferences_store.dart';
-import '../../../../core/maps/open_free_map_layer.dart';
 
 /// Full-screen map choice with a fixed centre marker. It stays useful when
 /// reverse geocoding is unavailable: coordinates are still a valid weather
@@ -30,7 +28,7 @@ final class _MapLocationPickerScreenState
   static const _minZoom = 3.0;
   static const _maxZoom = 14.0;
 
-  final MapController _mapController = MapController();
+  GoogleMapController? _mapController;
   Timer? _debounce;
   Coordinates _coordinates = Coordinates.paris;
   ChetiwaLocation? _location;
@@ -40,6 +38,7 @@ final class _MapLocationPickerScreenState
   SavedMapView? _restoredView;
   String? _error;
   int _generation = 0;
+  CameraPosition? _pendingCamera;
 
   @override
   void initState() {
@@ -51,13 +50,18 @@ final class _MapLocationPickerScreenState
   @override
   void dispose() {
     _debounce?.cancel();
-    _mapController.dispose();
+    _mapController?.dispose();
     super.dispose();
   }
 
-  void _onPositionChanged(MapCamera position, bool hasGesture) {
-    final center = position.center;
-    if (!hasGesture) return;
+  void _onCameraMove(CameraPosition position) {
+    _pendingCamera = position;
+  }
+
+  void _onCameraIdle() {
+    final position = _pendingCamera;
+    if (position == null) return;
+    final center = position.target;
     final coordinates = Coordinates(
       latitude: center.latitude,
       longitude: center.longitude,
@@ -100,9 +104,13 @@ final class _MapLocationPickerScreenState
       _coordinates = view.coordinates;
     });
     if (_mapReady) {
-      _mapController.move(
-        LatLng(view.coordinates.latitude, view.coordinates.longitude),
-        view.zoom.clamp(_minZoom, _maxZoom).toDouble(),
+      unawaited(
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(
+            LatLng(view.coordinates.latitude, view.coordinates.longitude),
+            view.zoom.clamp(_minZoom, _maxZoom).toDouble(),
+          ),
+        ),
       );
       unawaited(_resolve(view.coordinates));
     }
@@ -144,9 +152,11 @@ final class _MapLocationPickerScreenState
     try {
       final location = await widget.repository.getCurrentLocation();
       if (!mounted) return;
-      _mapController.move(
-        LatLng(location.coordinates.latitude, location.coordinates.longitude),
-        12,
+      await _mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          LatLng(location.coordinates.latitude, location.coordinates.longitude),
+          12,
+        ),
       );
       setState(() {
         _coordinates = location.coordinates;
@@ -186,36 +196,46 @@ final class _MapLocationPickerScreenState
       body: Stack(
         fit: StackFit.expand,
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: LatLng(
-                _coordinates.latitude,
-                _coordinates.longitude,
-              ),
-              initialZoom: _initialZoom,
-              minZoom: _minZoom,
-              maxZoom: _maxZoom,
-              onMapReady: () {
-                _mapReady = true;
-                final view = _restoredView;
-                if (view != null) {
-                  _mapController.move(
-                    LatLng(
-                      view.coordinates.latitude,
-                      view.coordinates.longitude,
-                    ),
-                    view.zoom.clamp(_minZoom, _maxZoom).toDouble(),
-                  );
-                  unawaited(_resolve(view.coordinates));
-                }
-              },
-              onPositionChanged: _onPositionChanged,
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-              ),
+          GoogleMap(
+            key: const Key('chetiwa-google-location-map'),
+            initialCameraPosition: CameraPosition(
+              target: LatLng(_coordinates.latitude, _coordinates.longitude),
+              zoom: _initialZoom,
             ),
-            children: [const OpenFreeMapLayer()],
+            mapType: MapType.normal,
+            minMaxZoomPreference: const MinMaxZoomPreference(
+              _minZoom,
+              _maxZoom,
+            ),
+            compassEnabled: false,
+            mapToolbarEnabled: false,
+            myLocationButtonEnabled: false,
+            myLocationEnabled: false,
+            rotateGesturesEnabled: false,
+            tiltGesturesEnabled: false,
+            zoomControlsEnabled: false,
+            padding: const EdgeInsets.only(bottom: 96),
+            onMapCreated: (controller) {
+              _mapController = controller;
+              _mapReady = true;
+              final view = _restoredView;
+              if (view != null) {
+                unawaited(
+                  controller.animateCamera(
+                    CameraUpdate.newLatLngZoom(
+                      LatLng(
+                        view.coordinates.latitude,
+                        view.coordinates.longitude,
+                      ),
+                      view.zoom.clamp(_minZoom, _maxZoom).toDouble(),
+                    ),
+                  ),
+                );
+                unawaited(_resolve(view.coordinates));
+              }
+            },
+            onCameraMove: _onCameraMove,
+            onCameraIdle: _onCameraIdle,
           ),
           const IgnorePointer(
             child: Center(
@@ -268,14 +288,6 @@ final class _MapLocationPickerScreenState
                 icon: const Icon(Icons.check_rounded),
                 label: Text(context.l10n.confirmLocation),
               ),
-            ),
-          ),
-          const Positioned(
-            left: 8,
-            bottom: 90,
-            child: Text(
-              OpenFreeMapLayer.attribution,
-              style: TextStyle(color: ChetiwaColors.textSecondary, fontSize: 9),
             ),
           ),
         ],

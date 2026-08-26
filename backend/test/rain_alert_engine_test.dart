@@ -39,6 +39,73 @@ void main() {
     },
   );
 
+  test(
+    'dry cells sleep until their forecast horizon requires a refresh',
+    () async {
+      var now = baseNow;
+      final store = _MemoryEngineStore(<ActiveRainAlert>[
+        _alert(owner: 'dry-owner'),
+      ]);
+      final provider = _NowcastProvider(<RainNowcastSample>[
+        for (var minutes = 0; minutes <= 240; minutes += 15)
+          RainNowcastSample(
+            time: baseNow.add(Duration(minutes: minutes)),
+            rateMmPerHour: 0,
+          ),
+      ]);
+      final engine = RainAlertEngine(
+        store: store,
+        provider: provider,
+        now: () => now,
+        localTime: (utc, _) => utc,
+      );
+
+      final first = await engine.run();
+      expect(first.cellsEvaluated, 1);
+      expect(first.cellsSkipped, 23);
+      expect(provider.calls, 1);
+      expect(store.states, isEmpty);
+      expect(store.schedules.values.single.mode, RainAlertPollingMode.dry);
+      expect(
+        store.schedules.values.single.nextCheckAt,
+        baseNow.add(const Duration(hours: 2)),
+      );
+
+      now = now.add(const Duration(minutes: 5));
+      final skipped = await engine.run();
+      expect(skipped.cellsEvaluated, 0);
+      expect(skipped.cellsSkipped, 0);
+      expect(provider.calls, 1);
+
+      now = baseNow.add(const Duration(hours: 2));
+      final due = await engine.run();
+      expect(due.cellsEvaluated, 1);
+      expect(provider.calls, 2);
+    },
+  );
+
+  test('rain inside the alert window keeps five-minute polling', () async {
+    final store = _MemoryEngineStore(<ActiveRainAlert>[
+      _alert(owner: 'wet-owner'),
+    ]);
+    final engine = RainAlertEngine(
+      store: store,
+      provider: _NowcastProvider(<RainNowcastSample>[
+        RainNowcastSample(
+          time: baseNow.add(const Duration(minutes: 10)),
+          rateMmPerHour: 2,
+        ),
+      ]),
+      now: () => baseNow,
+      localTime: (utc, _) => utc,
+    );
+
+    await engine.run();
+    final schedule = store.schedules.values.single;
+    expect(schedule.mode, RainAlertPollingMode.highFrequency);
+    expect(schedule.nextCheckAt, baseNow.add(const Duration(minutes: 5)));
+  });
+
   test('applies quiet hours in the phone timezone', () async {
     final quiet = _alert(
       owner: 'quiet-owner',
@@ -208,10 +275,24 @@ final class _PushSender implements RainAlertPushSender {
 }
 
 final class _MemoryEngineStore implements RainAlertEngineStore {
-  _MemoryEngineStore(this.alerts);
+  _MemoryEngineStore(this.alerts) {
+    for (final alert in alerts) {
+      final cell = RainAlertCell.fromLocation(alert.rule.location);
+      schedules[cell.key] = RainAlertCellSchedule(
+        cellKey: cell.key,
+        latitude: cell.latitude,
+        longitude: cell.longitude,
+        nextCheckAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+        lastCheckedAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+        mode: RainAlertPollingMode.retry,
+      );
+    }
+  }
 
   final List<ActiveRainAlert> alerts;
   final Map<String, RainAlertState> _states = <String, RainAlertState>{};
+  final Map<String, RainAlertCellSchedule> schedules =
+      <String, RainAlertCellSchedule>{};
   final List<PendingAlertDelivery> deliveries = <PendingAlertDelivery>[];
   final Set<String> disabledOwners = <String>{};
   String? _lease;
@@ -246,6 +327,34 @@ final class _MemoryEngineStore implements RainAlertEngineStore {
         ),
       )
       .toList(growable: false);
+
+  @override
+  Future<List<RainAlertCellSchedule>> listDueCellSchedules({
+    required DateTime now,
+    int limit = 500,
+  }) async => schedules.values
+      .where((schedule) => !schedule.nextCheckAt.isAfter(now))
+      .take(limit)
+      .toList(growable: false);
+
+  @override
+  Future<List<ActiveRainAlert>> listActiveAlertsForCell(String cellKey) async =>
+      (await listActiveAlerts())
+          .where(
+            (alert) =>
+                RainAlertCell.fromLocation(alert.rule.location).key == cellKey,
+          )
+          .toList(growable: false);
+
+  @override
+  Future<void> saveCellSchedule(RainAlertCellSchedule schedule) async {
+    schedules[schedule.cellKey] = schedule;
+  }
+
+  @override
+  Future<void> deleteCellSchedule(String cellKey) async {
+    schedules.remove(cellKey);
+  }
 
   @override
   Future<void> saveState(RainAlertState state) async {

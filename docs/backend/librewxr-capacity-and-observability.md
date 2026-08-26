@@ -111,21 +111,20 @@ d'un appel. En prenant 1,8 unité par rafraîchissement :
 
 ### Fond de carte
 
-Les tuiles de fond ne passent pas par LibreWXR : chaque téléphone appelle
-directement OpenFreeMap ou, pour Chetiwa+, Esri. Augmenter la VM ne change donc
-rien à leur capacité.
+Le fond ne passe pas par LibreWXR : les SDK Google Maps Android/iOS le rendent
+directement. Augmenter la VM Hetzner ne change donc rien à sa capacité.
 
-- OpenFreeMap fournit le fond vectoriel standard sans clé ni quota annoncé,
-  mais sans SLA. Le cache disque mobile sert de repli court.
-- ArcGIS Location Platform exige un compte/jeton. Le tarif publié inclut 2 M de
-  tuiles/mois, puis 0,15 USD par 1 000 tuiles, ou un modèle par session.
-- Le satellite ne doit pas rester le fond par défaut à grande échelle avant
-  calcul du coût. À 12 tuiles par ouverture quotidienne, 50 000 DAU représentent
-  déjà environ 18 M de tuiles/mois.
+- `MapType.hybrid` est le fond Radar officiel pour tous ; `MapType.normal` reste
+  sélectionnable.
+- Les clés Android/iOS sont séparées, limitées aux deux SDK et restreintes aux
+  identifiants d’application. Aucun Map ID n’est configuré.
+- Le logo et les attributions Google restent dans la surface native, au-dessus
+  de la timeline.
+- Le cache Chetiwa 128 Mo concerne uniquement LibreWXR ; les données Google ne
+  sont ni proxyfiées ni stockées par Chetiwa.
 
-Avant d’activer le satellite Chetiwa+, configurer Esri avec clé et budget. Le
-kill switch `PREMIUM_SATELLITE_ENABLED` permet de revenir immédiatement au fond
-OpenFreeMap. À terme, PMTiles auto-hébergé reste le repli sans dépendance SLA.
+Surveiller la page Google Maps Platform, les quotas et les erreurs de clés à
+chaque release. Une panne du fond ne doit jamais bloquer Graph ou Prévisions.
 
 ## Seuils de scaling LibreWXR
 

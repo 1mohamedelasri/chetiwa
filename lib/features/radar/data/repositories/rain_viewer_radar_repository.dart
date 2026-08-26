@@ -59,17 +59,21 @@ final class RainViewerRadarRepository implements RadarRepository {
       );
     }
     final past = radar['past'] as List<dynamic>? ?? const [];
-    final supportsChetiwaPalette =
-        (radar['colorSchemes'] as List<dynamic>? ?? const []).any(
-          (scheme) =>
-              scheme is Map<String, dynamic> &&
-              (scheme['id'] as num?)?.toInt() == 13,
-        );
+    final supportedColorSchemeIds =
+        (radar['colorSchemes'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map((scheme) => (scheme['id'] as num?)?.toInt())
+            .whereType<int>()
+            .toSet();
     // During the rollout, scheme 255 is the raw/grey presentation and hides
     // the intensity contrast users need to compare with other radar apps.
     // Scheme 12 is already exposed by LibreWXR and keeps yellow/red cores
     // visible until the Chetiwa grey/red LUT (13) is installed.
-    final libreWxrColorScheme = supportsChetiwaPalette ? 13 : 12;
+    final libreWxrColorScheme = supportedColorSchemeIds.contains(14)
+        ? 14
+        : supportedColorSchemeIds.contains(13)
+        ? 13
+        : 12;
     // RainViewer retired future/nowcast frames. LibreWXR exposes a bounded
     // nowcast window, so preserve it in the direct beta path.
     final nowcast = usesLibreWxr
@@ -144,7 +148,7 @@ final class RainViewerRadarRepository implements RadarRepository {
           ),
           progress: 0,
           tileUrlTemplate:
-              '$tileHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '$libreWxrColorScheme/1_0' : '2/1_0'}.png',
+              '$tileHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '$libreWxrColorScheme/1_0' : '2/1_0'}.png${usesLibreWxr ? '?presentation=crisp-v2' : ''}',
           kind: raw.forecast && latestObservationEpoch > 0
               ? RadarFramePolicy.futureKind(
                   latestObservation: DateTime.fromMillisecondsSinceEpoch(

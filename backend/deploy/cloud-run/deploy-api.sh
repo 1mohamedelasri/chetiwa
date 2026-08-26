@@ -7,6 +7,21 @@ image="${3:?usage: deploy-api.sh PROJECT_ID REGION IMAGE RUNTIME_SERVICE_ACCOUNT
 runtime_service_account="${4:?usage: deploy-api.sh PROJECT_ID REGION IMAGE RUNTIME_SERVICE_ACCOUNT PUBLIC_BASE_URL}"
 public_base_url="${5:?usage: deploy-api.sh PROJECT_ID REGION IMAGE RUNTIME_SERVICE_ACCOUNT PUBLIC_BASE_URL}"
 service_name="chetiwa-api"
+premium_enabled="${PREMIUM_ENABLED:-false}"
+premium_rollout_percent="${PREMIUM_ROLLOUT_PERCENT:-0}"
+premium_radar_model_enabled="${PREMIUM_RADAR_MODEL_ENABLED:-false}"
+
+case "${premium_enabled}:${premium_radar_model_enabled}" in
+  true:true|true:false|false:true|false:false) ;;
+  *) echo "PREMIUM_ENABLED and PREMIUM_RADAR_MODEL_ENABLED must be true or false." >&2; exit 2 ;;
+esac
+case "${premium_rollout_percent}" in
+  ''|*[!0-9]*) echo "PREMIUM_ROLLOUT_PERCENT must be an integer from 0 to 100." >&2; exit 2 ;;
+esac
+if (( premium_rollout_percent < 0 || premium_rollout_percent > 100 )); then
+  echo "PREMIUM_ROLLOUT_PERCENT must be an integer from 0 to 100." >&2
+  exit 2
+fi
 
 case "${public_base_url}" in
   https://*) ;;
@@ -33,7 +48,7 @@ gcloud run deploy "${service_name}" \
   --timeout=30s \
   --min=0 \
   --max=1 \
-  --set-env-vars="CHETIWA_ENV=production,GOOGLE_CLOUD_PROJECT=${project_id},FIRESTORE_DATABASE_ID=(default),RADAR_ENABLED=true,RADAR_QUOTA_ENFORCED=false,GLOBAL_KILL_SWITCH=false,PREMIUM_ENABLED=false,PREMIUM_ROLLOUT_PERCENT=0,PREMIUM_SATELLITE_ENABLED=false,PREMIUM_RADAR_MODEL_ENABLED=false,ADS_ENABLED=false,RAIN_ALERTS_ENABLED=false,RAIN_ALERTS_SEND_ENABLED=false,RADAR_PROVIDER=librewxr,RADAR_METADATA_URL=https://radar.ezplatforms.com/public/weather-maps.json,RADAR_TILE_URL_TEMPLATE=https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/13/1_0.png,PUBLIC_BASE_URL=${public_base_url}" \
+  --set-env-vars="CHETIWA_ENV=production,GOOGLE_CLOUD_PROJECT=${project_id},FIRESTORE_DATABASE_ID=(default),RADAR_ENABLED=true,RADAR_QUOTA_ENFORCED=false,GLOBAL_KILL_SWITCH=false,PREMIUM_ENABLED=${premium_enabled},PREMIUM_ROLLOUT_PERCENT=${premium_rollout_percent},PREMIUM_RADAR_MODEL_ENABLED=${premium_radar_model_enabled},ADS_ENABLED=false,ANALYTICS_CONSENT_PROMPT_ENABLED=true,RAIN_ALERTS_ENABLED=false,RAIN_ALERTS_SEND_ENABLED=false,RADAR_PROVIDER=librewxr,RADAR_METADATA_URL=https://radar.ezplatforms.com/public/weather-maps.json,RADAR_TILE_URL_TEMPLATE=https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2,PUBLIC_BASE_URL=${public_base_url}" \
   --set-secrets="OPEN_METEO_API_KEY=open-meteo-api-key:latest,INTERNAL_METRICS_TOKEN=chetiwa-internal-metrics-token:latest"
 
 service_url="$(gcloud run services describe "${service_name}" \

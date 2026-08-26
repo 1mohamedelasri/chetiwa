@@ -4,6 +4,7 @@ plugins {
     id("com.android.application")
     id("com.google.gms.google-services")
     id("com.google.firebase.crashlytics")
+    id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
@@ -36,8 +37,8 @@ android {
         applicationId = "com.ezplatforms.chetiwa"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        // Firebase Analytics supports Android 6.0 (API 23) and later.
-        minSdk = flutter.minSdkVersion
+        // google_maps_flutter 2.18 requires Android 7.0 (API 24).
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -72,4 +73,12 @@ dependencies {
 
 flutter {
     source = "../.."
+}
+
+secrets {
+    // local.properties is ignored and also contains Flutter's SDK path.
+    propertiesFileName = "local.properties"
+    defaultPropertiesFileName = "local.defaults.properties"
+    ignoreList.add("flutter.sdk")
+    ignoreList.add("sdk.dir")
 }

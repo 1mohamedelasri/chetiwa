@@ -70,12 +70,16 @@ final class ChetiwaDependencies {
            rainAlertNavigationController ?? RainAlertNavigationController(),
        _client = client;
 
-  factory ChetiwaDependencies.live() {
+  factory ChetiwaDependencies.live({bool firebaseAvailable = true}) {
     final client = http.Client();
     final consentRepository = GoogleConsentRepository();
     final adsRepository = GoogleAdsRepository(consent: consentRepository);
+    final premiumRadarTestMode = ApiConfig.premiumRadarTestMode;
     final entitlementController = EntitlementController(
-      gateway: StorePurchaseGateway(),
+      gateway: premiumRadarTestMode
+          ? FixturePremiumPurchaseGateway(premium: true)
+          : StorePurchaseGateway(),
+      persist: !premiumRadarTestMode,
     );
     final savedPlacesController = SavedPlacesController(
       entitlement: entitlementController,
@@ -90,11 +94,20 @@ final class ChetiwaDependencies {
       entitlement: entitlementController,
       radarSessionGateway: api == null ? null : ChetiwaRadarSessionGateway(api),
     );
-    final appFeatureFlagController = AppFeatureFlagController(
-      gateway: api == null ? null : ChetiwaAppFeatureFlagGateway(api),
-    );
+    final appFeatureFlagController = premiumRadarTestMode
+        ? AppFeatureFlagController(
+            initial: const AppFeatureFlags(
+              premiumAvailable: true,
+              adsEnabled: false,
+              premiumRadarModelAvailable: true,
+            ),
+            persist: false,
+          )
+        : AppFeatureFlagController(
+            gateway: api == null ? null : ChetiwaAppFeatureFlagGateway(api),
+          );
     final rainAlertNavigationController = RainAlertNavigationController();
-    final remoteRainAlertGateway = api == null
+    final remoteRainAlertGateway = api == null || !firebaseAvailable
         ? null
         : ChetiwaRemoteRainAlertGateway(
             api: ChetiwaAlertApi(api),
