@@ -34,6 +34,43 @@ void main() {
   });
 
   test(
+    'native tile handoff gate prevents the cursor outrunning Radar',
+    () async {
+      final bloc = RadarBloc(const FixtureRadarRepository());
+      addTearDown(bloc.close);
+
+      bloc.add(const RadarRequested());
+      await bloc.stream
+          .where((state) => state is RadarReady)
+          .cast<RadarReady>()
+          .first
+          .timeout(const Duration(seconds: 2));
+      bloc.add(const RadarPlaybackStarted());
+      final playing = await bloc.stream
+          .where((state) => state is RadarReady)
+          .cast<RadarReady>()
+          .firstWhere((state) => state.isPlaying)
+          .timeout(const Duration(seconds: 2));
+
+      bloc.add(const RadarPlaybackClockHeld());
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      bloc.add(const RadarPlaybackAdvanced());
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect((bloc.state as RadarReady).selectedIndex, playing.selectedIndex);
+      expect((bloc.state as RadarReady).isPlaying, isTrue);
+
+      bloc.add(const RadarPlaybackClockReleased());
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final advanced = bloc.stream
+          .where((state) => state is RadarReady)
+          .cast<RadarReady>()
+          .firstWhere((state) => state.selectedIndex != playing.selectedIndex);
+      bloc.add(const RadarPlaybackAdvanced());
+      await advanced.timeout(const Duration(seconds: 2));
+    },
+  );
+
+  test(
     'playback loops and reset restart from the current observation',
     () async {
       final bloc = RadarBloc(const FixtureRadarRepository());

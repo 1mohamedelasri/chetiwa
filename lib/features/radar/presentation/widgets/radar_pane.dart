@@ -29,15 +29,21 @@ abstract final class RadarMapSmokeTestBridge {
   static const _enabled = bool.fromEnvironment('CHETIWA_RADAR_SMOKE_TEST');
   static GoogleMapController? _controller;
   static int Function()? _tileOverlayCount;
+  static String? Function()? _presentedTileTemplate;
+  static bool Function()? _tileHandoffPending;
   static int _maxTileOverlayCount = 0;
 
   static void attach(
     GoogleMapController controller, {
     required int Function() tileOverlayCount,
+    required String? Function() presentedTileTemplate,
+    required bool Function() tileHandoffPending,
   }) {
     if (!_enabled) return;
     _controller = controller;
     _tileOverlayCount = tileOverlayCount;
+    _presentedTileTemplate = presentedTileTemplate;
+    _tileHandoffPending = tileHandoffPending;
     _maxTileOverlayCount = 0;
   }
 
@@ -45,6 +51,8 @@ abstract final class RadarMapSmokeTestBridge {
     if (!_enabled || !identical(_controller, controller)) return;
     _controller = null;
     _tileOverlayCount = null;
+    _presentedTileTemplate = null;
+    _tileHandoffPending = null;
   }
 
   static Future<bool> zoomTo(double zoom) async {
@@ -58,6 +66,12 @@ abstract final class RadarMapSmokeTestBridge {
       _enabled ? _tileOverlayCount?.call() ?? 0 : 0;
 
   static int get maxTileOverlayCount => _enabled ? _maxTileOverlayCount : 0;
+
+  static String? get presentedTileTemplate =>
+      _enabled ? _presentedTileTemplate?.call() : null;
+
+  static bool get tileHandoffPending =>
+      _enabled && (_tileHandoffPending?.call() ?? false);
 
   static void resetMaxTileOverlayCount() {
     if (!_enabled) return;
@@ -186,6 +200,10 @@ final class _RadarMapState extends State<_RadarMap>
   var _userPausedPlayback = false;
   var _autoplayRequested = false;
   var _playbackBufferReady = false;
+  // The BLoC owns the frame index while Google Maps paints tile overlays on a
+  // separate native surface. This gate stops only the automatic clock during
+  // a handoff so the cursor can never run ahead of the last confirmed image.
+  var _tilePlaybackClockHeld = false;
   // Never expose the native map's empty white surface during its cold boot.
   // It is revealed only after the camera has settled and a radar tile is
   // available from memory, disk, or network.
@@ -472,6 +490,7 @@ final class _RadarMapState extends State<_RadarMap>
       _frontTileSlot = incoming;
       _incomingTileSlot = null;
     });
+    _releasePlaybackClockAfterTileHandoff();
   }
 
   double get _tileCrossFadeProgress =>
@@ -498,6 +517,7 @@ final class _RadarMapState extends State<_RadarMap>
     if (!mounted || !widget.isActive || _cameraIsMoving) return;
     if (_tileTemplates[_frontTileSlot] == template &&
         _incomingTileSlot == null) {
+      _releasePlaybackClockAfterTileHandoff();
       return;
     }
     final incoming = _incomingTileSlot;
@@ -522,7 +542,10 @@ final class _RadarMapState extends State<_RadarMap>
     // unconfirmed overlay and exposing a blank flash.
     _cancelTileTransition(invalidatePending: false);
     if (!mounted || generation != _tileTransitionGeneration) return;
-    if (_tileTemplates[_frontTileSlot] == template) return;
+    if (_tileTemplates[_frontTileSlot] == template) {
+      _releasePlaybackClockAfterTileHandoff();
+      return;
+    }
 
     final targetSlot = 1 - _frontTileSlot;
     _setTileSlot(targetSlot, template, modelSnapshot: modelSnapshot);
@@ -534,7 +557,10 @@ final class _RadarMapState extends State<_RadarMap>
       _tileCache.recentCoordinateCount,
       _maxVisibleRadarTiles,
     );
-    if (expectedTiles == 0) return;
+    if (expectedTiles == 0) {
+      _pauseForIncompletePlaybackBuffer();
+      return;
+    }
     final preparedTiles = await _tileCache.prepareVisibleFrame(
       template,
       maxTiles: _maxVisibleRadarTiles,
@@ -580,6 +606,7 @@ final class _RadarMapState extends State<_RadarMap>
         _frontTileSlot = targetSlot;
         _incomingTileSlot = null;
       });
+      _releasePlaybackClockAfterTileHandoff();
       return;
     }
 
@@ -651,9 +678,41 @@ final class _RadarMapState extends State<_RadarMap>
     _playbackBufferReady = false;
     final state = _radarBloc.state;
     if (state is RadarReady && state.isPlaying) {
-      _radarBloc.add(const RadarPlaybackSuspended());
+      _holdPlaybackClockForTileHandoff();
     }
     if (state is RadarReady) _schedulePrefetch(state);
+  }
+
+  bool _isSelectedTilePresented(RadarReady state) {
+    final selectedTemplate = state.selectedFrame.tileUrlTemplate;
+    if (selectedTemplate == null) return true;
+    return _surfaceReady &&
+        !_cameraIsMoving &&
+        _incomingTileSlot == null &&
+        _tileTemplates[_frontTileSlot] == selectedTemplate;
+  }
+
+  void _holdPlaybackClockForTileHandoff() {
+    if (!mounted) return;
+    _tilePlaybackClockHeld = true;
+    _playheadController
+      ..stop()
+      ..value = 0;
+    // This event is deliberately idempotent. A lifecycle resume may restart
+    // the BLoC timer while a native handoff is still pending, so every playing
+    // state with an unpresented tile reasserts the gate.
+    _radarBloc.add(const RadarPlaybackClockHeld());
+  }
+
+  void _releasePlaybackClockAfterTileHandoff() {
+    if (!mounted) return;
+    final state = _radarBloc.state;
+    if (state is! RadarReady || !_isSelectedTilePresented(state)) return;
+    final clockWasHeld = _tilePlaybackClockHeld;
+    _tilePlaybackClockHeld = false;
+    if (!clockWasHeld || !state.isPlaying) return;
+    _radarBloc.add(const RadarPlaybackClockReleased());
+    unawaited(_playheadController.forward(from: 0));
   }
 
   void _cancelTileTransition({required bool invalidatePending}) {
@@ -757,6 +816,7 @@ final class _RadarMapState extends State<_RadarMap>
     if (state is! RadarReady || state.frames.length < 2 || state.isPlaying) {
       return;
     }
+    if (!_isSelectedTilePresented(state)) return;
     final needsNetworkTile = state.selectedFrame.tileUrlTemplate != null;
     if (needsNetworkTile &&
         (_tileCache.readyTileCount.value == 0 || !_playbackBufferReady)) {
@@ -773,6 +833,7 @@ final class _RadarMapState extends State<_RadarMap>
         _resumeRecoveryInProgress ||
         _timelineScrubbing ||
         !state.isPlaying ||
+        !_isSelectedTilePresented(state) ||
         state.frames.length < 2 ||
         state.selectedIndex >= state.frames.length - 1) {
       _playheadController
@@ -866,8 +927,14 @@ final class _RadarMapState extends State<_RadarMap>
           // is still rebuilding. Keep the intent in the BLoC, but never let the
           // timeline outrun a blank or partially restored viewport.
           _radarBloc.add(const RadarPlaybackSuspended());
+        } else if (!_isSelectedTilePresented(state)) {
+          // The BLoC has selected the next timestamp, but the native map still
+          // shows the previous tile. Freeze both clocks until Google Maps has
+          // requested and presented the complete incoming viewport.
+          _holdPlaybackClockForTileHandoff();
         } else {
           _autoplayRequested = false;
+          _releasePlaybackClockAfterTileHandoff();
         }
       }
       _syncPlayhead(state);
@@ -980,6 +1047,14 @@ final class _RadarMapState extends State<_RadarMap>
                         controller,
                         tileOverlayCount: () =>
                             _incomingTileSlot == null ? 1 : 2,
+                        presentedTileTemplate: () =>
+                            _tileTemplates[_frontTileSlot],
+                        tileHandoffPending: () =>
+                            _incomingTileSlot != null ||
+                            (_radarBloc.state is RadarReady &&
+                                !_isSelectedTilePresented(
+                                  _radarBloc.state as RadarReady,
+                                )),
                       );
                       _visibleTileSuccessBaseline =
                           _tileCache.successfulTileResponseCount.value;
@@ -1197,7 +1272,19 @@ final class _RadarMapState extends State<_RadarMap>
     if (!mounted || _cameraIsMoving) return false;
     if (ready == expectedTiles) {
       _playbackBufferReady = true;
-      _maybeStartAutoplay();
+      final latestState = _radarBloc.state;
+      if (latestState is RadarReady && !_isSelectedTilePresented(latestState)) {
+        final selectedTemplate = latestState.selectedFrame.tileUrlTemplate;
+        if (selectedTemplate != null) {
+          _queueTileFrameTransition(
+            selectedTemplate,
+            modelSnapshot: latestState.selectedFrame.isModelForecast,
+          );
+        }
+      } else {
+        _releasePlaybackClockAfterTileHandoff();
+        _maybeStartAutoplay();
+      }
       return true;
     }
     _playbackBufferReady = false;

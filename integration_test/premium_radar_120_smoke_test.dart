@@ -1,4 +1,5 @@
 import 'package:chetiwa/app/app.dart';
+import 'package:chetiwa/app/di/chetiwa_dependencies.dart';
 import 'package:chetiwa/core/config/api_config.dart';
 import 'package:chetiwa/features/radar/application/radar_bloc.dart';
 import 'package:chetiwa/features/radar/presentation/widgets/radar_pane.dart';
@@ -21,7 +22,11 @@ void main() {
       reason: 'Run with --dart-define=CHETIWA_PREMIUM_RADAR_TEST_MODE=true.',
     );
 
-    await tester.pumpWidget(const ChetiwaApp());
+    await tester.pumpWidget(
+      ChetiwaApp(
+        dependencies: ChetiwaDependencies.live(firebaseAvailable: false),
+      ),
+    );
     await _waitFor(tester, find.byKey(const Key('rain-chart')));
     await tester.tap(find.text('Radar'));
     await tester.pump();
@@ -48,6 +53,9 @@ void main() {
     final lastModelIndex = ready.frames.lastIndexWhere(
       (frame) => frame.isModelForecast,
     );
+    final lastNowcastIndex = ready.frames.lastIndexWhere(
+      (frame) => frame.isNowcast,
+    );
     final lastModel = ready.frames[lastModelIndex];
     final modelLeads = ready.frames
         .where((frame) => frame.isModelForecast)
@@ -73,9 +81,49 @@ void main() {
       RadarMapSmokeTestBridge.resetMaxTileOverlayCount();
     }
 
+    // Reproduce the production regression boundary: the +60 Radar frame used
+    // to stay frozen while the cursor continued through the model frames.
     radarBloc
       ..add(const RadarPlaybackPaused())
-      ..add(RadarFrameSelected(lastModelIndex));
+      ..add(RadarFrameSelected(lastNowcastIndex));
+    await _waitForCondition(
+      tester,
+      () {
+        final state = radarBloc.state as RadarReady;
+        return state.selectedIndex == lastNowcastIndex &&
+            !RadarMapSmokeTestBridge.tileHandoffPending &&
+            RadarMapSmokeTestBridge.presentedTileTemplate ==
+                state.selectedFrame.tileUrlTemplate;
+      },
+      reason: 'The +60 Radar frame was not presented before model playback.',
+      timeout: const Duration(seconds: 45),
+    );
+    radarBloc.add(const RadarPlaybackToggled());
+    for (
+      var expectedIndex = lastNowcastIndex + 1;
+      expectedIndex <= lastModelIndex;
+      expectedIndex++
+    ) {
+      await _waitForCondition(
+        tester,
+        () => (radarBloc.state as RadarReady).selectedIndex == expectedIndex,
+        reason: 'Premium playback did not reach frame $expectedIndex.',
+        timeout: const Duration(seconds: 8),
+      );
+      await _waitForCondition(
+        tester,
+        () {
+          final state = radarBloc.state as RadarReady;
+          return !RadarMapSmokeTestBridge.tileHandoffPending &&
+              RadarMapSmokeTestBridge.presentedTileTemplate ==
+                  state.selectedFrame.tileUrlTemplate;
+        },
+        reason:
+            'Premium cursor reached frame $expectedIndex before its tile was presented.',
+        timeout: const Duration(seconds: 45),
+      );
+    }
+    radarBloc.add(const RadarPlaybackPaused());
     await tester.pump();
     await _waitFor(tester, find.textContaining('prévision étendue Chetiwa+'));
     await _waitFor(tester, find.textContaining('PRÉVISION PLUIE'));
@@ -86,7 +134,18 @@ void main() {
       timeout: const Duration(seconds: 45),
     );
     if (const bool.fromEnvironment('CHETIWA_RADAR_SMOKE_TEST')) {
-      await tester.pump(const Duration(milliseconds: 250));
+      await _waitForCondition(
+        tester,
+        () {
+          final state = radarBloc.state as RadarReady;
+          return !RadarMapSmokeTestBridge.tileHandoffPending &&
+              RadarMapSmokeTestBridge.presentedTileTemplate ==
+                  state.selectedFrame.tileUrlTemplate;
+        },
+        reason:
+            'The +120 cursor was visible before Google Maps presented its model tile.',
+        timeout: const Duration(seconds: 45),
+      );
       expect(
         RadarMapSmokeTestBridge.maxTileOverlayCount,
         lessThanOrEqualTo(2),

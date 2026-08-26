@@ -1,4 +1,5 @@
 import 'package:chetiwa/app/app.dart';
+import 'package:chetiwa/app/di/chetiwa_dependencies.dart';
 import 'package:chetiwa/core/config/api_config.dart';
 import 'package:chetiwa/features/radar/application/radar_bloc.dart';
 import 'package:chetiwa/features/radar/data/cache/radar_tile_cache.dart';
@@ -24,7 +25,14 @@ void main() {
       reason:
           'Run with --dart-define=CHETIWA_RADAR_SMOKE_TEST=true for a cold-cache proof.',
     );
-    await tester.pumpWidget(const ChetiwaApp());
+    // Integration test binaries do not run the production bootstrap that
+    // initializes Firebase. Push is outside this Radar test, so keep the real
+    // backend/map stack while explicitly disabling only Firebase Messaging.
+    await tester.pumpWidget(
+      ChetiwaApp(
+        dependencies: ChetiwaDependencies.live(firebaseAvailable: false),
+      ),
+    );
     await _waitFor(tester, find.byKey(const Key('rain-chart')));
 
     await tester.tap(find.text('Radar'));
@@ -119,8 +127,16 @@ void main() {
     radarBloc.add(RadarFrameSelected(swapIndex));
     await _waitForCondition(
       tester,
-      () => RadarMapSmokeTestBridge.tileOverlayCount == 1,
-      reason: 'The native Radar handoff did not settle on one overlay',
+      () {
+        final state = radarBloc.state as RadarReady;
+        return RadarMapSmokeTestBridge.tileOverlayCount == 1 &&
+            !RadarMapSmokeTestBridge.tileHandoffPending &&
+            RadarMapSmokeTestBridge.presentedTileTemplate ==
+                state.selectedFrame.tileUrlTemplate;
+      },
+      reason:
+          'The native Radar handoff did not present the selected tile template',
+      timeout: const Duration(seconds: 15),
     );
     expect(
       RadarMapSmokeTestBridge.maxTileOverlayCount,
@@ -129,7 +145,18 @@ void main() {
     );
 
     radarBloc.add(const RadarPlaybackRestarted());
-    await tester.pump();
+    await _waitForCondition(
+      tester,
+      () {
+        final state = radarBloc.state as RadarReady;
+        return state.isPlaying &&
+            !RadarMapSmokeTestBridge.tileHandoffPending &&
+            RadarMapSmokeTestBridge.presentedTileTemplate ==
+                state.selectedFrame.tileUrlTemplate;
+      },
+      reason: 'Playback started before its first native tile was presented',
+      timeout: const Duration(seconds: 15),
+    );
     final initialRadar = radarBloc.state as RadarReady;
     final expectedPlaybackIndices = <int>{
       for (
@@ -141,9 +168,25 @@ void main() {
     };
     final visitedPlaybackIndices = <int>{initialRadar.playbackStartIndex};
     for (var index = 0; index < expectedPlaybackIndices.length; index++) {
-      await tester.pump(
-        RadarFramePolicy.playbackFrameDuration +
-            const Duration(milliseconds: 50),
+      final previousIndex = (radarBloc.state as RadarReady).selectedIndex;
+      await _waitForCondition(
+        tester,
+        () => (radarBloc.state as RadarReady).selectedIndex != previousIndex,
+        reason: 'The Radar playback clock did not advance from $previousIndex',
+        timeout:
+            RadarFramePolicy.playbackFrameDuration + const Duration(seconds: 5),
+      );
+      await _waitForCondition(
+        tester,
+        () {
+          final state = radarBloc.state as RadarReady;
+          return !RadarMapSmokeTestBridge.tileHandoffPending &&
+              RadarMapSmokeTestBridge.presentedTileTemplate ==
+                  state.selectedFrame.tileUrlTemplate;
+        },
+        reason:
+            'The cursor advanced without presenting the matching native Radar tile',
+        timeout: const Duration(seconds: 15),
       );
       final state = radarBloc.state as RadarReady;
       visitedPlaybackIndices.add(state.selectedIndex);
