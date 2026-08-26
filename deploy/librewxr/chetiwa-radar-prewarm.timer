@@ -1,0 +1,12 @@
+[Unit]
+Description=Prewarm new Chetiwa Radar frames every two minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+RandomizedDelaySec=10s
+Persistent=true
+Unit=chetiwa-radar-prewarm.service
+
+[Install]
+WantedBy=timers.target

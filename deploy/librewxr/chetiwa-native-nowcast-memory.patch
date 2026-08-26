@@ -1,0 +1,21 @@
+diff --git a/src/librewxr/data/nowcast.py b/src/librewxr/data/nowcast.py
+index 1303917..bff5c87 100644
+--- a/src/librewxr/data/nowcast.py
++++ b/src/librewxr/data/nowcast.py
+@@ -880,5 +880,16 @@ class NowcastGenerator:
+         # carries authoritative model output for the region.
+         forecast_regions: set[str] = set(flows.keys()) | set(external_by_region.keys())
++        # RRQPE is Chetiwa's coarse observed global fallback, not a native
++        # regional radar composite. Keeping twelve full global RRQPE warps in
++        # addition to OPERA and USCOMP doubles the atomic refresh working set
++        # and exceeded the 3 GiB launch container. It also produced visibly
++        # frozen cells where the coarse product's optical flow was zero.
++        #
++        # Excluding it from optical-flow nowcast is both more truthful and
++        # cheaper: OPERA/USCOMP continue with native radar motion, while the
++        # renderer already falls back to the loaded IFS model outside those
++        # regions for future timestamps. Observed RRQPE frames remain intact.
++        forecast_regions.discard("RRQPE")
+         if not forecast_regions:
+             return [], {}
+ 

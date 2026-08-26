@@ -1,0 +1,11 @@
+[Unit]
+Description=Prewarm newly published Chetiwa LibreWXR frames
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/chetiwa-radar-watchdog.env
+ExecStart=/usr/local/sbin/chetiwa-radar-prewarm
+Nice=12
+TimeoutStartSec=8min

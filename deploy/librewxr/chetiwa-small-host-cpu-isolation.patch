@@ -1,0 +1,38 @@
+diff --git a/src/librewxr/config.py b/src/librewxr/config.py
+--- a/src/librewxr/config.py
++++ b/src/librewxr/config.py
+@@ -451,5 +451,11 @@ class Settings(BaseSettings):
+     jma_msm_publish_delay_minutes: int = 300          # ~5 h after init for full run write-out
+     jma_msm_dbz_offset: float = 6.0                   # same Marshall-Palmer caveat as DINI/ICON-EU
++    # Bound optical-flow CPU independently from request rendering. Small
++    # two-vCPU hosts need one lane reserved for interactive tile requests.
++    nowcast_workers: int = Field(default=4, ge=1, le=16)
++    # OpenCV creates native threads inside every Python pool worker too.
++    # Keeping this explicit prevents workers x threads oversubscription.
++    opencv_threads: int = Field(default=2, ge=1, le=8)
+     nowcast_enabled: bool = True  # Generate precipitation nowcast via radar extrapolation + IFS
+     nowcast_frames: int = 6  # Number of 10-min forecast frames (6 = 60 min)
+     nowcast_blend_mode: str = "blended"  # "radar", "blended", or "model"
+diff --git a/src/librewxr/data/nowcast.py b/src/librewxr/data/nowcast.py
+--- a/src/librewxr/data/nowcast.py
++++ b/src/librewxr/data/nowcast.py
+@@ -140,7 +140,7 @@ def _nowcast_pool() -> concurrent.futures.ThreadPoolExecutor:
+     """Return the process-lifetime nowcast thread pool (lazily created)."""
+     global _NOWCAST_POOL
+     if _NOWCAST_POOL is None:
+         _NOWCAST_POOL = concurrent.futures.ThreadPoolExecutor(
+-            max_workers=4, thread_name_prefix="nowcast",
++            max_workers=settings.nowcast_workers, thread_name_prefix="nowcast",
+         )
+     return _NOWCAST_POOL
+diff --git a/src/librewxr/main.py b/src/librewxr/main.py
+--- a/src/librewxr/main.py
++++ b/src/librewxr/main.py
+@@ -946,6 +946,7 @@ async def lifespan(app: FastAPI):
+     # single mode shares one process between rendering and nowcast
+     # generation, and the Farneback optical-flow work wants several
+     # threads.
++    cv2.setNumThreads(settings.opencv_threads)
+     pool_size = settings.warmer_threads or max((os.cpu_count() or 4) - 1, 1)
+     request_executor = ThreadPoolExecutor(max_workers=pool_size)
+     warmer_executor = ThreadPoolExecutor(max_workers=pool_size)

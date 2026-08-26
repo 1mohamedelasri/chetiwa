@@ -1,0 +1,192 @@
+diff --git a/src/librewxr/data/nowcast.py b/src/librewxr/data/nowcast.py
+index a4da237..6444387 100644
+--- a/src/librewxr/data/nowcast.py
++++ b/src/librewxr/data/nowcast.py
+@@ -690,6 +690,41 @@ class NowcastGenerator:
+         interval = settings.fetch_interval
+         extrapolate = settings.nowcast_enabled
+ 
++        # A provider can publish a new timeline slot while reusing the exact
++        # same regional raster (MRMS/USCOMP did this in production). Comparing
++        # only the two newest timestamps then yields a zero optical-flow field
++        # and a completely frozen forecast. Select the newest content-distinct
++        # baseline per region and remember how many cadence steps it spans so
++        # its displacement can be normalized back to one forecast step.
++        history = []
++        for candidate_ts in reversed(timestamps[:-1]):
++            candidate = await self._store.get_frame(candidate_ts)
++            if candidate is not None:
++                history.append((candidate_ts, candidate))
++        prev_regions: dict[str, np.ndarray] = {}
++        region_step_spans: dict[str, int] = {}
++        for region_name, latest_data in latest_frame.regions.items():
++            fallback: tuple[int, np.ndarray] | None = None
++            selected: tuple[int, np.ndarray] | None = None
++            for candidate_ts, candidate_frame in history:
++                candidate_data = candidate_frame.regions.get(region_name)
++                if candidate_data is None:
++                    continue
++                if fallback is None:
++                    fallback = (candidate_ts, candidate_data)
++                if not np.array_equal(candidate_data, latest_data):
++                    selected = (candidate_ts, candidate_data)
++                    break
++            if selected is None:
++                selected = fallback
++            if selected is None:
++                continue
++            baseline_ts, baseline_data = selected
++            prev_regions[region_name] = baseline_data
++            region_step_spans[region_name] = max(
++                1, int(round((latest_ts - baseline_ts) / interval)),
++            )
++
+         # External nowcast contributions are part of the extrapolation
+         # phase only — the arrow-flow path doesn't need them (it never
+         # produces forecast frames), so skip the async fetch entirely
+@@ -732,11 +767,12 @@ class NowcastGenerator:
+         # runs at all.
+         nowcast_frames, flows = await asyncio.to_thread(
+             self._generate_sync,
+-            prev_frame.regions, latest_frame.regions,
++            prev_regions, latest_frame.regions,
+             latest_ts, n_steps, interval,
+             settings.nowcast_blend_mode,
+             external_by_region,
+             extrapolate,
++            region_step_spans,
+         )
+ 
+         # The flows swap is unconditional — the arrow overlay depends on
+@@ -787,6 +823,7 @@ class NowcastGenerator:
+         blend_mode: str = "blended",
+         external_by_region: dict[str, dict[int, np.ndarray]] | None = None,
+         extrapolate: bool = True,
++        region_step_spans: dict[str, int] | None = None,
+     ) -> tuple[list[NowcastFrame], dict[str, np.ndarray]]:
+         """Synchronous nowcast generation (runs in a thread).
+ 
+@@ -820,6 +857,7 @@ class NowcastGenerator:
+         """
+         t0 = time.monotonic()
+         external_by_region = external_by_region or {}
++        region_step_spans = region_step_spans or {}
+         # Flow target resolution: _TARGET_FLOW_DIM for the nowcast
+         # extrapolation feed (stored at this reduced resolution and
+         # upscaled only at warp time); reduced for the arrow-only path
+@@ -848,7 +886,7 @@ class NowcastGenerator:
+         region_results = list(_nowcast_pool().map(
+             lambda r: _compute_region_flow(
+                 r, prev_regions.get(r), latest_regions.get(r),
+-                flow_target_dim, interval,
++                flow_target_dim, interval, region_step_spans.get(r, 1),
+             ),
+             latest_regions,
+         ))
+@@ -1151,6 +1189,7 @@ def _compute_region_flow(
+     data1: np.ndarray | None,
+     flow_target_dim: int,
+     interval: int,
++    step_span: int = 1,
+ ) -> tuple[str, np.ndarray, np.ndarray, float | None] | None:
+     """Phase A per-region optical-flow task (runs on the nowcast pool).
+ 
+@@ -1212,6 +1251,12 @@ def _compute_region_flow(
+         flow_small * (1.0 / scale)
+         if scale < 1.0 else flow_small
+     )
++    # The selected baseline may be older than one provider cadence when the
++    # newest slots repeat identical bytes. Farneback measures displacement
++    # across that complete interval; divide it back to a single ten-minute
++    # step so extrapolation speed remains physically consistent.
++    if step_span > 1:
++        flow_unclamped = flow_unclamped / float(step_span)
+     # Cap unphysical motion vectors before extrapolation.  Without
+     # this, Farneback's polynomial fit at data/no-data boundaries
+     # reports 50-200+ px/step magnitudes, which the inverse-warp
+diff --git a/tests/test_nowcast.py b/tests/test_nowcast.py
+index cd350ad..1595ca4 100644
+--- a/tests/test_nowcast.py
++++ b/tests/test_nowcast.py
+@@ -490,8 +490,9 @@ class TestNowcastGeneratorSync:
+         assert frames[0].blend_weight > frames[1].blend_weight
+         assert frames[1].blend_weight > frames[2].blend_weight
+         # With 3 steps at 600s, max_blend_steps=6, so step 3 is mid-curve
+-        # t=3/6=0.5 → 0.20 + 0.80*(0.5)^1.4 ≈ 0.50
+-        assert 0.45 < frames[2].blend_weight < 0.55
++        # Chetiwa's smooth-nowcast profile retains a conservative 45% radar
++        # floor at this lead time instead of fading the echo below visibility.
++        assert frames[2].blend_weight == pytest.approx(0.45)
+ 
+         # Each frame should have the region
+         for f in frames:
+@@ -1012,6 +1013,23 @@ class _StubFrameStore:
+         return RadarFrame(timestamp=ts, regions=dict(self._frames[ts]))
+ 
+ 
++class _HistoryFrameStore:
++    """FrameStore stub with an arbitrary timestamp -> regions history."""
++
++    def __init__(self, frames: dict[int, dict]):
++        self._frames = frames
++
++    async def get_timestamps(self):
++        return sorted(self._frames)
++
++    async def get_frame(self, ts):
++        from librewxr.data.store import RadarFrame
++        regions = self._frames.get(ts)
++        if regions is None:
++            return None
++        return RadarFrame(timestamp=ts, regions=dict(regions))
++
++
+ class TestArrowFlowGating:
+     """``generate()`` async gating: both flags off → no-op."""
+ 
+@@ -1048,6 +1066,45 @@ class TestArrowFlowGating:
+         assert set(after_flows.keys()) == {"SENTINEL"}
+         assert await store.get_timestamps() == []  # no frames written
+ 
++    async def test_generate_skips_repeated_latest_raster_for_flow_baseline(
++        self, monkeypatch,
++    ):
++        """A provider timestamp with repeated bytes must not freeze motion.
++
++        The generator selects the newest older raster whose content differs
++        from the latest one and passes the elapsed cadence count so optical
++        flow can normalize the displacement to one forecast step.
++        """
++        from librewxr.config import settings
++
++        older = _make_blob(60, 90, radius=15, value=150)
++        latest = _make_blob(60, 110, radius=15, value=150)
++        stub = _HistoryFrameStore({
++            1000: {"USCOMP": older},
++            1600: {"USCOMP": latest.copy()},  # repeated provider image
++            2200: {"USCOMP": latest},
++        })
++        store = NowcastStore()
++        gen = NowcastGenerator(stub, store, cache=None, nowcast_contributions=[])
++        captured = {}
++
++        def capture_generate_sync(*args):
++            captured["prev_regions"] = args[0]
++            captured["latest_regions"] = args[1]
++            captured["step_spans"] = args[8]
++            return [], {}
++
++        monkeypatch.setattr(gen, "_generate_sync", capture_generate_sync)
++        monkeypatch.setattr(settings, "nowcast_enabled", False)
++        monkeypatch.setattr(settings, "arrow_flow_enabled", True)
++        monkeypatch.setattr(settings, "fetch_interval", 600)
++
++        await gen.generate()
++
++        np.testing.assert_array_equal(captured["prev_regions"]["USCOMP"], older)
++        np.testing.assert_array_equal(captured["latest_regions"]["USCOMP"], latest)
++        assert captured["step_spans"] == {"USCOMP": 2}
++
+     async def test_generate_nowcast_off_arrow_flow_on_writes_flows_only(self, monkeypatch):
+         """``nowcast_enabled=False`` + ``arrow_flow_enabled=True``:
+         ``generate()`` runs Phase A (flows) and skips Phase B (frames).
