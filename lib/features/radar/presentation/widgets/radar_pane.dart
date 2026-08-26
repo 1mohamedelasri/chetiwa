@@ -166,7 +166,10 @@ final class _RadarMapState extends State<_RadarMap>
   static const _maxRadarZoom = 14.0;
   static const _timelineHeight = 104.0;
   static const _minimumInitialVisibleTileResponses = 4;
-  static const _maxVisibleRadarTiles = 16;
+  // Animation only needs the eight most-recent (centre-first) viewport tiles
+  // warmed ahead. Waiting for the full native off-screen margin cannot finish
+  // inside a two-second playback step on a cold mobile connection.
+  static const _maxVisibleRadarTiles = 8;
 
   GoogleMapController? _mapController;
   final RadarTileCache _tileCache = RadarTileCache.shared;
@@ -202,9 +205,11 @@ final class _RadarMapState extends State<_RadarMap>
   Timer? _surfaceReadyTimer;
   Timer? _dataRefreshTimer;
   Timer? _preparationRevealTimer;
+  Timer? _preparationEscapeTimer;
   var _refreshFailureStreak = 0;
   var _viewportRequestGeneration = 0;
   var _radarTilesLoading = false;
+  var _playbackBufferWarmInProgress = false;
   var _visibleTileRetryCount = 0;
   var _autoplayRequested = false;
   // The BLoC owns the frame index while Google Maps paints tile overlays on a
@@ -215,6 +220,7 @@ final class _RadarMapState extends State<_RadarMap>
   // It is revealed only after the camera has settled and a radar tile is
   // available from memory, disk, or network.
   var _showTilePreparation = true;
+  var _preparationDeadlineExpired = false;
   var _surfaceReady = false;
   var _nativeMapSettled = false;
   var _resumeRecoveryInProgress = false;
@@ -327,13 +333,16 @@ final class _RadarMapState extends State<_RadarMap>
     _surfaceReadyTimer = null;
     _prefetchDebounce?.cancel();
     _visibleTileWatchdog?.cancel();
+    _preparationEscapeTimer?.cancel();
     _radarBloc.add(const RadarPlaybackSuspended());
     if (mounted) {
       setState(() {
         _surfaceReady = false;
         _showTilePreparation = true;
+        _preparationDeadlineExpired = false;
         _radarTilesLoading = true;
       });
+      _armPreparationEscape();
     }
 
     // Preserve the last viewport coordinates so the currently visible frame
@@ -372,6 +381,7 @@ final class _RadarMapState extends State<_RadarMap>
     );
     _dataRefreshTimer?.cancel();
     _preparationRevealTimer?.cancel();
+    _preparationEscapeTimer?.cancel();
     _radarBloc.add(const RadarPlaybackPaused());
     RadarMapSmokeTestBridge.detach(_mapController);
     _mapController?.dispose();
@@ -397,6 +407,7 @@ final class _RadarMapState extends State<_RadarMap>
 
   void _reconcileVisibleRadarPresentation() {
     if (!_frontViewportPresentationReady) return;
+    _preparationEscapeTimer?.cancel();
     _visibleTileWatchdog?.cancel();
     _visibleTileRetryCount = 0;
     _tileIssueReported = false;
@@ -449,6 +460,7 @@ final class _RadarMapState extends State<_RadarMap>
     _cameraPlaybackResumeTimer?.cancel();
     _visibleTileWatchdog?.cancel();
     _preparationRevealTimer?.cancel();
+    _preparationEscapeTimer?.cancel();
     _tileCache.beginViewport();
     for (final provider in _tileProviders.nonNulls) {
       provider.resetPresentationTracking();
@@ -477,6 +489,7 @@ final class _RadarMapState extends State<_RadarMap>
     _autoplayRequested = false;
     _tilePlaybackClockHeld = false;
     _showTilePreparation = true;
+    _preparationDeadlineExpired = false;
     _surfaceReady = false;
     _nativeMapSettled = false;
     _resumeRecoveryInProgress = false;
@@ -489,6 +502,9 @@ final class _RadarMapState extends State<_RadarMap>
         _minimumInitialVisibleTileResponses;
     _visibleTileSuccessBaseline = _tileCache.successfulTileResponseCount.value;
     if (state.isPlaying) _radarBloc.add(const RadarPlaybackSuspended());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _armPreparationEscape();
+    });
   }
 
   void _scheduleSurfaceReady() {
@@ -522,6 +538,7 @@ final class _RadarMapState extends State<_RadarMap>
         _radarTilesLoading = false;
         _showTilePreparation = false;
       });
+      _preparationEscapeTimer?.cancel();
       _maybeStartAutoplay();
     });
   }
@@ -529,9 +546,15 @@ final class _RadarMapState extends State<_RadarMap>
   bool get _frontViewportPresentationReady {
     final provider = _tileProviders[_frontTileSlot];
     if (provider == null) return false;
-    return provider.requestedCoordinateCount >=
-            _minimumInitialVisibleTileResponses &&
-        provider.hasCompletePresentation;
+    // Native Google Maps requests a margin outside the visible viewport.
+    // One cold/out-of-coverage coordinate must not keep the whole Radar behind
+    // a blocking preparation card forever. Four successful coordinates and a
+    // 50% native quorum are sufficient to reveal the map; missing margins are
+    // filled by the retry/fallback pipeline in the background.
+    return provider.hasPresentationCoverage(
+      minimumCoordinates: _minimumInitialVisibleTileResponses,
+      minimumRatio: 0.5,
+    );
   }
 
   void _reportRadarState(RadarState state) {
@@ -673,7 +696,11 @@ final class _RadarMapState extends State<_RadarMap>
     // Google basemap to remain visible outside provider coverage.
     final requiredPreparedTiles = math.min(
       expectedTiles,
-      math.max(4, (expectedTiles * 0.5).ceil()),
+      // Two centre-first bytes are enough to attach the incoming native
+      // overlay. Promotion below still requires Google Maps to acknowledge at
+      // least 50% of its complete request set, so this only removes a Dart
+      // prefetch bottleneck; it does not reveal a patchwork frame.
+      math.max(2, (expectedTiles * 0.25).ceil()),
     );
     if (preparedTiles < requiredPreparedTiles) {
       _lastTileHandoffDiagnostic =
@@ -914,12 +941,47 @@ final class _RadarMapState extends State<_RadarMap>
 
   void _revealPreparationIfStillNeeded() {
     _preparationRevealTimer?.cancel();
-    if (_tileCache.readyTileCount.value > 0) return;
+    if (_showTilePreparation) _armPreparationEscape();
+    if (_tileCache.readyTileCount.value > 0 || _preparationDeadlineExpired) {
+      return;
+    }
     // Warm disk-cache hits should appear without flashing a loading card. Only
     // reveal it when first paint is genuinely taking noticeable time.
     _preparationRevealTimer = Timer(const Duration(milliseconds: 300), () {
       if (!mounted || _tileCache.readyTileCount.value > 0) return;
       setState(() => _showTilePreparation = true);
+      _armPreparationEscape();
+    });
+  }
+
+  void _armPreparationEscape() {
+    if ((_preparationEscapeTimer?.isActive ?? false) ||
+        !mounted ||
+        !_showTilePreparation ||
+        _preparationDeadlineExpired) {
+      return;
+    }
+    final generation = _surfacePreparationGeneration;
+    _preparationEscapeTimer = Timer(const Duration(seconds: 8), () {
+      _preparationEscapeTimer = null;
+      if (!mounted ||
+          generation != _surfacePreparationGeneration ||
+          !_showTilePreparation) {
+        return;
+      }
+      // Never trap the user behind a loader. Keep playback suspended until a
+      // real tile quorum is painted, but reveal the interactive Google basemap
+      // and let silent retries continue in the background.
+      _preparationDeadlineExpired = true;
+      _resumePlaybackAfterCameraMove = true;
+      _radarBloc.add(const RadarPlaybackSuspended());
+      _reportTileIssue();
+      setState(() {
+        _showTilePreparation = false;
+        _radarTilesLoading = false;
+      });
+      final latest = _radarBloc.state;
+      if (latest is RadarReady) _scheduleVisibleRadarRetry();
     });
   }
 
@@ -1288,7 +1350,7 @@ final class _RadarMapState extends State<_RadarMap>
                     child: IgnorePointer(
                       child: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 220),
-                        child: !_surfaceReady || _showTilePreparation
+                        child: _showTilePreparation
                             ? const _RadarPreparingSurface(
                                 key: ValueKey('radar-preparation-visible'),
                               )
@@ -1378,7 +1440,9 @@ final class _RadarMapState extends State<_RadarMap>
   );
 
   void _schedulePrefetch(RadarReady state) {
-    if (!_mapReady || state.frames.isEmpty) return;
+    if (!_mapReady || state.frames.isEmpty || _playbackBufferWarmInProgress) {
+      return;
+    }
     ++_viewportRequestGeneration;
     _prefetchDebounce?.cancel();
     _tileCache.cancelPrefetch();
@@ -1391,6 +1455,16 @@ final class _RadarMapState extends State<_RadarMap>
   }
 
   Future<bool> _warmPlaybackBuffer(RadarReady state) async {
+    if (_playbackBufferWarmInProgress) return false;
+    _playbackBufferWarmInProgress = true;
+    try {
+      return await _warmPlaybackBufferOnce(state);
+    } finally {
+      _playbackBufferWarmInProgress = false;
+    }
+  }
+
+  Future<bool> _warmPlaybackBufferOnce(RadarReady state) async {
     final templates = _currentAndNextFrameTemplates(
       state,
     ).toList(growable: false);
@@ -1434,6 +1508,13 @@ final class _RadarMapState extends State<_RadarMap>
     // sixteen serial requests. If there is no next template, the visible
     // current frame itself is a complete buffer.
     final nextTemplates = templates.skip(1).toList(growable: false);
+    if (nextTemplates.isNotEmpty && state.isPlaying && !_timelineScrubbing) {
+      // Freeze both clocks *before* the BLoC reaches the next timestamp. The
+      // previous implementation released this gate even when prefetch failed,
+      // allowing the red cursor to advance while Google Maps still displayed
+      // the old precipitation frame.
+      _holdPlaybackClockForTileHandoff();
+    }
     final ready = nextTemplates.isEmpty
         ? expectedTiles
         : await _tileCache.prefetchNextFrames(
@@ -1443,11 +1524,29 @@ final class _RadarMapState extends State<_RadarMap>
             maxConcurrent: 6,
           );
     if (!mounted || _cameraIsMoving) return false;
-    final bufferReady = ready == expectedTiles;
+    final requiredReady = math.min(
+      expectedTiles,
+      math.max(4, (expectedTiles * 0.5).ceil()),
+    );
+    final bufferReady = ready >= requiredReady;
     final latestState = _radarBloc.state;
-    if (latestState is RadarReady && _isSelectedTilePresented(latestState)) {
+    final sameSelectedFrame =
+        latestState is RadarReady &&
+        latestState.selectedFrame.tileUrlTemplate ==
+            state.selectedFrame.tileUrlTemplate;
+    if (bufferReady &&
+        latestState is RadarReady &&
+        sameSelectedFrame &&
+        _isSelectedTilePresented(latestState)) {
       _releasePlaybackClockAfterTileHandoff();
       _maybeStartAutoplay();
+    } else if (latestState is RadarReady) {
+      // Keep the current image/cursor paired and retry in the background.
+      // A transient 5xx may delay the animation, but can never desynchronise
+      // it or require the user to clear application data.
+      Timer(const Duration(milliseconds: 250), () {
+        if (mounted) _schedulePrefetch(latestState);
+      });
     }
     return bufferReady;
   }
@@ -1615,7 +1714,10 @@ final class _RadarMapState extends State<_RadarMap>
     final generation = ++_viewportRequestGeneration;
     setState(() {
       _radarTilesLoading = true;
-      if (_tileCache.readyTileCount.value == 0) _showTilePreparation = true;
+      if (_tileCache.readyTileCount.value == 0 &&
+          !_preparationDeadlineExpired) {
+        _showTilePreparation = true;
+      }
     });
     final expectedTiles = math.min(_tileCache.recentCoordinateCount, 8);
     final ready = await _tileCache.prefetchNextFrames(
@@ -1631,7 +1733,8 @@ final class _RadarMapState extends State<_RadarMap>
       _reportTileIssue();
       setState(() {
         _radarTilesLoading = false;
-        _showTilePreparation = !_frontViewportPresentationReady;
+        _showTilePreparation =
+            !_preparationDeadlineExpired && !_frontViewportPresentationReady;
       });
       if (expectedTiles == 0) {
         _tileProviders[_frontTileSlot]?.resetPresentationTracking();
@@ -1667,6 +1770,7 @@ final class _RadarMapState extends State<_RadarMap>
       _radarTilesLoading = false;
       _showTilePreparation = false;
     });
+    _preparationEscapeTimer?.cancel();
     _visibleTileRetryCount = 0;
     final latest = _radarBloc.state;
     if (latest is RadarReady) {

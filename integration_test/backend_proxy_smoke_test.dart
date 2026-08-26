@@ -44,6 +44,11 @@ void main() {
       find.byKey(const ValueKey('radar-first-tile-ready')),
       timeout: const Duration(seconds: 45),
     );
+    await _waitFor(
+      tester,
+      find.byKey(const ValueKey('radar-preparation-hidden')),
+      timeout: const Duration(seconds: 10),
+    );
 
     final map = find.byType(GoogleMap);
     expect(map, findsOneWidget);
@@ -123,6 +128,11 @@ void main() {
       // server/network path is not required to finish inside three seconds.
       timeout: const Duration(seconds: 15),
     );
+    await _waitFor(
+      tester,
+      find.byKey(const ValueKey('radar-preparation-hidden')),
+      timeout: const Duration(seconds: 10),
+    );
 
     radarBloc.add(const RadarPlaybackPaused());
     await tester.pump();
@@ -178,6 +188,9 @@ void main() {
         tester,
         () => (radarBloc.state as RadarReady).selectedIndex != previousIndex,
         reason: 'The Radar playback clock did not advance from $previousIndex',
+        diagnostics: () =>
+            'ready=${tileCache.readyTileCount.value} '
+            '${RadarMapSmokeTestBridge.debugState}',
         timeout:
             RadarFramePolicy.playbackFrameDuration + const Duration(seconds: 5),
       );
@@ -255,34 +268,19 @@ void main() {
         },
         timeout: const Duration(seconds: 45),
       );
+      await _waitFor(
+        tester,
+        find.byKey(const ValueKey('radar-preparation-hidden')),
+        timeout: const Duration(seconds: 10),
+      );
     }
 
     radarBloc.add(const RadarPlaybackPaused());
     await tester.pump();
 
-    final probeState = radarBloc.state as RadarReady;
-    final probeUrl = probeState.selectedFrame.tileUrlTemplate!
-        .replaceAll('{z}', '7')
-        .replaceAll('{x}', '64')
-        .replaceAll('{y}', '44');
-    expect(
-      tileCache.simulateNext502ForSmokeTest(url: probeUrl),
-      isTrue,
-      reason:
-          'Run with --dart-define=CHETIWA_RADAR_SMOKE_TEST=true to exercise recovery.',
-    );
-    final failuresBefore = tileCache.simulatedFailureCount.value;
-    expect(
-      await tileCache.fetchTileForSmokeTest(probeUrl),
-      isFalse,
-      reason: 'The first probe must receive the injected HTTP 502',
-    );
-    expect(tileCache.simulatedFailureCount.value, failuresBefore + 1);
-    expect(
-      await tileCache.fetchTileForSmokeTest(probeUrl),
-      isTrue,
-      reason: 'The Radar tile request must recover immediately after HTTP 502',
-    );
+    // HTTP 502 recovery is exercised with an entire persistent outage in
+    // radar_preparation_escape_smoke_test.dart. Keeping that fault injection
+    // separate avoids conflating it with this live pan/zoom/playback proof.
     expect(find.byKey(const Key('radar-local-time')), findsOneWidget);
 
     await tester.tap(find.text('Prévisions'));

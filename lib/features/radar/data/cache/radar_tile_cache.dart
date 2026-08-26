@@ -218,6 +218,26 @@ final class RadarTileCache {
   bool simulateNext502ForSmokeTest({String? url}) =>
       _smokeController.arm(url: url);
 
+  bool simulateRepeated502ForSmokeTest({required int count, String? url}) =>
+      _smokeController.arm(url: url, count: count);
+
+  bool cancelSimulatedFailuresForSmokeTest() {
+    if (!_smokeTestEnabled) return false;
+    _smokeController.cancelFailures();
+    return true;
+  }
+
+  bool clearVolatileCacheForSmokeTest() {
+    if (!_smokeTestEnabled) return false;
+    _memory.clear();
+    _memoryBytes = 0;
+    _coordinateFallbacks.clear();
+    _readySessionTiles.clear();
+    _recentCoordinates.clear();
+    readyTileCount.value = 0;
+    return true;
+  }
+
   Future<bool> fetchTileForSmokeTest(String url) async {
     if (!_smokeTestEnabled) return false;
     return await _getBytes(url, forceNetwork: true, requestGeneration: null) !=
@@ -543,7 +563,12 @@ final class RadarTileCache {
               .get(Uri.parse(url))
               .timeout(
                 fallbackAvailable
-                    ? const Duration(seconds: 4)
+                    // During playback the previous frame already provides a
+                    // geographically exact last-good tile. Do not freeze the
+                    // whole animation for four seconds while one cold CDN
+                    // edge renders the next timestamp; fall back quickly and
+                    // let the silent retry pipeline refresh it afterwards.
+                    ? const Duration(milliseconds: 900)
                     : _tileRequestTimeout,
               );
           if (response.statusCode == 200) {
@@ -965,30 +990,38 @@ final class _RadarSmokeController {
 
   final bool enabled;
   final ValueNotifier<int> failureCount = ValueNotifier<int>(0);
-  bool _armed = false;
+  int _remainingFailures = 0;
   String? _targetUrl;
 
   bool shouldBypassCacheFor(String url) =>
-      enabled && _armed && (_targetUrl == null || _targetUrl == url);
+      enabled &&
+      _remainingFailures > 0 &&
+      (_targetUrl == null || _targetUrl == url);
 
-  bool arm({String? url}) {
-    if (!enabled) return false;
-    _armed = true;
+  bool arm({String? url, int count = 1}) {
+    if (!enabled || count < 1) return false;
+    _remainingFailures = count;
     _targetUrl = url;
     return true;
   }
 
   bool consumeFailure(String url) {
-    if (!_armed || (_targetUrl != null && _targetUrl != url)) return false;
-    _armed = false;
-    _targetUrl = null;
+    if (_remainingFailures < 1 || (_targetUrl != null && _targetUrl != url)) {
+      return false;
+    }
+    _remainingFailures--;
+    if (_remainingFailures == 0) _targetUrl = null;
     failureCount.value++;
     return true;
   }
 
-  void resetFailures() {
-    _armed = false;
+  void cancelFailures() {
+    _remainingFailures = 0;
     _targetUrl = null;
+  }
+
+  void resetFailures() {
+    cancelFailures();
     failureCount.value = 0;
   }
 }

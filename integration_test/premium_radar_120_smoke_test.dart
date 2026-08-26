@@ -72,6 +72,11 @@ void main() {
       find.byKey(const ValueKey('radar-first-tile-ready')),
       timeout: const Duration(seconds: 45),
     );
+    await _waitFor(
+      tester,
+      find.byKey(const ValueKey('radar-preparation-hidden')),
+      timeout: const Duration(seconds: 10),
+    );
     if (const bool.fromEnvironment('CHETIWA_RADAR_SMOKE_TEST')) {
       await _waitForCondition(
         tester,
@@ -122,10 +127,15 @@ void main() {
             'Premium cursor reached frame $expectedIndex before its tile was presented.',
         timeout: const Duration(seconds: 45),
       );
+      await _waitFor(
+        tester,
+        find.byKey(const ValueKey('radar-preparation-hidden')),
+        timeout: const Duration(seconds: 10),
+      );
     }
     radarBloc.add(const RadarPlaybackPaused());
     await tester.pump();
-    await _waitFor(tester, find.textContaining('prévision étendue Chetiwa+'));
+    await _waitFor(tester, find.textContaining('prévision étendue · Chetiwa+'));
     await _waitFor(tester, find.textContaining('PRÉVISION PLUIE'));
     expect(find.textContaining('ÉCHOS RADAR'), findsNothing);
     await _waitFor(
