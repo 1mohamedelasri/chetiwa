@@ -93,8 +93,13 @@ final class RuntimeConfig {
       if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
         throw FormatException('$key must be an absolute HTTP(S) URL');
       }
+      final trustedDockerRadarOrigin =
+          key == 'RADAR_METADATA_URL' &&
+          uri.scheme == 'http' &&
+          uri.host.toLowerCase() == 'librewxr';
       if (uri.scheme != 'https' &&
-          !(environment == AppEnvironment.local && uri.scheme == 'http')) {
+          !(environment == AppEnvironment.local && uri.scheme == 'http') &&
+          !trustedDockerRadarOrigin) {
         throw FormatException('$key must use HTTPS outside local development');
       }
       return uri;
@@ -181,6 +186,7 @@ final class RuntimeConfig {
       radarTileUrlTemplate: _optionalUrlTemplate(
         source['RADAR_TILE_URL_TEMPLATE'] ??
             'https://api.librewxr.net{frame}/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2',
+        trustedHttpHost: 'librewxr',
       ),
       sharedCounterUrl: _optionalUrl(source['SHARED_COUNTER_URL']),
       monthlyBudgetCents: _positiveInt(
@@ -288,7 +294,10 @@ final class RuntimeConfig {
     return uri;
   }
 
-  static String? _optionalUrlTemplate(String? value) {
+  static String? _optionalUrlTemplate(
+    String? value, {
+    String? trustedHttpHost,
+  }) {
     final normalized = _optional(value);
     if (normalized == null) return null;
     const placeholders = <String>['{frame}', '{z}', '{x}', '{y}'];
@@ -309,6 +318,14 @@ final class RuntimeConfig {
     if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
       throw FormatException(
         'URL template must produce an absolute URL: $value',
+      );
+    }
+    if (uri.scheme != 'https' &&
+        !(uri.scheme == 'http' &&
+            trustedHttpHost != null &&
+            uri.host.toLowerCase() == trustedHttpHost.toLowerCase())) {
+      throw FormatException(
+        'URL template must use HTTPS or the trusted internal host: $value',
       );
     }
     return normalized;

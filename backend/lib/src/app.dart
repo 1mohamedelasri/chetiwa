@@ -333,7 +333,14 @@ Handler createApp({
         final providerFrame = utf8.decode(base64Url.decode(paddedFrame));
         final z = int.tryParse(zValue);
         final x = int.tryParse(xValue);
-        final y = int.tryParse(yValue);
+        // The canonical public URL carries a .png suffix so Cloudflare treats
+        // the response as a cacheable static asset without an account-specific
+        // Cache Rule. Keep accepting the legacy extensionless URL for installed
+        // beta builds during the migration.
+        final normalizedYValue = yValue.endsWith('.png')
+            ? yValue.substring(0, yValue.length - 4)
+            : yValue;
+        final y = int.tryParse(normalizedYValue);
         if (z == null || x == null || y == null || z < 0 || z > 12) {
           throw const ApiException(
             statusCode: 400,
@@ -378,50 +385,54 @@ Handler createApp({
             policy: policy,
           );
         }
-        final budgetDecision = distributedBudget == null
-            ? budget.record(config.radarTileCostCents, now: clock())
-            : await distributedBudget.record(
-                config.radarTileCostCents,
-                now: clock(),
-              );
-        if (budgetDecision.threshold case final threshold?) {
-          metrics.recordBudgetAlert(threshold);
-        }
-        if (!budgetDecision.allowed) {
-          throw const ApiException(
-            statusCode: 503,
-            code: 'budget_kill_switch',
-            message:
-                'Radar tile service is temporarily disabled by its budget guard',
-          );
-        }
         try {
-          final bytes = await gateway.radarTile(
-            frame: providerFrame,
-            z: z,
-            x: x,
-            y: y,
-            cacheVersion: cacheVersion,
-          );
-          final tile = CachedTileResponse(
-            bytes: bytes,
-            etag: '"${sha256.convert(bytes)}"',
-            storedAt: instant,
-          );
-          binaryTileCache.write(key, tile);
+          final loaded = await binaryTileCache.loadOnce(key, () async {
+            final budgetDecision = distributedBudget == null
+                ? budget.record(config.radarTileCostCents, now: clock())
+                : await distributedBudget.record(
+                    config.radarTileCostCents,
+                    now: clock(),
+                  );
+            if (budgetDecision.threshold case final threshold?) {
+              metrics.recordBudgetAlert(threshold);
+            }
+            if (!budgetDecision.allowed) {
+              throw const ApiException(
+                statusCode: 503,
+                code: 'budget_kill_switch',
+                message:
+                    'Radar tile service is temporarily disabled by its budget guard',
+              );
+            }
+            final bytes = await gateway.radarTile(
+              frame: providerFrame,
+              z: z,
+              x: x,
+              y: y,
+              cacheVersion: cacheVersion,
+            );
+            final tile = CachedTileResponse(
+              bytes: bytes,
+              etag: '"${sha256.convert(bytes)}"',
+              storedAt: clock().toUtc(),
+            );
+            binaryTileCache.write(key, tile);
+            return tile;
+          });
+          final cacheStatus = loaded.joined ? 'COALESCED' : 'MISS';
           metrics.record(
             latency: clock().toUtc().difference(started),
             freshness: Duration.zero,
             error: false,
-            cacheStatus: 'MISS',
-            tileBytes: bytes.length,
+            cacheStatus: cacheStatus,
+            tileBytes: loaded.joined ? 0 : loaded.entry.bytes.length,
           );
           return _tileResponse(
             request,
-            tile,
-            cacheStatus: 'MISS',
+            loaded.entry,
+            cacheStatus: cacheStatus,
             policy: policy,
-            tileBytes: bytes.length,
+            tileBytes: loaded.joined ? 0 : loaded.entry.bytes.length,
           );
         } on ApiException {
           if (cached != null && cached.canServeStale(instant, policy)) {

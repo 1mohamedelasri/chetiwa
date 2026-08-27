@@ -1,0 +1,28 @@
+diff --git a/src/librewxr/data/fetcher.py b/src/librewxr/data/fetcher.py
+index 12b95ba..76a50cb 100644
+--- a/src/librewxr/data/fetcher.py
++++ b/src/librewxr/data/fetcher.py
+@@ -215,9 +215,23 @@ class RadarFetcher:
+         Fetches auxiliary grids and the latest radar frame immediately so
+         the server can start serving tiles within seconds.  Historical
+         frames are backfilled in a background task.
++
++        When the durable radar cache restored at least one frame, expose it
++        immediately and refresh in the background.  Fetching ECMWF plus a
++        twelve-frame nowcast can take several minutes on a two-vCPU launch
++        host; awaiting that work made every deploy look like an outage even
++        though valid last-known radar data was already in memory.
+         """
+         region_names = [r.name for r in self._enabled_regions]
+         logger.info("Fetching regions: %s", ", ".join(region_names))
++        restored_timestamps = await self._store.get_timestamps()
++        if restored_timestamps:
++            self._task = asyncio.create_task(self._backfill_then_loop())
++            logger.info(
++                "Serving %d restored radar frame(s); refresh running in background",
++                len(restored_timestamps),
++            )
++            return
+         await self._fetch_initial()
+         self._task = asyncio.create_task(self._backfill_then_loop())
+         logger.info("Radar fetcher started (backfill running in background)")

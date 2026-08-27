@@ -18,6 +18,9 @@ scp \
   "$script_dir/chetiwa-opaque-palette-upgrade.patch" \
   "$script_dir/chetiwa-crisp-presentation.patch" \
   "$script_dir/chetiwa-crisp-palette-upgrade.patch" \
+  "$script_dir/chetiwa-restored-startup.patch" \
+  "$script_dir/chetiwa-nonblocking-frame-reads.patch" \
+  "$script_dir/chetiwa-interactive-tile-executor.patch" \
   "$script_dir/radar-watchdog.sh" \
   "$script_dir/prewarm-public-radar.sh" \
   "$script_dir/chetiwa-radar-watchdog.service" \
@@ -53,6 +56,9 @@ small_host_cpu_patch_applied=0
 palette_patch_applied=0
 crisp_patch_applied=0
 crisp_palette_patch_applied=0
+restored_startup_patch_applied=0
+nonblocking_frame_reads_patch_applied=0
+interactive_tile_executor_patch_applied=0
 rollback() {
   echo 'Deployment failed; restoring the previous LibreWXR profile.' >&2
   install -m 0600 \"\$backup_env\" '$remote_dir/.env'
@@ -76,6 +82,15 @@ rollback() {
   fi
   if [ "\$crisp_palette_patch_applied" -eq 1 ]; then
     git -C '$remote_dir' apply -R '$staging_dir/chetiwa-crisp-palette-upgrade.patch' || true
+  fi
+  if [ "\$restored_startup_patch_applied" -eq 1 ]; then
+    git -C '$remote_dir' apply -R '$staging_dir/chetiwa-restored-startup.patch' || true
+  fi
+  if [ "\$nonblocking_frame_reads_patch_applied" -eq 1 ]; then
+    git -C '$remote_dir' apply -R '$staging_dir/chetiwa-nonblocking-frame-reads.patch' || true
+  fi
+  if [ "\$interactive_tile_executor_patch_applied" -eq 1 ]; then
+    git -C '$remote_dir' apply -R '$staging_dir/chetiwa-interactive-tile-executor.patch' || true
   fi
   docker compose --env-file '$remote_dir/.env' \
     --project-directory '$remote_dir' up -d --build --force-recreate || true
@@ -129,6 +144,27 @@ else
   git -C '$remote_dir' apply --check '$staging_dir/chetiwa-crisp-palette-upgrade.patch'
   git -C '$remote_dir' apply '$staging_dir/chetiwa-crisp-palette-upgrade.patch'
   crisp_palette_patch_applied=1
+fi
+if grep -q 'Serving %d restored radar frame' '$remote_dir/src/librewxr/data/fetcher.py'; then
+  echo 'Chetiwa restored-frame fast startup patch already installed.'
+else
+  git -C '$remote_dir' apply --check '$staging_dir/chetiwa-restored-startup.patch'
+  git -C '$remote_dir' apply '$staging_dir/chetiwa-restored-startup.patch'
+  restored_startup_patch_applied=1
+fi
+if grep -q 'Keep serving the immutable previous snapshot' '$remote_dir/src/librewxr/data/store.py'; then
+  echo 'Chetiwa non-blocking frame-read patch already installed.'
+else
+  git -C '$remote_dir' apply --check '$staging_dir/chetiwa-nonblocking-frame-reads.patch'
+  git -C '$remote_dir' apply '$staging_dir/chetiwa-nonblocking-frame-reads.patch'
+  nonblocking_frame_reads_patch_applied=1
+fi
+if grep -q 'interactive-tile-geometry' '$remote_dir/src/librewxr/main.py'; then
+  echo 'Chetiwa interactive tile executor patch already installed.'
+else
+  git -C '$remote_dir' apply --check '$staging_dir/chetiwa-interactive-tile-executor.patch'
+  git -C '$remote_dir' apply '$staging_dir/chetiwa-interactive-tile-executor.patch'
+  interactive_tile_executor_patch_applied=1
 fi
 install -m 0600 '$staging_dir/hetzner-small.env' '$remote_dir/.env'
 install -m 0755 '$staging_dir/radar-watchdog.sh' /usr/local/sbin/chetiwa-radar-watchdog

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -683,6 +684,95 @@ void main() {
     }
 
     expect(requestedRuns, <String>['1776707400', '1776708000']);
+  });
+
+  test('Radar frame metadata emits CDN-cacheable .png tile URLs', () async {
+    config = RuntimeConfig.fromEnvironment(const <String, String>{
+      'ARCGIS_API_KEY': 'test-key',
+      'PUBLIC_BASE_URL': 'https://chetiwa-api.ezplatforms.com',
+      'RADAR_PROVIDER': 'librewxr',
+      'RADAR_METADATA_URL':
+          'https://radar.ezplatforms.com/public/weather-maps.json',
+      'RADAR_TILE_URL_TEMPLATE':
+          'https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/14/1_0.png',
+    });
+    final app = appWith(
+      MockClient(
+        (_) async => http.Response(
+          jsonEncode(<String, Object?>{
+            'generated': 1776708060,
+            'host': 'https://radar.ezplatforms.com',
+            'radar': <String, Object?>{
+              'past': <Object?>[
+                <String, Object?>{
+                  'time': 1776708000,
+                  'path': '/v2/radar/observed',
+                },
+              ],
+              'nowcast': <Object?>[],
+            },
+          }),
+          200,
+        ),
+      ),
+    );
+
+    final response = await app(
+      Request(
+        'GET',
+        Uri.parse(
+          'http://localhost/v1/radar/frames?latitude=48.85&longitude=2.35',
+        ),
+      ),
+    );
+    final body =
+        jsonDecode(await response.readAsString()) as Map<String, Object?>;
+    expect(response.statusCode, 200, reason: body.toString());
+    final data = body['data'] as Map<String, Object?>;
+    final frame =
+        (data['frames'] as List<Object?>).single as Map<String, Object?>;
+
+    expect(frame['tileUrlTemplate'], endsWith('/{z}/{x}/{y}.png'));
+  });
+
+  test('concurrent identical radar tiles render only once', () async {
+    config = RuntimeConfig.fromEnvironment(const <String, String>{
+      'ARCGIS_API_KEY': 'test-key',
+      'RADAR_PROVIDER': 'librewxr',
+      'RADAR_TILE_URL_TEMPLATE':
+          'https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/14/1_0.png',
+    });
+    final png = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+3MxZ5wAAAABJRU5ErkJggg==',
+    );
+    final origin = Completer<http.Response>();
+    var calls = 0;
+    final app = appWith(
+      MockClient((_) {
+        calls++;
+        return origin.future;
+      }),
+    );
+    final frame = base64Url
+        .encode(utf8.encode('/v2/radar/observed'))
+        .replaceAll('=', '');
+    final uri = Uri.parse('http://localhost/v1/radar/tiles/$frame/7/64/44.png');
+
+    final first = Future<Response>.sync(() => app(Request('GET', uri)));
+    final second = Future<Response>.sync(() => app(Request('GET', uri)));
+    await Future<void>.delayed(Duration.zero);
+    expect(calls, 1);
+    origin.complete(http.Response.bytes(png, 200));
+    final responses = await Future.wait([first, second]);
+
+    expect(responses.map((response) => response.statusCode), everyElement(200));
+    expect(responses.map((response) => response.headers['x-cache']).toSet(), {
+      'MISS',
+      'COALESCED',
+    });
+    await Future.wait(
+      responses.map((response) => response.read().drain<void>()),
+    );
   });
 
   test('Radar tile proxy serves stale PNG after an origin 502', () async {

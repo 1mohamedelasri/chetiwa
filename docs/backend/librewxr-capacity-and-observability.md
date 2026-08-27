@@ -1,4 +1,44 @@
-# Capacité et supervision météo/radar — 25 août 2026
+# Capacité et supervision météo/radar — audit du 27 août 2026
+
+## Audit de latence et correctifs de production
+
+Le ralentissement n'avait pas une cause unique. Le chemin complet a été mesuré
+et corrigé du téléphone jusqu'à LibreWXR :
+
+| Cause confirmée | Effet utilisateur | Correction |
+| --- | --- | --- |
+| URL API sans suffixe statique | Cloudflare répondait `DYNAMIC` et chaque téléphone revenait à l'origine | URL canonique `.png`; HIT Cloudflare vérifié |
+| API → origine via Tunnel public | Double trajet Cloudflare/Tunnel sur chaque MISS | réseau Docker interne `librewxr:8080` |
+| Trois essais origine de 10 s | une tuile lente pouvait durer 30 s | un essai borné à 7 s, dernier visuel conservé |
+| Requêtes froides identiques concurrentes | plusieurs rendus identiques consommaient le CPU | single-flight dans le cache API |
+| Limite partagée par IP mobile | plusieurs utilisateurs derrière le même NAT pouvaient se bloquer | identifiant d'installation anonyme sur chaque requête tuile |
+| Six requêtes d'un ancien viewport | après un pan/zoom, la nouvelle ville attendait jusqu'à 8 s | annulation du client HTTP et priorité immédiate au nouveau viewport |
+| Timer Radar actif pendant la veille | curseur et couche pouvaient reprendre sur deux frames différentes | suspension/reprise atomique du BLoC et du playhead |
+| Loader recréé après une longue veille | écran de préparation alors qu'une carte valide existait | conservation de la dernière surface fiable; restauration silencieuse |
+| Cache disque mobile taillé seulement au lancement | croissance et I/O au cours d'une longue session | taille contrôlée périodiquement après 64 écritures |
+| Cache tuiles/coordonnées origine trop petit | évictions et régénérations fréquentes | 256 Mo tuiles, 512 Mo coordonnées |
+| Préchauffage limité à Paris z7 | USA et changements de zoom restaient froids | Paris + Nashville en z5/z7/z9, 96 couples frame/cible |
+| Démarrage bloqué par ECMWF/nowcast | plusieurs minutes d'indisponibilité après un déploiement | frames restaurées servies immédiatement; recalcul en arrière-plan |
+| Écriture memmap sous le verrou de lecture | les tuiles froides attendaient jusqu'à 30 s pendant un cycle de collecte | lectures sur snapshot atomique non bloquantes; l'ancien frame reste servi pendant l'écriture |
+| Exécuteur mono-thread partagé avec l'ingestion | le calcul d'une tuile visible restait en file derrière ECMWF/GRIB malgré un `/health` vert | pools dédiés au calcul géométrique et à l'encodage des tuiles interactives |
+
+Mesures du 27 août après correction :
+
+| Chemin | Résultat |
+| --- | ---: |
+| Tuile API avec HIT Cloudflare, 5 essais | 39–48 ms |
+| 12 tuiles origine froides, concurrence 4 | p50 649 ms, p95 736 ms |
+| Réponses invalides pendant le benchmark | 0/12 |
+| Préchauffage Europe + CONUS | 96/96 |
+| 4 MISS origine pendant une collecte à 118 % CPU | 160–314 ms |
+| 16 tuiles origine, concurrence 4, pendant la collecte | maximum 592 ms, 0 erreur |
+| 16 tuiles CONUS pendant un pic à 198 % CPU | maximum 513 ms, 0 erreur |
+| MISS API publique puis HIT Cloudflare | 304 ms puis 39–40 ms |
+
+Un « 100 % sans lag » n'est pas un SLA techniquement honnête sur réseau
+mobile. La cible de release est : aucune interface bloquée par le réseau,
+aucun ancien viewport prioritaire, dernier radar valide toujours conservé,
+HIT p95 < 500 ms, MISS p95 < 2 s et 5xx < 1 %.
 
 ## Verdict actuel
 
@@ -9,7 +49,8 @@ Tunnel Cloudflare. Le préchauffage soumettait jusqu'à 35 076 tuiles après un
 cycle et amplifiait la pression mémoire.
 
 Après correction : aucun redémarrage, aucun OOM, environ 678 Mio au repos,
-cache tuiles borné à 256 Mo, préchauffage désactivé et watchdog sain. Le pic du
+cache tuiles borné à 256 Mo, préchauffage mondial désactivé, préchauffage ciblé
+Europe/CONUS actif et watchdog sain. Le pic du
 démarrage a atteint 2,9 Gio et 321 Mio de swap ; la VM 4 Gio reste donc un
 profil de lancement minimal, pas la cible définitive de montée en charge.
 
@@ -46,11 +87,13 @@ restart :
 | 16 | 1,75 s | 2,33 s | 6,86 tuiles/s |
 
 La saturation commence après huit requêtes froides simultanées : ajouter de la
-concurrence augmente ensuite la latence sans augmenter le débit. Le test a
-commencé pendant le cycle RRQPE/nowcast de 22:50 ; la toute première tuile a
-mis 22,6 s alors que le p95 du palier est resté à 297 ms. Ce cas extrême
-confirme que les deux vCPU sont le goulot pendant la collecte, même si
-Cloudflare masque normalement ce coût pour les tuiles déjà demandées.
+concurrence augmente ensuite la latence sans augmenter le débit. Le test
+initial avait commencé pendant le cycle RRQPE/nowcast de 22:50 ; sa première
+tuile avait mis 22,6 s. L'audit a relié ce cas à la file mono-thread partagée
+entre ingestion et rendu. Après isolation du chemin interactif, un retest
+effectué pendant une collecte à 118 % CPU a servi 16 tuiles avec quatre
+requêtes simultanées en 2–592 ms, sans erreur. Les deux vCPU restent une limite
+de débit, mais une collecte ne bloque plus une tuile visible.
 
 La planification conserve donc seulement **3 tuiles origine/s continues**,
 moins de la moitié du maximum de burst, afin de laisser de la CPU aux cycles
@@ -90,7 +133,7 @@ Ce tableau est une estimation de capacité, pas un SLA. Après production, la
 valeur autoritative sera calculée avec les vraies métriques
 `uniqueTilesPerSession`, le taux de HIT Cloudflare et la répartition horaire.
 Avant sept jours de trafic réel, retenir **2 000–5 000 DAU** comme enveloppe de
-bêta, avec rollout progressif. Le cache 256 Mo doit être déployé avant ce test.
+bêta, avec rollout progressif. Le cache 256 Mo est déployé.
 
 ## Autres fournisseurs : limites indépendantes de la VM
 

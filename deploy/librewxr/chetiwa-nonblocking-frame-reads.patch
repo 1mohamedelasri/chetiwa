@@ -1,0 +1,45 @@
+diff --git a/src/librewxr/data/store.py b/src/librewxr/data/store.py
+--- a/src/librewxr/data/store.py
++++ b/src/librewxr/data/store.py
+@@ -142,8 +142,10 @@
+             return evicted_ts, False
+ 
+     async def get_frame(self, timestamp: int) -> RadarFrame | None:
+-        async with self._lock:
+-            return self._by_ts.get(timestamp)
++        # Keep serving the immutable previous snapshot while add_frame writes
++        # large region memmaps. Atomic reference swaps make this lock-free read
++        # see either the old or the new complete frame, never a partial frame.
++        return self._by_ts.get(timestamp)
+ 
+     def frame_version(self, timestamp: int) -> int | None:
+         """Content version for a timestamp, or None when unknown.
+@@ -159,21 +161,20 @@
+         return self._frame_versions.get(timestamp)
+ 
+     async def get_latest_frame(self) -> RadarFrame | None:
+-        async with self._lock:
+-            return self._frames[-1] if self._frames else None
++        frames = self._frames
++        return frames[-1] if frames else None
+ 
+     async def get_timestamps(self) -> list[int]:
+-        async with self._lock:
+-            return [f.timestamp for f in self._frames]
++        frames = self._frames
++        return [f.timestamp for f in frames]
+ 
+     async def get_region_keys(self) -> dict[int, set[str]]:
+         """Return a mapping of timestamp -> set of region names present."""
+-        async with self._lock:
+-            return {f.timestamp: set(f.regions.keys()) for f in self._frames}
++        frames = self._frames
++        return {f.timestamp: set(f.regions.keys()) for f in frames}
+ 
+     async def frame_count(self) -> int:
+-        async with self._lock:
+-            return len(self._frames)
++        return len(self._frames)
+ 
+     @property
+     def data_bytes(self) -> int:

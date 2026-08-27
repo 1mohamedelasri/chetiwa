@@ -1,0 +1,64 @@
+--- a/src/librewxr/api/routes.py
++++ b/src/librewxr/api/routes.py
+@@ -90,6 +90,10 @@
+ # anon/file/shmem split for the /health ``cluster`` section.
+ memory_monitor = None  # MemoryMonitor | None
+ 
++# Dedicated interactive geometry pool. Single mode assigns this separately
++# from the loop default executor used by radar/NWP ingestion.
++geometry_executor = None  # ThreadPoolExecutor | None
++
+ # Tile present pool - set by main.py.  Multi-mode render workers get a
+ # dedicated executor for the cheap ``present_tile`` tail (colorize/encode)
+ # so those jobs never queue behind long geometry computes on the shared
+@@ -1168,7 +1172,7 @@
+                         tile_request_tracker.record_fast_path(geom.fast_path)
+                 else:
+                     compute_start = time.perf_counter_ns()
+-                    geom = await asyncio.to_thread(
++                    compute_call = functools.partial(
+                         compute_tile_geometry,
+                         frame_regions=frame.regions,
+                         z=z, x=xi, y=yi,
+@@ -1181,6 +1185,12 @@
+                         nowcast_blend=nowcast_blend,
+                         precip_mask=precip_mask,
+                     )
++                    if geometry_executor is None:
++                        geom = await asyncio.to_thread(compute_call)
++                    else:
++                        geom = await asyncio.get_running_loop().run_in_executor(
++                            geometry_executor, compute_call,
++                        )
+                     compute_ns = time.perf_counter_ns() - compute_start
+                     tile_cache.put(geom_key, geom)
+                     # Only fire on the cold-compute path: a fast-path label here means
+--- a/src/librewxr/main.py
++++ b/src/librewxr/main.py
+@@ -948,7 +948,15 @@
+     pool_size = settings.warmer_threads or max((os.cpu_count() or 4) - 1, 1)
+     request_executor = ThreadPoolExecutor(max_workers=pool_size)
+     warmer_executor = ThreadPoolExecutor(max_workers=pool_size)
++    geometry_executor = ThreadPoolExecutor(
++        max_workers=1, thread_name_prefix="interactive-tile-geometry",
++    )
++    present_executor = ThreadPoolExecutor(
++        max_workers=1, thread_name_prefix="interactive-tile-present",
++    )
+     asyncio.get_running_loop().set_default_executor(request_executor)
++    routes.geometry_executor = geometry_executor
++    routes.present_executor = present_executor
+ 
+     warmer = TileWarmer(
+         store, cache,
+@@ -1151,6 +1159,10 @@
+     warmer.shutdown()
+     warmer_executor.shutdown(wait=False)
+     request_executor.shutdown(wait=False)
++    geometry_executor.shutdown(wait=False)
++    present_executor.shutdown(wait=False)
++    routes.geometry_executor = None
++    routes.present_executor = None
+     if nowcast_store is not None:
+         nowcast_store.cleanup()
+     if storm_cell_store is not None:

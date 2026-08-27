@@ -39,11 +39,33 @@ void main() {
       'PORT': '9090',
       'GOOGLE_CLOUD_PROJECT': 'chetiwa-production',
       'PUBLIC_BASE_URL': 'https://api.chetiwa.example',
+      'RADAR_METADATA_URL': 'http://librewxr:8080/public/weather-maps.json',
+      'RADAR_TILE_URL_TEMPLATE':
+          'http://librewxr:8080{frame}/256/{z}/{x}/{y}/14/1_0.png',
     });
 
     expect(config.environment, AppEnvironment.production);
     expect(config.port, 9090);
     expect(config.isProduction, isTrue);
+    expect(config.radarMetadataUri.host, 'librewxr');
+  });
+
+  test('internal radar HTTP is restricted to the Docker service name', () {
+    expect(
+      () => RuntimeConfig.fromEnvironment(const <String, String>{
+        'CHETIWA_ENV': 'staging',
+        'GOOGLE_CLOUD_PROJECT': 'chetiwa-staging',
+        'RADAR_METADATA_URL': 'http://example.com/weather-maps.json',
+      }),
+      throwsFormatException,
+    );
+    expect(
+      () => RuntimeConfig.fromEnvironment(const <String, String>{
+        'RADAR_TILE_URL_TEMPLATE':
+            'http://example.com{frame}/256/{z}/{x}/{y}/14/1_0.png',
+      }),
+      throwsFormatException,
+    );
   });
 
   test('production radar requires a public HTTPS API URL', () {

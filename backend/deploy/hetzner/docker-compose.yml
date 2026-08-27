@@ -10,6 +10,11 @@ services:
       # Cloudflared runs with host networking and reaches this loopback port.
       # The API is never exposed directly on the public Hetzner interface.
       - "127.0.0.1:8081:8080"
+    networks:
+      - default
+      # Same-host API -> LibreWXR traffic must not loop through the public
+      # Cloudflare Tunnel. Public ingress remains unchanged.
+      - radar-origin
     restart: unless-stopped
     stop_grace_period: 20s
     healthcheck:
@@ -28,3 +33,7 @@ services:
         limits:
           memory: 384M
 
+networks:
+  radar-origin:
+    external: true
+    name: ${LIBREWXR_DOCKER_NETWORK:-librewxr_default}

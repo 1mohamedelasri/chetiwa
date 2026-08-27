@@ -65,4 +65,4 @@ export 'src/runtime_config.dart'
 export 'src/shared_counter.dart'
     show HttpSharedCounter, InMemorySharedCounter, SharedCounter;
 export 'src/tile_response_cache.dart'
-    show CachedTileResponse, TileCachePolicy, TileResponseCache;
+    show CachedTileResponse, TileCachePolicy, TileLoadResult, TileResponseCache;

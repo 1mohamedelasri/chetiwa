@@ -28,6 +28,15 @@ final class CachedTileResponse {
       now.difference(storedAt) <= policy.staleIfErrorFor;
 }
 
+final class TileLoadResult {
+  const TileLoadResult({required this.entry, required this.joined});
+
+  final CachedTileResponse entry;
+
+  /// True when another request was already loading the exact same tile.
+  final bool joined;
+}
+
 final class TileResponseCache {
   TileResponseCache({this.maxEntries = 2048, this.maxBytes = 128 * 1024 * 1024})
     : assert(maxEntries > 0),
@@ -36,6 +45,7 @@ final class TileResponseCache {
   final int maxEntries;
   final int maxBytes;
   final Map<String, CachedTileResponse> _entries = {};
+  final Map<String, Future<CachedTileResponse>> _inFlight = {};
   var _bytes = 0;
 
   CachedTileResponse? read(String key) {
@@ -58,8 +68,32 @@ final class TileResponseCache {
     _bytes += value.bytes.length;
   }
 
+  /// Coalesces concurrent cache misses for the same tile.
+  ///
+  /// A cold Cloudflare edge can send several identical requests before the
+  /// first response is cacheable. Rendering each one independently overloaded
+  /// LibreWXR and amplified a single cold tile into a visible Radar stall.
+  Future<TileLoadResult> loadOnce(
+    String key,
+    Future<CachedTileResponse> Function() loader,
+  ) async {
+    final existing = _inFlight[key];
+    if (existing != null) {
+      return TileLoadResult(entry: await existing, joined: true);
+    }
+
+    final operation = Future<CachedTileResponse>.sync(loader);
+    _inFlight[key] = operation;
+    try {
+      return TileLoadResult(entry: await operation, joined: false);
+    } finally {
+      if (identical(_inFlight[key], operation)) _inFlight.remove(key);
+    }
+  }
+
   int get entryCount => _entries.length;
   int get bytes => _bytes;
+  int get inFlightCount => _inFlight.length;
 
   void clear() {
     _entries.clear();

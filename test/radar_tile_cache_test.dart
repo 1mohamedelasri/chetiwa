@@ -119,6 +119,32 @@ void main() {
     expect(cache.readyTileCount.value, 1);
   });
 
+  test(
+    'tile requests identify the installation for a private rate bucket',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'chetiwa-radar-device-header-test-',
+      );
+      addTearDown(() => _deleteDirectoryEventually(directory));
+      final png = await _solidPngTile();
+      String? deviceId;
+      final cache = RadarTileCache.forTesting(
+        client: MockClient((request) async {
+          deviceId = request.headers['x-chetiwa-device-id'];
+          return http.Response.bytes(png, 200);
+        }),
+        directory: directory,
+        deviceId: '0123456789abcdef0123456789abcdef',
+      )..beginSession();
+
+      await cache
+          .providerFor('https://tiles.test/{z}/{x}/{y}.png')
+          .getTile(64, 44, 7);
+
+      expect(deviceId, '0123456789abcdef0123456789abcdef');
+    },
+  );
+
   test('Google tile provider overzooms the correct native z10 tile', () async {
     final directory = await Directory.systemTemp.createTemp(
       'chetiwa-radar-overzoom-test-',
@@ -467,6 +493,38 @@ void main() {
     await Future.wait(activeOldViewport);
   });
 
+  test(
+    'a new viewport aborts obsolete requests before loading the new city',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'chetiwa-radar-abort-old-viewport-test-',
+      );
+      addTearDown(() => _deleteDirectoryEventually(directory));
+      final firstClient = _AbortableClient();
+      final png = await _solidPngTile();
+      final cache = RadarTileCache.forTesting(
+        client: firstClient,
+        resetClientFactory: () =>
+            MockClient((_) async => http.Response.bytes(png, 200)),
+        directory: directory,
+      )..beginSession();
+      final oldTile = cache
+          .providerFor('https://tiles.test/old/{z}/{x}/{y}.png')
+          .getTile(64, 44, 7);
+      await firstClient.started.future;
+
+      cache.beginViewport();
+      final newTile = await cache
+          .providerFor('https://tiles.test/new/{z}/{x}/{y}.png')
+          .getTile(65, 44, 7)
+          .timeout(const Duration(milliseconds: 500));
+
+      expect(newTile.data, png);
+      expect((await oldTile).data, isNull);
+      expect(firstClient.closed, isTrue);
+    },
+  );
+
   test('Google tile provider does not retry a permanent 400', () async {
     final directory = await Directory.systemTemp.createTemp(
       'chetiwa-radar-permanent-error-test-',
@@ -506,6 +564,27 @@ void main() {
     expect(tile.data, isNull);
     expect(cache.readyTileCount.value, 0);
   });
+}
+
+final class _AbortableClient extends http.BaseClient {
+  final Completer<void> started = Completer<void>();
+  final Completer<http.StreamedResponse> _response =
+      Completer<http.StreamedResponse>();
+  bool closed = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    if (!started.isCompleted) started.complete();
+    return _response.future;
+  }
+
+  @override
+  void close() {
+    closed = true;
+    if (!_response.isCompleted) {
+      _response.completeError(http.ClientException('cancelled'));
+    }
+  }
 }
 
 Future<List<int>> _solidPngTile() async {

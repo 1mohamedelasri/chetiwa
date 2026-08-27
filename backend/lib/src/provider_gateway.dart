@@ -247,7 +247,7 @@ final class ProviderGateway {
             : '';
         final tileUrlTemplate = _config.publicBaseUrl == null
             ? '$directHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '14/1_0.png' : '2/1_0.png'}$query'
-            : '${_config.publicBaseUrl}/v1/radar/tiles/$frameId/{z}/{x}/{y}${cacheVersion == null ? '' : '?run=$cacheVersion'}';
+            : '${_config.publicBaseUrl}/v1/radar/tiles/$frameId/{z}/{x}/{y}.png${cacheVersion == null ? '' : '?run=$cacheVersion'}';
         frames.add(<String, Object?>{
           'time': _isoFromEpoch(epoch),
           'kind': kind,
@@ -453,36 +453,68 @@ final class ProviderGateway {
             },
           );
     Object? lastError;
-    for (var attempt = 0; attempt < 3; attempt++) {
-      try {
-        final response = await _client
-            .get(uri, headers: const <String, String>{'accept': 'image/png'})
-            .timeout(const Duration(seconds: 10));
-        if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
-          return Uint8List.fromList(response.bodyBytes);
-        }
-        if (response.statusCode < 500 && response.statusCode != 429) {
-          throw ApiException(
-            statusCode: 502,
-            code: 'radar_tile_provider_rejected',
-            message: 'Radar tile provider returned HTTP ${response.statusCode}',
-          );
-        }
-        lastError = 'HTTP ${response.statusCode}';
-      } on ApiException {
-        rethrow;
-      } on Object catch (error) {
-        lastError = error;
+    try {
+      // Mobile waits at most eight seconds for a genuinely cold tile. Retrying
+      // three ten-second origin calls after the phone disconnected multiplied
+      // CPU work and made the next request slower. One bounded local-origin
+      // request is sufficient; cache fallback and the mobile recovery loop own
+      // subsequent attempts.
+      final response = await _client
+          .get(uri, headers: const <String, String>{'accept': 'image/png'})
+          .timeout(const Duration(seconds: 7));
+      if (response.statusCode == 200 &&
+          _isSupportedRadarImage(response.bodyBytes)) {
+        return Uint8List.fromList(response.bodyBytes);
       }
-      if (attempt < 2) {
-        await _delay(Duration(milliseconds: 200 * (attempt + 1)));
+      if (response.statusCode == 200) {
+        throw const ApiException(
+          statusCode: 502,
+          code: 'invalid_radar_tile',
+          message: 'Radar tile provider returned invalid image bytes',
+        );
       }
+      if (response.statusCode < 500 && response.statusCode != 429) {
+        throw ApiException(
+          statusCode: 502,
+          code: 'radar_tile_provider_rejected',
+          message: 'Radar tile provider returned HTTP ${response.statusCode}',
+        );
+      }
+      lastError = 'HTTP ${response.statusCode}';
+    } on ApiException {
+      rethrow;
+    } on Object catch (error) {
+      lastError = error;
     }
     throw ApiException(
       statusCode: 503,
       code: 'radar_tile_provider_unavailable',
-      message: 'Radar tile provider unavailable after retries: $lastError',
+      message: 'Radar tile provider unavailable: $lastError',
     );
+  }
+
+  static bool _isSupportedRadarImage(List<int> bytes) {
+    if (bytes.length < 12) return false;
+    final png =
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4e &&
+        bytes[3] == 0x47 &&
+        bytes[4] == 0x0d &&
+        bytes[5] == 0x0a &&
+        bytes[6] == 0x1a &&
+        bytes[7] == 0x0a;
+    final jpeg = bytes[0] == 0xff && bytes[1] == 0xd8 && bytes[2] == 0xff;
+    final webp =
+        bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46 &&
+        bytes[8] == 0x57 &&
+        bytes[9] == 0x45 &&
+        bytes[10] == 0x42 &&
+        bytes[11] == 0x50;
+    return png || jpeg || webp;
   }
 
   Future<Map<String, dynamic>> _getJson(Uri uri) async {

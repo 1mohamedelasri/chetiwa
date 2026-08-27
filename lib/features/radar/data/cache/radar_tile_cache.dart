@@ -9,6 +9,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import '../../../../core/network/installation_id_provider.dart';
+
 final class RadarTileMetricsSnapshot {
   const RadarTileMetricsSnapshot({
     required this.cacheHits,
@@ -117,14 +119,19 @@ final class RadarTileCache {
         directory == null
             ? _persistentDirectory()
             : Future<Directory>.value(directory),
+        _safeInstallationId(const InstallationIdProvider()),
+        resetClientFactory: client == null ? http.Client.new : null,
       );
 
   RadarTileCache._withClient(
     http.Client delegate,
     this._smokeController,
     this._directoryFuture,
-  ) : metrics = RadarTileMetrics(),
-      _client = _RadarSmokeClient(delegate, _smokeController) {
+    this._installationIdFuture, {
+    http.Client Function()? resetClientFactory,
+  }) : metrics = RadarTileMetrics(),
+       _resetClientFactory = resetClientFactory,
+       _client = _RadarSmokeClient(delegate, _smokeController) {
     unawaited(_prepareDirectory());
   }
 
@@ -132,7 +139,15 @@ final class RadarTileCache {
   factory RadarTileCache.forTesting({
     required http.Client client,
     required Directory directory,
-  }) => RadarTileCache._(client: client, directory: directory);
+    String? deviceId,
+    http.Client Function()? resetClientFactory,
+  }) => RadarTileCache._withClient(
+    client,
+    _RadarSmokeController(enabled: false),
+    Future<Directory>.value(directory),
+    Future<String?>.value(deviceId),
+    resetClientFactory: resetClientFactory,
+  );
 
   static final RadarTileCache shared = RadarTileCache._();
 
@@ -152,8 +167,10 @@ final class RadarTileCache {
     }
   }
 
-  final http.Client _client;
+  http.Client _client;
+  final http.Client Function()? _resetClientFactory;
   final Future<Directory> _directoryFuture;
+  final Future<String?> _installationIdFuture;
   final _RadarSmokeController _smokeController;
   final RadarTileMetrics metrics;
   final ValueNotifier<int> readyTileCount = ValueNotifier<int>(0);
@@ -178,8 +195,11 @@ final class RadarTileCache {
   var _memoryBytes = 0;
   var _activeDownloads = 0;
   var _activeRenders = 0;
+  var _diskWritesSinceTrim = 0;
+  var _diskTrimInProgress = false;
   var _prefetchGeneration = 0;
   var _viewportGeneration = 0;
+  var _discardDownloadReleasesBeforeGeneration = 0;
 
   /// Coordinates requested by the native map for the settled viewport.
   ///
@@ -200,14 +220,24 @@ final class RadarTileCache {
   }
 
   /// Invalidates queued work from the previous camera viewport. Downloads
-  /// already on the wire may finish and populate the cache, but they cannot
-  /// retry or keep newer visible requests trapped behind an obsolete queue.
+  /// already on the wire are actively cancelled in production. Without this,
+  /// six obsolete eight-second requests could occupy every network slot after
+  /// a fast pan and make the newly settled city appear frozen.
   int beginViewport({bool preserveRecentCoordinates = false}) {
     _viewportGeneration++;
     cancelPrefetch();
     if (!preserveRecentCoordinates) _recentCoordinates.clear();
     while (_downloadWaiters.isNotEmpty) {
       _downloadWaiters.removeFirst().completer.complete(false);
+    }
+    final resetClientFactory = _resetClientFactory;
+    if (_activeDownloads > 0 && resetClientFactory != null) {
+      _client.close();
+      _client = _RadarSmokeClient(resetClientFactory(), _smokeController);
+      // Old-generation completions are ignored by _releaseDownloadSlot. New
+      // viewport work therefore starts immediately on the fresh client.
+      _activeDownloads = 0;
+      _discardDownloadReleasesBeforeGeneration = _viewportGeneration;
     }
     return _viewportGeneration;
   }
@@ -547,6 +577,11 @@ final class RadarTileCache {
     }
     metrics.recordCacheLookup(url, hit: false);
     if (!await _acquireDownloadSlot(requestGeneration)) return null;
+    // Bind this operation to the client owned by its viewport generation.
+    // beginViewport closes that instance; looking up `_client` only after the
+    // async installation-id read would accidentally move an obsolete request
+    // onto the fresh viewport's client.
+    final requestClient = _client;
     try {
       // Once this exact geographic tile has a previously presented image,
       // one bounded refresh attempt is enough. A second long retry used to
@@ -559,8 +594,15 @@ final class RadarTileCache {
           : 2;
       for (var attempt = 0; attempt < attempts; attempt++) {
         try {
-          final response = await _client
-              .get(Uri.parse(url))
+          final installationId = await _installationIdFuture;
+          final response = await requestClient
+              .get(
+                Uri.parse(url),
+                headers: <String, String>{
+                  if (installationId != null)
+                    'x-chetiwa-device-id': installationId,
+                },
+              )
               .timeout(
                 fallbackAvailable
                     // During playback the previous frame already provides a
@@ -601,7 +643,7 @@ final class RadarTileCache {
     } on Object {
       return null;
     } finally {
-      _releaseDownloadSlot();
+      _releaseDownloadSlot(requestGeneration);
     }
   }
 
@@ -627,7 +669,11 @@ final class RadarTileCache {
     return waiter.completer.future;
   }
 
-  void _releaseDownloadSlot() {
+  void _releaseDownloadSlot(int? requestGeneration) {
+    if (requestGeneration != null &&
+        requestGeneration < _discardDownloadReleasesBeforeGeneration) {
+      return;
+    }
     while (_downloadWaiters.isNotEmpty) {
       final waiter = _downloadWaiters.removeFirst();
       if (waiter.generation != null &&
@@ -740,9 +786,26 @@ final class RadarTileCache {
       );
       await temporary.writeAsBytes(bytes, flush: false);
       await temporary.rename(file.path);
+      _diskWritesSinceTrim++;
+      if (_diskWritesSinceTrim >= 64) {
+        _diskWritesSinceTrim = 0;
+        _scheduleDiskTrim();
+      }
     } on FileSystemException {
       // Cache writes are opportunistic and must never block visible Radar.
     }
+  }
+
+  void _scheduleDiskTrim() {
+    if (_diskTrimInProgress) return;
+    _diskTrimInProgress = true;
+    unawaited(() async {
+      try {
+        await _trimDiskCache();
+      } finally {
+        _diskTrimInProgress = false;
+      }
+    }());
   }
 
   Future<void> _trimDiskCache() async {
@@ -803,6 +866,18 @@ final class RadarTileCache {
         bytes[10] == 0x42 &&
         bytes[11] == 0x50;
     return png || jpeg || webp;
+  }
+
+  static Future<String?> _safeInstallationId(
+    InstallationIdProvider provider,
+  ) async {
+    try {
+      return await provider.getOrCreate();
+    } on Object {
+      // Radar remains usable if preferences are temporarily unavailable. The
+      // API then falls back to its IP bucket for this process.
+      return null;
+    }
   }
 }
 

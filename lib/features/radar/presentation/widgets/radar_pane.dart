@@ -296,6 +296,11 @@ final class _RadarMapState extends State<_RadarMap>
       _cameraPlaybackResumeTimer?.cancel();
       _visibleTileWatchdog?.cancel();
       _playheadController.stop();
+      // Stop the BLoC's periodic clock as well as the visual playhead. Keeping
+      // that timer alive let the selected radar frame advance while Android or
+      // iOS had suspended the native map, producing a frozen tile/cursor pair
+      // after resume.
+      _radarBloc.add(const RadarPlaybackSuspended());
       return;
     }
     if (state != AppLifecycleState.resumed) return;
@@ -325,6 +330,8 @@ final class _RadarMapState extends State<_RadarMap>
     }
 
     final generation = ++_surfacePreparationGeneration;
+    final canKeepLastGoodSurface =
+        _surfaceReady && _frontViewportPresentationReady;
     _resumeRecoveryInProgress = true;
     _minimumSuccessfulTileResponses =
         _tileCache.successfulTileResponseCount.value +
@@ -337,12 +344,18 @@ final class _RadarMapState extends State<_RadarMap>
     _radarBloc.add(const RadarPlaybackSuspended());
     if (mounted) {
       setState(() {
-        _surfaceReady = false;
-        _showTilePreparation = true;
-        _preparationDeadlineExpired = false;
-        _radarTilesLoading = true;
+        // A previously rendered native map is a better recovery surface than
+        // a blocking loader. Keep the last good radar visible while its exact
+        // current frame is restored from memory/disk. The branded preparation
+        // card remains reserved for a genuinely cold first launch.
+        if (!canKeepLastGoodSurface) {
+          _surfaceReady = false;
+          _showTilePreparation = true;
+          _preparationDeadlineExpired = false;
+          _radarTilesLoading = true;
+        }
       });
-      _armPreparationEscape();
+      if (!canKeepLastGoodSurface) _armPreparationEscape();
     }
 
     // Preserve the last viewport coordinates so the currently visible frame
@@ -365,6 +378,16 @@ final class _RadarMapState extends State<_RadarMap>
     ).timeout(const Duration(seconds: 6), onTimeout: () => false);
     if (!mounted || generation != _surfacePreparationGeneration) return;
     _scheduleSurfaceReady();
+    if (canKeepLastGoodSurface) {
+      setState(() {
+        _resumeRecoveryInProgress = false;
+        _radarTilesLoading = false;
+      });
+      if (widget.isActive) {
+        _radarBloc.add(const RadarPlaybackResumed());
+      }
+      _maybeStartAutoplay();
+    }
   }
 
   @override
