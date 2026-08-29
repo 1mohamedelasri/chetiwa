@@ -40,12 +40,21 @@ final class LocalRainAlertCoordinator {
     if (_initialized) return;
     _initialized = true;
     await _preferences.ready;
+    try {
+      await _scheduler.initialize();
+    } on Object {
+      // A platform notification service failure must not break weather startup.
+    }
     final remote = _remoteGateway;
     if (remote != null) {
-      await remote.initialize();
-      _tokenSubscription = remote.tokenRefresh.listen((_) {
-        unawaited(sync());
-      });
+      try {
+        await remote.initialize();
+        _tokenSubscription = remote.tokenRefresh.listen((_) {
+          unawaited(sync());
+        });
+      } on Object {
+        // sync() below will retain remote ownership or use the local fallback.
+      }
     }
     await sync();
   }
@@ -136,6 +145,11 @@ final class LocalRainAlertCoordinator {
           scheduledAt: scheduledAt,
           timeZone: forecast.timeZone,
           locationLabel: location.label,
+          eventId:
+              'local:${first.time.toUtc().toIso8601String()}:'
+              '${location.coordinates.latitude.toStringAsFixed(4)}:'
+              '${location.coordinates.longitude.toStringAsFixed(4)}',
+          coordinates: location.coordinates,
           body:
               '${_intensityLabel(first.intensity)} prévue vers '
               '${WeatherTimeZone.displayHourMinute(first.time)}.',

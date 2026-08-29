@@ -1,6 +1,7 @@
 import 'package:chetiwa/core/location/coordinates.dart';
 import 'package:chetiwa/core/location/location_repository.dart';
 import 'package:chetiwa/core/notifications/rain_notification_scheduler.dart';
+import 'package:chetiwa/core/notifications/rain_alert_navigation_controller.dart';
 import 'package:chetiwa/core/time/weather_clock.dart';
 import 'package:chetiwa/features/alerts/application/alert_preferences_controller.dart';
 import 'package:chetiwa/features/alerts/application/local_rain_alert_coordinator.dart';
@@ -36,6 +37,12 @@ void main() {
       scheduler.scheduled?.scheduledAt,
       now.add(const Duration(minutes: 15)),
     );
+    final navigation = RainAlertNavigationIntent.fromData(
+      Map<String, dynamic>.from(scheduler.scheduled!.navigationData),
+    );
+    expect(navigation?.locationLabel, 'Paris, France');
+    expect(navigation?.coordinates.latitude, Coordinates.paris.latitude);
+    expect(navigation?.section, 'radar');
   });
 
   test('refuse une alerte sans lieu principal', () async {
@@ -85,6 +92,8 @@ void main() {
           timeZone: 'Europe/Paris',
           locationLabel: 'Paris, France',
           body: 'ancienne alerte locale',
+          eventId: 'local:test',
+          coordinates: Coordinates.paris,
         ),
       );
       final remote = FixtureRemoteRainAlertGateway(

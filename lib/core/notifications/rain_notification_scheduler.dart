@@ -1,7 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 
+import '../location/coordinates.dart';
 import '../time/weather_clock.dart';
+import 'rain_alert_navigation_controller.dart';
 
 final class RainNotification {
   const RainNotification({
@@ -9,15 +13,30 @@ final class RainNotification {
     required this.timeZone,
     required this.locationLabel,
     required this.body,
+    required this.eventId,
+    required this.coordinates,
   });
 
   final DateTime scheduledAt;
   final String timeZone;
   final String locationLabel;
   final String body;
+  final String eventId;
+  final Coordinates coordinates;
+
+  Map<String, Object> get navigationData => <String, Object>{
+    'type': 'rain_alert',
+    'eventId': eventId,
+    'locationLabel': locationLabel,
+    'latitude': coordinates.latitude,
+    'longitude': coordinates.longitude,
+    'section': 'radar',
+  };
 }
 
 abstract interface class RainNotificationScheduler {
+  Future<void> initialize();
+
   Future<void> schedule(RainNotification notification);
 
   Future<void> cancel();
@@ -25,14 +44,19 @@ abstract interface class RainNotificationScheduler {
 
 final class SystemRainNotificationScheduler
     implements RainNotificationScheduler {
-  SystemRainNotificationScheduler({FlutterLocalNotificationsPlugin? plugin})
-    : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
+  SystemRainNotificationScheduler({
+    FlutterLocalNotificationsPlugin? plugin,
+    RainAlertNavigationController? navigation,
+  }) : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
+       _navigation = navigation;
 
   static const _notificationId = 4101;
   final FlutterLocalNotificationsPlugin _plugin;
+  final RainAlertNavigationController? _navigation;
   bool _initialized = false;
 
-  Future<void> _initialize() async {
+  @override
+  Future<void> initialize() async {
     if (_initialized) return;
     const settings = InitializationSettings(
       android: AndroidInitializationSettings('ic_notification'),
@@ -42,7 +66,16 @@ final class SystemRainNotificationScheduler
         requestSoundPermission: false,
       ),
     );
-    await _plugin.initialize(settings);
+    await _plugin.initialize(
+      settings,
+      onDidReceiveNotificationResponse: (response) {
+        _openPayload(response.payload);
+      },
+    );
+    final launchDetails = await _plugin.getNotificationAppLaunchDetails();
+    if (launchDetails?.didNotificationLaunchApp ?? false) {
+      _openPayload(launchDetails?.notificationResponse?.payload);
+    }
 
     await _plugin
         .resolvePlatformSpecificImplementation<
@@ -59,9 +92,21 @@ final class SystemRainNotificationScheduler
     _initialized = true;
   }
 
+  void _openPayload(String? payload) {
+    if (payload == null || payload.isEmpty) return;
+    try {
+      final decoded = jsonDecode(payload);
+      if (decoded is! Map<String, dynamic>) return;
+      final intent = RainAlertNavigationIntent.fromData(decoded);
+      if (intent != null) _navigation?.open(intent);
+    } on FormatException {
+      // Ignore notifications created by an older app version.
+    }
+  }
+
   @override
   Future<void> schedule(RainNotification notification) async {
-    await _initialize();
+    await initialize();
     final location = WeatherTimeZone.location(notification.timeZone);
     await _plugin.zonedSchedule(
       _notificationId,
@@ -85,13 +130,13 @@ final class SystemRainNotificationScheduler
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
-      payload: 'rain-alert',
+      payload: jsonEncode(notification.navigationData),
     );
   }
 
   @override
   Future<void> cancel() async {
-    await _initialize();
+    await initialize();
     await _plugin.cancel(_notificationId);
   }
 }
@@ -99,6 +144,9 @@ final class SystemRainNotificationScheduler
 final class FixtureRainNotificationScheduler
     implements RainNotificationScheduler {
   RainNotification? scheduled;
+
+  @override
+  Future<void> initialize() async {}
 
   @override
   Future<void> schedule(RainNotification notification) async {

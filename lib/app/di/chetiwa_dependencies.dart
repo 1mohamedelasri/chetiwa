@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/config/api_config.dart';
@@ -107,11 +108,13 @@ final class ChetiwaDependencies {
             gateway: api == null ? null : ChetiwaAppFeatureFlagGateway(api),
           );
     final rainAlertNavigationController = RainAlertNavigationController();
+    final localNotifications = FlutterLocalNotificationsPlugin();
     final remoteRainAlertGateway = api == null || !firebaseAvailable
         ? null
         : ChetiwaRemoteRainAlertGateway(
             api: ChetiwaAlertApi(api),
             messaging: FirebasePushMessagingGateway(
+              localNotifications: localNotifications,
               navigation: rainAlertNavigationController,
             ),
           );
@@ -152,7 +155,10 @@ final class ChetiwaDependencies {
         alertPreferencesController: AlertPreferencesController(),
         notificationPermissionGateway:
             const SystemNotificationPermissionGateway(),
-        rainNotificationScheduler: SystemRainNotificationScheduler(),
+        rainNotificationScheduler: SystemRainNotificationScheduler(
+          plugin: localNotifications,
+          navigation: rainAlertNavigationController,
+        ),
         rainAlertNavigationController: rainAlertNavigationController,
         remoteRainAlertGateway: remoteRainAlertGateway,
         adsRepository: adsRepository,
@@ -190,7 +196,10 @@ final class ChetiwaDependencies {
       alertPreferencesController: AlertPreferencesController(),
       notificationPermissionGateway:
           const SystemNotificationPermissionGateway(),
-      rainNotificationScheduler: SystemRainNotificationScheduler(),
+      rainNotificationScheduler: SystemRainNotificationScheduler(
+        plugin: localNotifications,
+        navigation: rainAlertNavigationController,
+      ),
       rainAlertNavigationController: rainAlertNavigationController,
       remoteRainAlertGateway: remoteRainAlertGateway,
       adsRepository: adsRepository,

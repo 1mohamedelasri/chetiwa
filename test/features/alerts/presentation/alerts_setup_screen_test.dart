@@ -97,4 +97,43 @@ void main() {
     expect(preferences.minimumIntensity, RainAlertIntensity.heavy);
     expect(preferences.quietHoursEnabled, isTrue);
   });
+
+  testWidgets('opens settings instead of re-requesting a denied permission', (
+    tester,
+  ) async {
+    final preferences = AlertPreferencesController(persist: false);
+    final gateway = FixtureNotificationPermissionGateway(
+      initial: NotificationAuthorization.denied,
+    );
+    final activeLocation = ActiveLocationController(
+      const FixtureLocationRepository(),
+    );
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AlertPreferencesController>.value(
+            value: preferences,
+          ),
+          Provider<NotificationPermissionGateway>.value(value: gateway),
+          ChangeNotifierProvider<ActiveLocationController>.value(
+            value: activeLocation,
+          ),
+        ],
+        child: MaterialApp(
+          theme: ChetiwaTheme.light,
+          home: const AlertsSetupScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('smart-alerts-enabled-switch')));
+    await tester.pumpAndSettle();
+
+    expect(gateway.openSettingsCount, 1);
+    expect(gateway.requestCount, 0);
+    expect(preferences.enabled, isFalse);
+    expect(find.text('Autoriser les alertes pluie ?'), findsNothing);
+  });
 }

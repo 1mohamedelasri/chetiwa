@@ -54,7 +54,8 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
       await _setAlertsEnabled(true);
       return;
     }
-    if (status == NotificationAuthorization.permanentlyDenied ||
+    if (status == NotificationAuthorization.denied ||
+        status == NotificationAuthorization.permanentlyDenied ||
         status == NotificationAuthorization.restricted) {
       await gateway.openSettings();
       await _refreshAuthorization();
@@ -271,6 +272,8 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
     if (_loadingAuthorization) return 'Vérification de l’autorisation…';
     return switch (_authorization) {
       NotificationAuthorization.authorized => 'Autorisées sur cet appareil',
+      NotificationAuthorization.denied =>
+        'Refusées · activez-les dans les réglages',
       NotificationAuthorization.permanentlyDenied ||
       NotificationAuthorization.restricted =>
         'Bloquées par le système · ouvrez les réglages',

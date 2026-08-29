@@ -64,26 +64,6 @@ final class FirebasePushMessagingGateway implements PushMessagingGateway {
   @override
   Future<void> initialize() async {
     if (_initialized) return;
-    await _localNotifications.initialize(
-      const InitializationSettings(
-        android: AndroidInitializationSettings('ic_notification'),
-        iOS: DarwinInitializationSettings(
-          requestAlertPermission: false,
-          requestBadgePermission: false,
-          requestSoundPermission: false,
-        ),
-      ),
-      onDidReceiveNotificationResponse: (response) {
-        final payload = response.payload;
-        if (payload == null) return;
-        try {
-          final decoded = jsonDecode(payload);
-          if (decoded is Map<String, dynamic>) _open(decoded);
-        } on FormatException {
-          // Ignore legacy/local payloads that are not navigation data.
-        }
-      },
-    );
     await _localNotifications
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
@@ -117,10 +97,22 @@ final class FirebasePushMessagingGateway implements PushMessagingGateway {
     await _messaging.setAutoInitEnabled(true);
     if (Platform.isIOS) {
       // FCM cannot mint a usable iOS token before APNs has registered the app.
-      final apnsToken = await _messaging.getAPNSToken();
+      final apnsToken = await _waitForApnsToken();
       if (apnsToken == null || apnsToken.isEmpty) return null;
     }
     return _messaging.getToken();
+  }
+
+  Future<String?> _waitForApnsToken() async {
+    const attempts = 20;
+    for (var attempt = 0; attempt < attempts; attempt += 1) {
+      final token = await _messaging.getAPNSToken();
+      if (token != null && token.isNotEmpty) return token;
+      if (attempt < attempts - 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+    }
+    return null;
   }
 
   @override
