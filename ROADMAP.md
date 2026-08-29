@@ -3,6 +3,16 @@ GO technique pour une bêta contrôlée après déploiement des profils versionn
 Le 23 août 2026, l’URL publique LibreWXR a renvoyé cinq `502` consécutifs alors que les fonds Esri répondaient en 70–120 ms, puis elle est revenue en `200`. Cette intermittence confirme le besoin du watchdog. Après récupération, Paris chaud répondait en 37–44 ms (`CF-Cache-Status: HIT`) ; une première tuile Sierra Leone froide a demandé 5,53 s (`MISS`), puis 40 ms (`HIT`).
 Le 24 août, cinq sondes métadonnées sur cinq répondaient en 61–144 ms, mais `/health` montrait toujours un seul worker, 64 Mo de cache, seulement 19 minutes d’uptime, 0 % de hit interne sur l’instance redémarrée et 6,23 s de latence moyenne par tuile. Le client est prêt ; l’exploitation ne l’est pas encore pour un SLA public.
 
+## Lancement marché — France d’abord
+
+| Phase | Périmètre | Gate de sortie |
+| --- | --- | --- |
+| 1. Bêta fermée | Android, France, 50–100 testeurs, sans publicité. | 14 jours sans incident critique. |
+| 2. Production France | Google Play France uniquement ; Open-Meteo commercial ; monitoring actif. | Sessions sans crash ≥ 99,5 %, erreurs Radar < 1 %, disque < 70 %, HIT CDN ≥ 90 %. |
+| 3. Publicité | Ajouter `ADS_ROLLOUT_PERCENT`, puis 10 % → 25 % → 50 % → 100 %. | 7 jours stables entre chaque palier. |
+| 4. Expansion francophone | Belgique, Luxembourg, Suisse, un open test par pays avant production. | Qualité Radar et recherche validée dans chaque pays. |
+| 5. Expansion anglaise | Royaume-Uni, Canada, puis États-Unis. iOS après validation économique d’Android. | Traduction store, conformité et coûts validés. |
+
 ## Roadmap production — Smart Rain Alerts sans compte
 
 **Objectif :** prévenir avant la pluie sur Android et iPhone, même lorsque
