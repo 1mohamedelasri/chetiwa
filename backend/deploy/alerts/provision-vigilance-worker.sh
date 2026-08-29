@@ -6,8 +6,9 @@ region="${2:?usage: provision-vigilance-worker.sh PROJECT_ID REGION IMAGE WORKER
 image="${3:?usage: provision-vigilance-worker.sh PROJECT_ID REGION IMAGE WORKER_SERVICE_ACCOUNT SCHEDULER_SERVICE_ACCOUNT ENV_FILE}"
 worker_service_account="${4:?usage: provision-vigilance-worker.sh PROJECT_ID REGION IMAGE WORKER_SERVICE_ACCOUNT SCHEDULER_SERVICE_ACCOUNT ENV_FILE}"
 scheduler_service_account="${5:?usage: provision-vigilance-worker.sh PROJECT_ID REGION IMAGE WORKER_SERVICE_ACCOUNT SCHEDULER_SERVICE_ACCOUNT ENV_FILE}"
-env_file="${6:?usage: provision-vigilance-worker.sh PROJECT_ID REGION IMAGE WORKER_SERVICE_ACCOUNT SCHEDULER_SERVICE_ACCOUNT ENV_FILE [METEO_FRANCE_SECRET]}"
+env_file="${6:?usage: provision-vigilance-worker.sh PROJECT_ID REGION IMAGE WORKER_SERVICE_ACCOUNT SCHEDULER_SERVICE_ACCOUNT ENV_FILE [METEO_FRANCE_SECRET] [METEOALARM_SECRET]}"
 meteo_france_secret="${7:-}"
+meteoalarm_secret="${8:-}"
 job_name="chetiwa-vigilance-alerts"
 scheduler_name="chetiwa-vigilance-alerts-every-5m"
 
@@ -33,11 +34,17 @@ gcloud projects add-iam-policy-binding "${project_id}" \
   --role="roles/firebasecloudmessaging.admin" \
   --quiet >/dev/null
 
-secret_args=()
+secret_mappings=()
 if [[ -n "${meteo_france_secret}" ]]; then
-  secret_args+=(
-    "--set-secrets=METEO_FRANCE_APPLICATION_ID=${meteo_france_secret}:latest"
-  )
+  secret_mappings+=("METEO_FRANCE_APPLICATION_ID=${meteo_france_secret}:latest")
+fi
+if [[ -n "${meteoalarm_secret}" ]]; then
+  secret_mappings+=("METEOALARM_API_KEY=${meteoalarm_secret}:latest")
+fi
+secret_args=()
+if (( ${#secret_mappings[@]} > 0 )); then
+  secret_value=$(IFS=,; printf '%s' "${secret_mappings[*]}")
+  secret_args+=("--set-secrets=${secret_value}")
 fi
 
 gcloud run jobs deploy "${job_name}" \

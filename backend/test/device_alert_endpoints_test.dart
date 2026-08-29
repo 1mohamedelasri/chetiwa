@@ -99,6 +99,48 @@ void main() {
     );
   });
 
+  test(
+    'accepts a European official-alert location without a French department',
+    () async {
+      final app = createApp(
+        config: RuntimeConfig.fromEnvironment(const <String, String>{
+          'VIGILANCE_ALERTS_ENABLED': 'true',
+          'METEOALARM_ALERTS_ENABLED': 'true',
+          'METEOALARM_API_KEY': 'meteogate-key',
+        }),
+        now: () => instant,
+        departmentResolver: _DepartmentResolver(null),
+        deviceAlertStore: InMemoryDeviceAlertStore(now: () => instant),
+      );
+      await app(_jsonRequest('POST', '/v1/devices', _deviceBody()));
+
+      final response = await app(
+        _jsonRequest('POST', '/v1/alerts', <String, Object?>{
+          ..._alertBody(),
+          'location': <String, Object?>{
+            'label': 'Bruxelles, Belgique',
+            'latitude': 50.8503,
+            'longitude': 4.3517,
+            'timeZone': 'Europe/Brussels',
+          },
+          'vigilance': <String, Object?>{
+            'enabled': true,
+            'minimumLevel': 'orange',
+            'phenomena': <String>['rainFlood', 'thunderstorms'],
+          },
+        }),
+      );
+      final alert =
+          ((await _body(response))['data'] as Map<String, Object?>)['alert']
+              as Map<String, Object?>;
+      final vigilance = alert['vigilance'] as Map<String, Object?>;
+
+      expect(response.statusCode, 201);
+      expect(vigilance['enabled'], isTrue);
+      expect(vigilance.containsKey('departmentCode'), isFalse);
+    },
+  );
+
   test('supports isolated alert CRUD and device cascade deletion', () async {
     final app = localApp();
     await app(_jsonRequest('POST', '/v1/devices', _deviceBody()));

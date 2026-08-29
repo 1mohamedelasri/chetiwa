@@ -50,8 +50,9 @@ final class OfficialAlertNavigationIntent {
   });
 
   static OfficialAlertNavigationIntent? fromData(Map<String, dynamic> data) {
+    final source = data['source']?.toString();
     if (data['type'] != 'official_weather_alert' ||
-        data['source'] != 'meteofrance') {
+        !const <String>{'meteofrance', 'meteoalarm'}.contains(source)) {
       return null;
     }
     final eventId = data['eventId']?.toString();
@@ -63,7 +64,7 @@ final class OfficialAlertNavigationIntent {
         departmentCode.isEmpty ||
         officialUrl == null ||
         officialUrl.scheme != 'https' ||
-        officialUrl.host != 'vigilance.meteofrance.fr') {
+        !_officialHosts.contains(officialUrl.host)) {
       return null;
     }
     return OfficialAlertNavigationIntent(
@@ -76,6 +77,11 @@ final class OfficialAlertNavigationIntent {
   final String eventId;
   final String departmentCode;
   final Uri officialUrl;
+
+  static const _officialHosts = <String>{
+    'vigilance.meteofrance.fr',
+    'www.meteoalarm.org',
+  };
 }
 
 /// Retains a cold-start notification intent until WeatherScreen is mounted.

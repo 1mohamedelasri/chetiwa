@@ -322,7 +322,7 @@ final class FirebaseVigilancePushSender implements VigilancePushSender {
             ),
             data: <String, String>{
               'type': 'official_weather_alert',
-              'source': 'meteofrance',
+              'source': draft.source,
               'eventId': draft.eventId,
               'alertId': draft.alertId,
               'departmentCode': draft.departmentCode,
@@ -334,7 +334,7 @@ final class FirebaseVigilancePushSender implements VigilancePushSender {
                 'beginsAt': beginsAt.toIso8601String(),
               if (draft.endsAt case final endsAt?)
                 'endsAt': endsAt.toIso8601String(),
-              'officialUrl': 'https://vigilance.meteofrance.fr/fr',
+              'officialUrl': draft.officialUrl,
             },
             android: fcm.AndroidConfig(
               collapseKey: collapse,

@@ -19,6 +19,7 @@ export 'src/device_alert_store.dart'
 export 'src/firestore_device_alert_store.dart' show FirestoreDeviceAlertStore;
 export 'src/json_response_cache.dart'
     show CachedJsonResponse, JsonResponseCache;
+export 'src/meteoalarm_services.dart' show MeteoAlarmVigilanceProvider;
 export 'src/operational_control.dart'
     show
         BudgetDecision,

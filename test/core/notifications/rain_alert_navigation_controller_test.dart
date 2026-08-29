@@ -42,7 +42,7 @@ void main() {
     );
   });
 
-  test('accepts only an official Météo-France vigilance destination', () {
+  test('accepts only allow-listed official vigilance destinations', () {
     final controller = RainAlertNavigationController();
     final intent = OfficialAlertNavigationIntent.fromData(<String, dynamic>{
       'type': 'official_weather_alert',
@@ -55,6 +55,16 @@ void main() {
     expect(intent, isNotNull);
     controller.openOfficial(intent!);
     expect(controller.takeOfficial()?.departmentCode, '75');
+    expect(
+      OfficialAlertNavigationIntent.fromData(<String, dynamic>{
+        'type': 'official_weather_alert',
+        'source': 'meteoalarm',
+        'eventId': 'official-eu-1',
+        'departmentCode': 'EU',
+        'officialUrl': 'https://www.meteoalarm.org',
+      }),
+      isNotNull,
+    );
     expect(
       OfficialAlertNavigationIntent.fromData(<String, dynamic>{
         'type': 'official_weather_alert',

@@ -22,6 +22,10 @@ enum OfficialWeatherPhenomenon {
   heatwave,
   extremeCold,
   avalanches,
+  coastalFlooding,
+  fog,
+  forestFire,
+  drought,
 }
 
 final class OfficialAlertInput {
@@ -37,6 +41,10 @@ final class OfficialAlertInput {
       OfficialWeatherPhenomenon.heatwave,
       OfficialWeatherPhenomenon.extremeCold,
       OfficialWeatherPhenomenon.avalanches,
+      OfficialWeatherPhenomenon.coastalFlooding,
+      OfficialWeatherPhenomenon.fog,
+      OfficialWeatherPhenomenon.forestFire,
+      OfficialWeatherPhenomenon.drought,
     },
   });
 

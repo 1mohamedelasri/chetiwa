@@ -22,6 +22,7 @@ void main() {
     expect(config.rainAlertsSendEnabled, isFalse);
     expect(config.vigilanceAlertsEnabled, isFalse);
     expect(config.vigilanceAlertsSendEnabled, isFalse);
+    expect(config.meteoAlarmAlertsEnabled, isFalse);
     expect(config.rainAlertSoftBudgetCents, 2500);
     expect(config.rainAlertHardBudgetCents, 5000);
   });
@@ -50,6 +51,18 @@ void main() {
     expect(config.port, 9090);
     expect(config.isProduction, isTrue);
     expect(config.radarMetadataUri.host, 'librewxr');
+  });
+
+  test('uses dedicated Open-Meteo customer endpoints with a paid key', () {
+    final config = RuntimeConfig.fromEnvironment(const <String, String>{
+      'OPEN_METEO_API_KEY': 'commercial-key',
+    });
+
+    expect(config.openMeteoForecastUri.host, 'customer-api.open-meteo.com');
+    expect(
+      config.openMeteoGeocodingUri.host,
+      'customer-geocoding-api.open-meteo.com',
+    );
   });
 
   test('internal radar HTTP is restricted to the Docker service name', () {
@@ -156,6 +169,32 @@ void main() {
       throwsStateError,
     );
   });
+
+  test('accepts a MeteoGate credential for European official alerts', () {
+    final config = RuntimeConfig.fromEnvironment(const <String, String>{
+      'VIGILANCE_ALERTS_ENABLED': 'true',
+      'METEOALARM_ALERTS_ENABLED': 'true',
+      'METEOALARM_API_KEY': 'meteogate-key',
+    });
+
+    expect(config.meteoAlarmAlertsEnabled, isTrue);
+    expect(config.meteoAlarmApiKey, 'meteogate-key');
+    expect(config.meteoAlarmWarningsUri.host, 'api.meteogate.eu');
+  });
+
+  test(
+    'allows the API to expose European alerts without the worker secret',
+    () {
+      final config = RuntimeConfig.fromEnvironment(const <String, String>{
+        'VIGILANCE_ALERTS_ENABLED': 'true',
+        'METEOALARM_ALERTS_ENABLED': 'true',
+      });
+
+      expect(config.vigilanceAlertsEnabled, isTrue);
+      expect(config.meteoAlarmAlertsEnabled, isTrue);
+      expect(config.meteoAlarmApiKey, isNull);
+    },
+  );
 
   test('parses monetization feature flags and validates rollout', () {
     final config = RuntimeConfig.fromEnvironment(const <String, String>{

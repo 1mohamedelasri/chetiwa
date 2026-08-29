@@ -15,18 +15,72 @@ String vigilanceSettingsFingerprint(VigilanceAlertSettings settings) {
 
 final class VigilanceEvent {
   const VigilanceEvent({
-    required this.departmentCode,
     required this.phenomenon,
     required this.level,
     required this.beginsAt,
     required this.endsAt,
+    this.departmentCode,
+    this.polygons = const <VigilancePolygon>[],
   });
 
-  final String departmentCode;
+  final String? departmentCode;
   final VigilancePhenomenon phenomenon;
   final VigilanceLevel level;
   final DateTime beginsAt;
   final DateTime endsAt;
+  final List<VigilancePolygon> polygons;
+
+  bool contains({required double latitude, required double longitude}) =>
+      polygons.any(
+        (polygon) => polygon.contains(latitude: latitude, longitude: longitude),
+      );
+}
+
+final class VigilancePoint {
+  const VigilancePoint({required this.latitude, required this.longitude});
+
+  final double latitude;
+  final double longitude;
+}
+
+final class VigilancePolygon {
+  const VigilancePolygon({required this.outer, this.holes = const []});
+
+  final List<VigilancePoint> outer;
+  final List<List<VigilancePoint>> holes;
+
+  bool contains({required double latitude, required double longitude}) =>
+      _containsPoint(outer, latitude: latitude, longitude: longitude) &&
+      !holes.any(
+        (hole) =>
+            _containsPoint(hole, latitude: latitude, longitude: longitude),
+      );
+}
+
+bool _containsPoint(
+  List<VigilancePoint> polygon, {
+  required double latitude,
+  required double longitude,
+}) {
+  if (polygon.length < 3) return false;
+  var inside = false;
+  for (
+    var current = 0, previous = polygon.length - 1;
+    current < polygon.length;
+    previous = current++
+  ) {
+    final a = polygon[current];
+    final b = polygon[previous];
+    final crosses =
+        (a.latitude > latitude) != (b.latitude > latitude) &&
+        longitude <
+            (b.longitude - a.longitude) *
+                    (latitude - a.latitude) /
+                    (b.latitude - a.latitude) +
+                a.longitude;
+    if (crosses) inside = !inside;
+  }
+  return inside;
 }
 
 final class VigilanceSnapshot {
@@ -103,6 +157,8 @@ final class VigilanceDeliveryDraft {
     required this.createdAt,
     required this.expiresAt,
     required this.settingsFingerprint,
+    this.source = 'meteofrance',
+    this.officialUrl = 'https://vigilance.meteofrance.fr/fr',
     this.level,
     this.beginsAt,
     this.endsAt,
@@ -123,7 +179,11 @@ final class VigilanceDeliveryDraft {
   final DateTime createdAt;
   final DateTime expiresAt;
   final String settingsFingerprint;
+  final String source;
+  final String officialUrl;
 }
+
+enum VigilanceAlertScope { france, outsideFrance, all }
 
 final class PendingVigilanceDelivery {
   const PendingVigilanceDelivery({
@@ -189,6 +249,11 @@ final class VigilanceAlertEngine {
     this.enqueueDeliveries = true,
     this.maximumProductAge = const Duration(hours: 26),
     this.maximumLookAhead = const Duration(hours: 48),
+    this.scope = VigilanceAlertScope.france,
+    this.source = 'meteofrance',
+    this.officialUrl = 'https://vigilance.meteofrance.fr/fr',
+    this.sourceLabelFrench = 'Météo-France',
+    this.sourceLabelEnglish = 'Météo-France',
     int maximumConcurrentAlerts = 32,
   }) : _store = store,
        _provider = provider,
@@ -202,15 +267,18 @@ final class VigilanceAlertEngine {
   final Duration maximumProductAge;
   final Duration maximumLookAhead;
   final int maximumConcurrentAlerts;
+  final VigilanceAlertScope scope;
+  final String source;
+  final String officialUrl;
+  final String sourceLabelFrench;
+  final String sourceLabelEnglish;
 
   Future<VigilanceRunReport> run() async {
     final instant = _now().toUtc();
     final snapshot = await _provider.current();
     if (snapshot.productAt.isAfter(instant.add(const Duration(minutes: 10))) ||
         instant.difference(snapshot.productAt) > maximumProductAge) {
-      throw StateError(
-        'Meteo-France vigilance product is stale or future-dated',
-      );
+      throw StateError('Official vigilance product is stale or future-dated');
     }
     final alerts = (await _store.listActiveVigilanceAlerts())
         .where(
@@ -220,7 +288,7 @@ final class VigilanceAlertEngine {
               alert.device.pushToken != null &&
               alert.device.pushToken!.isNotEmpty &&
               alert.rule.vigilance.enabled &&
-              alert.rule.vigilance.departmentCode != null,
+              _matchesScope(alert.rule.vigilance),
         )
         .toList(growable: false);
     var proposed = 0;
@@ -249,6 +317,12 @@ final class VigilanceAlertEngine {
       deliveriesEnqueued: enqueued,
     );
   }
+
+  bool _matchesScope(VigilanceAlertSettings settings) => switch (scope) {
+    VigilanceAlertScope.france => settings.departmentCode != null,
+    VigilanceAlertScope.outsideFrance => settings.departmentCode == null,
+    VigilanceAlertScope.all => true,
+  };
 
   Future<({int proposed, int enqueued})> _evaluateAlert(
     VigilanceSnapshot snapshot,
@@ -303,7 +377,13 @@ final class VigilanceAlertEngine {
     final settings = alert.rule.vigilance;
     final candidates = snapshot.events.where(
       (event) =>
-          event.departmentCode == settings.departmentCode &&
+          ((event.departmentCode != null &&
+                  event.departmentCode == settings.departmentCode) ||
+              (event.departmentCode == null &&
+                  event.contains(
+                    latitude: alert.rule.location.latitude,
+                    longitude: alert.rule.location.longitude,
+                  ))) &&
           settings.phenomena.contains(event.phenomenon) &&
           event.level.colorId >= settings.minimumLevel.colorId &&
           event.endsAt.isAfter(instant) &&
@@ -352,9 +432,9 @@ final class VigilanceAlertEngine {
     VigilanceDeliveryKind kind,
     DateTime instant,
   ) {
-    final departmentCode = alert.rule.vigilance.departmentCode!;
+    final departmentCode = alert.rule.vigilance.departmentCode ?? 'EU';
     final departmentName =
-        alert.rule.vigilance.departmentName ?? departmentCode;
+        alert.rule.vigilance.departmentName ?? alert.rule.location.label;
     final level = after?.level;
     final eventKey = <Object?>[
       alert.rule.ownerHash,
@@ -394,6 +474,8 @@ final class VigilanceAlertEngine {
           ? validityEnd
           : instant.add(const Duration(hours: 1)),
       settingsFingerprint: vigilanceSettingsFingerprint(alert.rule.vigilance),
+      source: source,
+      officialUrl: officialUrl,
     );
   }
 
@@ -427,8 +509,8 @@ final class VigilanceAlertEngine {
           ? 'Vigilance $levelLabel · $departmentName'
           : '${levelLabel[0].toUpperCase()}${levelLabel.substring(1)} warning · $departmentName',
       body: french
-          ? '${_phenomenonLabel(phenomenon, true)}${future ? ' à venir' : ''}. Consultez les consignes officielles Météo-France.'
-          : '${_phenomenonLabel(phenomenon, false)}${future ? ' expected' : ''}. Check the official Météo-France guidance.',
+          ? '${_phenomenonLabel(phenomenon, true)}${future ? ' à venir' : ''}. Consultez les consignes officielles $sourceLabelFrench.'
+          : '${_phenomenonLabel(phenomenon, false)}${future ? ' expected' : ''}. Check the official $sourceLabelEnglish guidance.',
     );
   }
 
@@ -443,6 +525,9 @@ final class VigilanceAlertEngine {
         (VigilancePhenomenon.extremeCold, true) => 'Grand froid',
         (VigilancePhenomenon.avalanches, true) => 'Avalanches',
         (VigilancePhenomenon.coastalFlooding, true) => 'Vagues-submersion',
+        (VigilancePhenomenon.fog, true) => 'Brouillard',
+        (VigilancePhenomenon.forestFire, true) => 'Feux de forêt',
+        (VigilancePhenomenon.drought, true) => 'Sécheresse',
         (VigilancePhenomenon.wind, false) => 'Wind',
         (VigilancePhenomenon.rainFlood, false) => 'Rain and flooding',
         (VigilancePhenomenon.thunderstorms, false) => 'Thunderstorms',
@@ -452,6 +537,9 @@ final class VigilanceAlertEngine {
         (VigilancePhenomenon.extremeCold, false) => 'Extreme cold',
         (VigilancePhenomenon.avalanches, false) => 'Avalanches',
         (VigilancePhenomenon.coastalFlooding, false) => 'Coastal flooding',
+        (VigilancePhenomenon.fog, false) => 'Fog',
+        (VigilancePhenomenon.forestFire, false) => 'Forest fire',
+        (VigilancePhenomenon.drought, false) => 'Drought',
       };
 }
 

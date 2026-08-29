@@ -176,6 +176,6 @@ void main() {
     expect(preferences.officialEnabled, isTrue);
     expect(preferences.enabled, isFalse);
     expect(preferences.officialMinimumLevel, OfficialAlertLevel.orange);
-    expect(preferences.officialPhenomena, hasLength(8));
+    expect(preferences.officialPhenomena, hasLength(12));
   });
 }

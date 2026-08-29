@@ -232,6 +232,64 @@ void main() {
       expect(store.deliveries, isEmpty);
     },
   );
+
+  test(
+    'European warnings are matched against the exact user location',
+    () async {
+      const europeSettings = VigilanceAlertSettings(
+        enabled: true,
+        phenomena: <VigilancePhenomenon>{VigilancePhenomenon.rainFlood},
+      );
+      final snapshot = VigilanceSnapshot(
+        snapshotId: 'meteoalarm-belgium',
+        productAt: now,
+        events: <VigilanceEvent>[
+          VigilanceEvent(
+            phenomenon: VigilancePhenomenon.rainFlood,
+            level: VigilanceLevel.orange,
+            beginsAt: now.subtract(const Duration(minutes: 10)),
+            endsAt: now.add(const Duration(hours: 3)),
+            polygons: const <VigilancePolygon>[
+              VigilancePolygon(
+                outer: <VigilancePoint>[
+                  VigilancePoint(latitude: 50.7, longitude: 4.1),
+                  VigilancePoint(latitude: 50.7, longitude: 4.6),
+                  VigilancePoint(latitude: 51.1, longitude: 4.6),
+                  VigilancePoint(latitude: 51.1, longitude: 4.1),
+                ],
+              ),
+            ],
+          ),
+        ],
+      );
+      final store = _Store(
+        _active(
+          now,
+          vigilance: europeSettings,
+          location: const AlertLocation(
+            label: 'Bruxelles',
+            latitude: 50.85,
+            longitude: 4.35,
+            timeZone: 'Europe/Brussels',
+          ),
+        ),
+      );
+      final engine = VigilanceAlertEngine(
+        store: store,
+        provider: _Provider(snapshot),
+        now: () => now,
+        scope: VigilanceAlertScope.outsideFrance,
+        source: 'meteoalarm',
+        officialUrl: 'https://www.meteoalarm.org',
+        sourceLabelFrench: 'MeteoAlarm',
+        sourceLabelEnglish: 'MeteoAlarm',
+      );
+
+      expect((await engine.run()).deliveriesEnqueued, 1);
+      expect(store.deliveries.single.source, 'meteoalarm');
+      expect(store.deliveries.single.departmentName, 'Bruxelles');
+    },
+  );
 }
 
 VigilanceSnapshot _snapshot(DateTime now, VigilanceLevel level) =>
@@ -258,6 +316,12 @@ ActiveVigilanceAlert _active(
     phenomena: <VigilancePhenomenon>{VigilancePhenomenon.thunderstorms},
   ),
   VigilanceAlertState? state,
+  AlertLocation location = const AlertLocation(
+    label: 'Paris',
+    latitude: 48.85,
+    longitude: 2.35,
+    timeZone: 'Europe/Paris',
+  ),
 }) => ActiveVigilanceAlert(
   device: DeviceRecord(
     ownerHash: 'owner',
@@ -273,12 +337,7 @@ ActiveVigilanceAlert _active(
   rule: AlertRuleRecord(
     id: 'alert',
     ownerHash: 'owner',
-    location: const AlertLocation(
-      label: 'Paris',
-      latitude: 48.85,
-      longitude: 2.35,
-      timeZone: 'Europe/Paris',
-    ),
+    location: location,
     leadMinutes: 15,
     minimumIntensity: 'moderate',
     quietHours: const QuietHours(enabled: false, start: '22:00', end: '07:00'),

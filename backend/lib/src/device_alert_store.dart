@@ -98,7 +98,10 @@ enum VigilancePhenomenon {
   heatwave(6),
   extremeCold(7),
   avalanches(8),
-  coastalFlooding(9);
+  coastalFlooding(9),
+  fog(10),
+  forestFire(11),
+  drought(12);
 
   const VigilancePhenomenon(this.id);
 
@@ -124,6 +127,10 @@ final class VigilanceAlertSettings {
       VigilancePhenomenon.heatwave,
       VigilancePhenomenon.extremeCold,
       VigilancePhenomenon.avalanches,
+      VigilancePhenomenon.coastalFlooding,
+      VigilancePhenomenon.fog,
+      VigilancePhenomenon.forestFire,
+      VigilancePhenomenon.drought,
     },
     this.departmentCode,
     this.departmentName,

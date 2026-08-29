@@ -71,6 +71,9 @@ final class RuntimeConfig {
     required this.meteoFranceApplicationId,
     required this.meteoFranceVigilanceUri,
     required this.meteoFranceTokenUri,
+    required this.meteoAlarmAlertsEnabled,
+    required this.meteoAlarmApiKey,
+    required this.meteoAlarmWarningsUri,
     required this.departmentResolverUri,
   });
 
@@ -158,6 +161,12 @@ final class RuntimeConfig {
     final meteoFranceApplicationId = _optional(
       source['METEO_FRANCE_APPLICATION_ID'],
     );
+    final meteoAlarmAlertsEnabled = _boolean(
+      source['METEOALARM_ALERTS_ENABLED'],
+      fallback: false,
+    );
+    final meteoAlarmApiKey = _optional(source['METEOALARM_API_KEY']);
+    final openMeteoApiKey = _optional(source['OPEN_METEO_API_KEY']);
     if (vigilanceAlertsSendEnabled && !vigilanceAlertsEnabled) {
       throw StateError(
         'VIGILANCE_ALERTS_SEND_ENABLED requires VIGILANCE_ALERTS_ENABLED',
@@ -165,9 +174,10 @@ final class RuntimeConfig {
     }
     if (vigilanceAlertsEnabled &&
         meteoFranceVigilanceApiKey == null &&
-        meteoFranceApplicationId == null) {
+        meteoFranceApplicationId == null &&
+        !meteoAlarmAlertsEnabled) {
       throw StateError(
-        'Official vigilance alerts require a Meteo-France credential',
+        'Official vigilance alerts require a Meteo-France or MeteoAlarm credential',
       );
     }
 
@@ -179,17 +189,23 @@ final class RuntimeConfig {
           _optional(source['FIRESTORE_DATABASE_ID']) ?? '(default)',
       openMeteoForecastUri: readUri(
         'OPEN_METEO_FORECAST_URL',
-        'https://api.open-meteo.com/v1/forecast',
+        openMeteoApiKey == null
+            ? 'https://api.open-meteo.com/v1/forecast'
+            : 'https://customer-api.open-meteo.com/v1/forecast',
       ),
       openMeteoMeteoFranceUri: readUri(
         'OPEN_METEO_METEOFRANCE_URL',
-        'https://api.open-meteo.com/v1/meteofrance',
+        openMeteoApiKey == null
+            ? 'https://api.open-meteo.com/v1/meteofrance'
+            : 'https://customer-api.open-meteo.com/v1/meteofrance',
       ),
       openMeteoGeocodingUri: readUri(
         'OPEN_METEO_GEOCODING_URL',
-        'https://geocoding-api.open-meteo.com/v1/search',
+        openMeteoApiKey == null
+            ? 'https://geocoding-api.open-meteo.com/v1/search'
+            : 'https://customer-geocoding-api.open-meteo.com/v1/search',
       ),
-      openMeteoApiKey: _optional(source['OPEN_METEO_API_KEY']),
+      openMeteoApiKey: openMeteoApiKey,
       radarProvider: radarProvider,
       radarMetadataUri: readUri(
         'RADAR_METADATA_URL',
@@ -283,6 +299,12 @@ final class RuntimeConfig {
         'METEO_FRANCE_TOKEN_URL',
         'https://portail-api.meteofrance.fr/token',
       ),
+      meteoAlarmAlertsEnabled: meteoAlarmAlertsEnabled,
+      meteoAlarmApiKey: meteoAlarmApiKey,
+      meteoAlarmWarningsUri: readUri(
+        'METEOALARM_WARNINGS_URL',
+        'https://api.meteogate.eu/warnings/collections/warnings/locations/ALL',
+      ),
       departmentResolverUri: readUri(
         'DEPARTMENT_RESOLVER_URL',
         'https://geo.api.gouv.fr/communes',
@@ -331,6 +353,9 @@ final class RuntimeConfig {
   final String? meteoFranceApplicationId;
   final Uri meteoFranceVigilanceUri;
   final Uri meteoFranceTokenUri;
+  final bool meteoAlarmAlertsEnabled;
+  final String? meteoAlarmApiKey;
+  final Uri meteoAlarmWarningsUri;
   final Uri departmentResolverUri;
 
   bool get isProduction => environment == AppEnvironment.production;

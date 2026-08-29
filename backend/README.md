@@ -120,6 +120,9 @@ le moteur à 50 €. Leur activation est documentée dans
 | `VIGILANCE_ALERTS_SEND_ENABLED` | autorise les pushes Vigilance après validation shadow |
 | `METEO_FRANCE_APPLICATION_ID` | secret OAuth2 Basic du portail API Météo-France |
 | `METEO_FRANCE_VIGILANCE_API_KEY` | clé Bearer alternative au flux OAuth2 |
+| `METEOALARM_ALERTS_ENABLED` | active les vigilances officielles européennes via MeteoGate |
+| `METEOALARM_API_KEY` | clé `apikey` du portail développeur MeteoGate |
+| `METEOALARM_WARNINGS_URL` | endpoint OGC EDR MeteoGate des alertes européennes |
 
 Les URLs externes doivent être HTTPS hors profil local. Le service refuse
 RainViewer en profil `production`, mais accepte LibreWXR, dont l'API publique

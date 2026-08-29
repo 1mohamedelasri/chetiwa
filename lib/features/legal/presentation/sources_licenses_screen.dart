@@ -37,6 +37,11 @@ final class SourcesLicensesScreen extends StatelessWidget {
             purpose: strings.sourceGoogleMapsPurpose,
             url: 'https://cloud.google.com/maps-platform/terms',
           ),
+          _SourceTile(
+            name: 'MeteoAlarm · EUMETNET',
+            purpose: strings.sourceMeteoAlarmPurpose,
+            url: 'https://www.meteoalarm.org/',
+          ),
           const SizedBox(height: ChetiwaSpacing.x5),
           Text(
             strings.sourcesLicensesNotice,

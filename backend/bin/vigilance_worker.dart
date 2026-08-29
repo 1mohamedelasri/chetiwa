@@ -32,18 +32,64 @@ Future<void> main() async {
   FirebaseVigilancePushSender? sender;
   final stopwatch = Stopwatch()..start();
   try {
-    final provider = MeteoFranceVigilanceProvider(
-      client: client,
-      apiKey: config.meteoFranceVigilanceApiKey,
-      applicationId: config.meteoFranceApplicationId,
-      tokenUri: config.meteoFranceTokenUri,
-      productUri: config.meteoFranceVigilanceUri,
-    );
-    final run = await VigilanceAlertEngine(
-      store: store,
-      provider: provider,
-      enqueueDeliveries: config.vigilanceAlertsSendEnabled,
-    ).run();
+    final reports = <({String provider, VigilanceRunReport report})>[];
+    final failures = <String>[];
+    final hasMeteoFrance =
+        config.meteoFranceVigilanceApiKey != null ||
+        config.meteoFranceApplicationId != null;
+    var meteoFranceSucceeded = false;
+    if (hasMeteoFrance) {
+      try {
+        final provider = MeteoFranceVigilanceProvider(
+          client: client,
+          apiKey: config.meteoFranceVigilanceApiKey,
+          applicationId: config.meteoFranceApplicationId,
+          tokenUri: config.meteoFranceTokenUri,
+          productUri: config.meteoFranceVigilanceUri,
+        );
+        final report = await VigilanceAlertEngine(
+          store: store,
+          provider: provider,
+          enqueueDeliveries: config.vigilanceAlertsSendEnabled,
+          scope: VigilanceAlertScope.france,
+        ).run();
+        reports.add((provider: 'meteofrance', report: report));
+        meteoFranceSucceeded = true;
+      } on Object catch (error) {
+        failures.add('meteofrance:${error.runtimeType}');
+      }
+    }
+    if (config.meteoAlarmAlertsEnabled) {
+      try {
+        final apiKey = config.meteoAlarmApiKey;
+        if (apiKey == null) {
+          throw StateError('METEOALARM_API_KEY is required by the worker');
+        }
+        final provider = MeteoAlarmVigilanceProvider(
+          client: client,
+          apiKey: apiKey,
+          warningsUri: config.meteoAlarmWarningsUri,
+        );
+        final report = await VigilanceAlertEngine(
+          store: store,
+          provider: provider,
+          enqueueDeliveries: config.vigilanceAlertsSendEnabled,
+          scope: meteoFranceSucceeded
+              ? VigilanceAlertScope.outsideFrance
+              : VigilanceAlertScope.all,
+          source: 'meteoalarm',
+          officialUrl: 'https://www.meteoalarm.org',
+          sourceLabelFrench: 'MeteoAlarm',
+          sourceLabelEnglish: 'MeteoAlarm',
+        ).run();
+        reports.add((provider: 'meteoalarm', report: report));
+      } on Object catch (error) {
+        failures.add('meteoalarm:${error.runtimeType}');
+      }
+    }
+    if (reports.isEmpty && failures.isNotEmpty) {
+      throw StateError('All official warning providers failed: $failures');
+    }
     final dispatch = !config.vigilanceAlertsSendEnabled
         ? const VigilancePushDispatchReport(
             pending: 0,
@@ -64,13 +110,21 @@ Future<void> main() async {
     stopwatch.stop();
     stdout.writeln(
       jsonEncode(<String, Object?>{
-        'status': 'completed',
+        'status': failures.isEmpty ? 'completed' : 'partial',
         'mode': config.vigilanceAlertsSendEnabled ? 'send' : 'shadow',
-        'snapshotId': run.snapshotId,
-        'activeAlerts': run.activeAlerts,
-        'alertsEvaluated': run.alertsEvaluated,
-        'deliveriesProposed': run.deliveriesProposed,
-        'deliveriesEnqueued': run.deliveriesEnqueued,
+        'providers': reports
+            .map(
+              (entry) => <String, Object?>{
+                'provider': entry.provider,
+                'snapshotId': entry.report.snapshotId,
+                'activeAlerts': entry.report.activeAlerts,
+                'alertsEvaluated': entry.report.alertsEvaluated,
+                'deliveriesProposed': entry.report.deliveriesProposed,
+                'deliveriesEnqueued': entry.report.deliveriesEnqueued,
+              },
+            )
+            .toList(growable: false),
+        if (failures.isNotEmpty) 'providerFailures': failures,
         'pushPending': dispatch.pending,
         'pushSent': dispatch.sent,
         'pushRetried': dispatch.retried,

@@ -166,6 +166,9 @@ final class ChetiwaLocalizations {
   String get sourceGoogleMapsPurpose => _fr
       ? 'Fond satellite hybride et carte de sélection de lieu'
       : 'Hybrid satellite basemap and location picker map';
+  String get sourceMeteoAlarmPurpose => _fr
+      ? 'Alertes météorologiques officielles européennes (CC BY 4.0)'
+      : 'Official European weather warnings (CC BY 4.0)';
   String get premiumOnly => _fr ? 'Chetiwa+ uniquement' : 'Chetiwa+ only';
   String get chooseMainLocationHelp => _fr
       ? 'Choisissez une ville ou un point sur la carte.'

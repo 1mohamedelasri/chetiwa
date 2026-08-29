@@ -1157,6 +1157,8 @@ final class FirestoreDeviceAlertStore
       if (delivery.endsAt case final value?) 'endsAt': _timestamp(value),
       'title': _string(delivery.title),
       'body': _string(delivery.body),
+      'source': _string(delivery.source),
+      'officialUrl': _string(delivery.officialUrl),
       'settingsFingerprint': _string(delivery.settingsFingerprint),
       'status': _string('pending'),
       'attempts': _integer(0),
@@ -1189,6 +1191,10 @@ final class FirestoreDeviceAlertStore
         endsAt: _readOptionalTimestamp(fields, 'endsAt'),
         title: _readString(fields, 'title'),
         body: _readString(fields, 'body'),
+        source: fields['source']?.stringValue ?? 'meteofrance',
+        officialUrl:
+            fields['officialUrl']?.stringValue ??
+            'https://vigilance.meteofrance.fr/fr',
         settingsFingerprint: _readString(fields, 'settingsFingerprint'),
         createdAt: _readTimestamp(fields, 'createdAt'),
         expiresAt: _readTimestamp(fields, 'expiresAt'),

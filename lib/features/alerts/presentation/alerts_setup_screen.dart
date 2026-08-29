@@ -417,9 +417,9 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
             ),
             const SizedBox(height: ChetiwaSpacing.x5),
             Text(
-              'Les vigilances utilisent exclusivement la source officielle '
-              'Météo-France du département. Une forte pluie prévue n’est jamais '
-              'présentée comme un orage officiel.',
+              'Les vigilances utilisent les sources officielles Météo-France '
+              'en France et MeteoAlarm en Europe. Une forte pluie prévue n’est '
+              'jamais présentée comme un orage officiel.',
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
@@ -440,6 +440,10 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
         OfficialWeatherPhenomenon.heatwave => 'Canicule',
         OfficialWeatherPhenomenon.extremeCold => 'Grand froid',
         OfficialWeatherPhenomenon.avalanches => 'Avalanches',
+        OfficialWeatherPhenomenon.coastalFlooding => 'Submersion côtière',
+        OfficialWeatherPhenomenon.fog => 'Brouillard',
+        OfficialWeatherPhenomenon.forestFire => 'Feux de forêt',
+        OfficialWeatherPhenomenon.drought => 'Sécheresse',
       };
 
   String _authorizationText() {

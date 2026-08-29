@@ -515,7 +515,11 @@ Handler createApp({
         final body = await _readJsonObject(request);
         final alert = await stateStore.createAlert(
           ownerHash,
-          await _alertDraft(body, departmentLookup),
+          await _alertDraft(
+            body,
+            departmentLookup,
+            europeanAlertsEnabled: config.meteoAlarmAlertsEnabled,
+          ),
         );
         return _dataResponse(
           <String, Object?>{'alert': _alertJson(alert)},
@@ -531,7 +535,11 @@ Handler createApp({
         final ownerHash = _installationOwnerHash(request);
         _validateAlertId(alertId);
         final body = await _readJsonObject(request);
-        final changes = await _alertChanges(body, departmentLookup);
+        final changes = await _alertChanges(
+          body,
+          departmentLookup,
+          europeanAlertsEnabled: config.meteoAlarmAlertsEnabled,
+        );
         if (changes.isEmpty) {
           throw const ApiException(
             statusCode: 400,
@@ -821,8 +829,9 @@ DeviceRegistration _deviceRegistration(Map<String, Object?> body) {
 
 Future<AlertRuleDraft> _alertDraft(
   Map<String, Object?> body,
-  DepartmentResolver resolver,
-) async {
+  DepartmentResolver resolver, {
+  required bool europeanAlertsEnabled,
+}) async {
   final location = _alertLocation(_requiredObject(body, 'location'));
   return AlertRuleDraft(
     location: location,
@@ -830,19 +839,30 @@ Future<AlertRuleDraft> _alertDraft(
     minimumIntensity: _minimumIntensity(body['minimumIntensity']),
     quietHours: _quietHours(_requiredObject(body, 'quietHours')),
     enabled: _requiredBool(body, 'enabled'),
-    vigilance: await _vigilanceSettings(body['vigilance'], location, resolver),
+    vigilance: await _vigilanceSettings(
+      body['vigilance'],
+      location,
+      resolver,
+      europeanAlertsEnabled: europeanAlertsEnabled,
+    ),
   );
 }
 
 Future<AlertRuleChanges> _alertChanges(
   Map<String, Object?> body,
-  DepartmentResolver resolver,
-) async {
+  DepartmentResolver resolver, {
+  required bool europeanAlertsEnabled,
+}) async {
   final location = body.containsKey('location')
       ? _alertLocation(_requiredObject(body, 'location'))
       : null;
   final vigilance = body.containsKey('vigilance')
-      ? await _vigilanceSettings(body['vigilance'], location, resolver)
+      ? await _vigilanceSettings(
+          body['vigilance'],
+          location,
+          resolver,
+          europeanAlertsEnabled: europeanAlertsEnabled,
+        )
       : null;
   return AlertRuleChanges(
     location: location,
@@ -865,8 +885,9 @@ Future<AlertRuleChanges> _alertChanges(
 Future<VigilanceAlertSettings> _vigilanceSettings(
   Object? raw,
   AlertLocation? location,
-  DepartmentResolver resolver,
-) async {
+  DepartmentResolver resolver, {
+  required bool europeanAlertsEnabled,
+}) async {
   if (raw == null) return const VigilanceAlertSettings();
   if (raw is! Map<String, Object?>) {
     throw const ApiException(
@@ -893,7 +914,6 @@ Future<VigilanceAlertSettings> _vigilanceSettings(
   final names =
       rawPhenomena ??
       VigilancePhenomenon.values
-          .where((value) => value != VigilancePhenomenon.coastalFlooding)
           .map((value) => value.name)
           .toList(growable: false);
   if (names is! List || names.any((value) => value is! String)) {
@@ -908,8 +928,7 @@ Future<VigilanceAlertSettings> _vigilanceSettings(
     final matches = VigilancePhenomenon.values.where(
       (value) => value.name == name,
     );
-    if (matches.isEmpty ||
-        matches.first == VigilancePhenomenon.coastalFlooding) {
+    if (matches.isEmpty) {
       throw const ApiException(
         statusCode: 400,
         code: 'invalid_vigilance_phenomena',
@@ -953,10 +972,21 @@ Future<VigilanceAlertSettings> _vigilanceSettings(
     );
   }
   if (department == null) {
+    if (europeanAlertsEnabled &&
+        location.latitude >= 20 &&
+        location.latitude <= 75 &&
+        location.longitude >= -35 &&
+        location.longitude <= 55) {
+      return VigilanceAlertSettings(
+        enabled: true,
+        minimumLevel: minimumLevel,
+        phenomena: phenomena,
+      );
+    }
     throw const ApiException(
       statusCode: 422,
       code: 'outside_vigilance_area',
-      message: 'This location is outside the supported French vigilance area',
+      message: 'This location is outside the supported official warning area',
     );
   }
   return VigilanceAlertSettings(
