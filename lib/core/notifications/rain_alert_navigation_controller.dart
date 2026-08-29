@@ -42,18 +42,66 @@ final class RainAlertNavigationIntent {
   final String section;
 }
 
+final class OfficialAlertNavigationIntent {
+  const OfficialAlertNavigationIntent({
+    required this.eventId,
+    required this.departmentCode,
+    required this.officialUrl,
+  });
+
+  static OfficialAlertNavigationIntent? fromData(Map<String, dynamic> data) {
+    if (data['type'] != 'official_weather_alert' ||
+        data['source'] != 'meteofrance') {
+      return null;
+    }
+    final eventId = data['eventId']?.toString();
+    final departmentCode = data['departmentCode']?.toString();
+    final officialUrl = Uri.tryParse(data['officialUrl']?.toString() ?? '');
+    if (eventId == null ||
+        eventId.isEmpty ||
+        departmentCode == null ||
+        departmentCode.isEmpty ||
+        officialUrl == null ||
+        officialUrl.scheme != 'https' ||
+        officialUrl.host != 'vigilance.meteofrance.fr') {
+      return null;
+    }
+    return OfficialAlertNavigationIntent(
+      eventId: eventId,
+      departmentCode: departmentCode,
+      officialUrl: officialUrl,
+    );
+  }
+
+  final String eventId;
+  final String departmentCode;
+  final Uri officialUrl;
+}
+
 /// Retains a cold-start notification intent until WeatherScreen is mounted.
 final class RainAlertNavigationController extends ChangeNotifier {
   RainAlertNavigationIntent? _pending;
+  OfficialAlertNavigationIntent? _pendingOfficial;
 
   void open(RainAlertNavigationIntent intent) {
     _pending = intent;
     notifyListeners();
   }
 
+  void openOfficial(OfficialAlertNavigationIntent intent) {
+    _pendingOfficial = intent;
+    notifyListeners();
+  }
+
   RainAlertNavigationIntent? take() {
     final value = _pending;
     _pending = null;
+    return value;
+  }
+
+  OfficialAlertNavigationIntent? takeOfficial() {
+    final value = _pendingOfficial;
+    _pendingOfficial = null;
     return value;
   }
 }

@@ -14,6 +14,9 @@ final class AlertPreferencesController extends ChangeNotifier {
   static const _quietHoursEnabledKey = 'alerts.quiet_hours_enabled';
   static const _quietHoursStartKey = 'alerts.quiet_hours_start';
   static const _quietHoursEndKey = 'alerts.quiet_hours_end';
+  static const _officialEnabledKey = 'alerts.official.enabled';
+  static const _officialMinimumLevelKey = 'alerts.official.minimum_level';
+  static const _officialPhenomenaKey = 'alerts.official.phenomena';
 
   final bool _persist;
   late final Future<void> _ready;
@@ -23,6 +26,10 @@ final class AlertPreferencesController extends ChangeNotifier {
   bool _quietHoursEnabled = false;
   String _quietHoursStart = '22:00';
   String _quietHoursEnd = '07:00';
+  bool _officialEnabled = false;
+  OfficialAlertLevel _officialMinimumLevel = OfficialAlertLevel.orange;
+  Set<OfficialWeatherPhenomenon> _officialPhenomena =
+      Set<OfficialWeatherPhenomenon>.of(OfficialWeatherPhenomenon.values);
 
   bool get enabled => _enabled;
   int get leadMinutes => _leadMinutes;
@@ -30,6 +37,10 @@ final class AlertPreferencesController extends ChangeNotifier {
   bool get quietHoursEnabled => _quietHoursEnabled;
   String get quietHoursStart => _quietHoursStart;
   String get quietHoursEnd => _quietHoursEnd;
+  bool get officialEnabled => _officialEnabled;
+  OfficialAlertLevel get officialMinimumLevel => _officialMinimumLevel;
+  Set<OfficialWeatherPhenomenon> get officialPhenomena =>
+      Set<OfficialWeatherPhenomenon>.unmodifiable(_officialPhenomena);
   Future<void> get ready => _ready;
 
   Future<void> setEnabled(bool value) => _update(enabled: value);
@@ -40,6 +51,18 @@ final class AlertPreferencesController extends ChangeNotifier {
       _update(quietHoursEnabled: value);
   Future<void> setQuietHours({required String start, required String end}) =>
       _update(quietHoursStart: start, quietHoursEnd: end);
+  Future<void> setOfficialEnabled(bool value) =>
+      _update(officialEnabled: value);
+  Future<void> setOfficialMinimumLevel(OfficialAlertLevel value) =>
+      _update(officialMinimumLevel: value);
+  Future<void> setOfficialPhenomenon(
+    OfficialWeatherPhenomenon phenomenon,
+    bool enabled,
+  ) {
+    final next = Set<OfficialWeatherPhenomenon>.of(_officialPhenomena);
+    enabled ? next.add(phenomenon) : next.remove(phenomenon);
+    return _update(officialPhenomena: next);
+  }
 
   Future<void> clear() async {
     _enabled = false;
@@ -48,6 +71,11 @@ final class AlertPreferencesController extends ChangeNotifier {
     _quietHoursEnabled = false;
     _quietHoursStart = '22:00';
     _quietHoursEnd = '07:00';
+    _officialEnabled = false;
+    _officialMinimumLevel = OfficialAlertLevel.orange;
+    _officialPhenomena = Set<OfficialWeatherPhenomenon>.of(
+      OfficialWeatherPhenomenon.values,
+    );
     notifyListeners();
     if (!_persist) return;
     final preferences = await SharedPreferences.getInstance();
@@ -58,6 +86,9 @@ final class AlertPreferencesController extends ChangeNotifier {
       preferences.remove(_quietHoursEnabledKey),
       preferences.remove(_quietHoursStartKey),
       preferences.remove(_quietHoursEndKey),
+      preferences.remove(_officialEnabledKey),
+      preferences.remove(_officialMinimumLevelKey),
+      preferences.remove(_officialPhenomenaKey),
     ]);
   }
 
@@ -68,6 +99,9 @@ final class AlertPreferencesController extends ChangeNotifier {
     bool? quietHoursEnabled,
     String? quietHoursStart,
     String? quietHoursEnd,
+    bool? officialEnabled,
+    OfficialAlertLevel? officialMinimumLevel,
+    Set<OfficialWeatherPhenomenon>? officialPhenomena,
   }) async {
     _enabled = enabled ?? _enabled;
     _leadMinutes = leadMinutes ?? _leadMinutes;
@@ -75,6 +109,9 @@ final class AlertPreferencesController extends ChangeNotifier {
     _quietHoursEnabled = quietHoursEnabled ?? _quietHoursEnabled;
     _quietHoursStart = quietHoursStart ?? _quietHoursStart;
     _quietHoursEnd = quietHoursEnd ?? _quietHoursEnd;
+    _officialEnabled = officialEnabled ?? _officialEnabled;
+    _officialMinimumLevel = officialMinimumLevel ?? _officialMinimumLevel;
+    _officialPhenomena = officialPhenomena ?? _officialPhenomena;
     notifyListeners();
     if (!_persist) return;
     final preferences = await SharedPreferences.getInstance();
@@ -85,6 +122,15 @@ final class AlertPreferencesController extends ChangeNotifier {
       preferences.setBool(_quietHoursEnabledKey, _quietHoursEnabled),
       preferences.setString(_quietHoursStartKey, _quietHoursStart),
       preferences.setString(_quietHoursEndKey, _quietHoursEnd),
+      preferences.setBool(_officialEnabledKey, _officialEnabled),
+      preferences.setString(
+        _officialMinimumLevelKey,
+        _officialMinimumLevel.name,
+      ),
+      preferences.setStringList(
+        _officialPhenomenaKey,
+        _officialPhenomena.map((value) => value.name).toList(growable: false),
+      ),
     ]);
   }
 
@@ -99,6 +145,22 @@ final class AlertPreferencesController extends ChangeNotifier {
     _quietHoursEnabled = preferences.getBool(_quietHoursEnabledKey) ?? false;
     _quietHoursStart = preferences.getString(_quietHoursStartKey) ?? '22:00';
     _quietHoursEnd = preferences.getString(_quietHoursEndKey) ?? '07:00';
+    _officialEnabled = preferences.getBool(_officialEnabledKey) ?? false;
+    _officialMinimumLevel = OfficialAlertLevel.values.firstWhere(
+      (value) => value.name == preferences.getString(_officialMinimumLevelKey),
+      orElse: () => OfficialAlertLevel.orange,
+    );
+    final storedPhenomena = preferences.getStringList(_officialPhenomenaKey);
+    _officialPhenomena = storedPhenomena == null
+        ? Set<OfficialWeatherPhenomenon>.of(OfficialWeatherPhenomenon.values)
+        : storedPhenomena
+              .map(
+                (name) => OfficialWeatherPhenomenon.values
+                    .where((value) => value.name == name)
+                    .firstOrNull,
+              )
+              .whereType<OfficialWeatherPhenomenon>()
+              .toSet();
     notifyListeners();
   }
 }

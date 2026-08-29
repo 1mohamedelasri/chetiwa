@@ -41,4 +41,30 @@ void main() {
       isNull,
     );
   });
+
+  test('accepts only an official Météo-France vigilance destination', () {
+    final controller = RainAlertNavigationController();
+    final intent = OfficialAlertNavigationIntent.fromData(<String, dynamic>{
+      'type': 'official_weather_alert',
+      'source': 'meteofrance',
+      'eventId': 'official-1',
+      'departmentCode': '75',
+      'officialUrl': 'https://vigilance.meteofrance.fr/fr',
+    });
+
+    expect(intent, isNotNull);
+    controller.openOfficial(intent!);
+    expect(controller.takeOfficial()?.departmentCode, '75');
+    expect(
+      OfficialAlertNavigationIntent.fromData(<String, dynamic>{
+        'type': 'official_weather_alert',
+        'source': 'meteofrance',
+        'eventId': 'official-2',
+        'departmentCode': '75',
+        'officialUrl': 'https://example.com/phishing',
+      }),
+      isNull,
+    );
+    controller.dispose();
+  });
 }

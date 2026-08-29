@@ -11,6 +11,46 @@ enum RainAlertIntensity {
   );
 }
 
+enum OfficialAlertLevel { yellow, orange, red }
+
+enum OfficialWeatherPhenomenon {
+  wind,
+  rainFlood,
+  thunderstorms,
+  floods,
+  snowIce,
+  heatwave,
+  extremeCold,
+  avalanches,
+}
+
+final class OfficialAlertInput {
+  const OfficialAlertInput({
+    required this.enabled,
+    this.minimumLevel = OfficialAlertLevel.orange,
+    this.phenomena = const <OfficialWeatherPhenomenon>{
+      OfficialWeatherPhenomenon.wind,
+      OfficialWeatherPhenomenon.rainFlood,
+      OfficialWeatherPhenomenon.thunderstorms,
+      OfficialWeatherPhenomenon.floods,
+      OfficialWeatherPhenomenon.snowIce,
+      OfficialWeatherPhenomenon.heatwave,
+      OfficialWeatherPhenomenon.extremeCold,
+      OfficialWeatherPhenomenon.avalanches,
+    },
+  });
+
+  final bool enabled;
+  final OfficialAlertLevel minimumLevel;
+  final Set<OfficialWeatherPhenomenon> phenomena;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'enabled': enabled,
+    'minimumLevel': minimumLevel.name,
+    'phenomena': phenomena.map((value) => value.name).toList(growable: false),
+  };
+}
+
 final class AlertLocationInput {
   const AlertLocationInput({
     required this.label,
@@ -57,6 +97,7 @@ final class RainAlertInput {
     required this.minimumIntensity,
     required this.quietHours,
     required this.enabled,
+    this.vigilance = const OfficialAlertInput(enabled: false),
   });
 
   final AlertLocationInput location;
@@ -64,6 +105,7 @@ final class RainAlertInput {
   final RainAlertIntensity minimumIntensity;
   final AlertQuietHoursInput quietHours;
   final bool enabled;
+  final OfficialAlertInput vigilance;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'location': location.toJson(),
@@ -71,6 +113,7 @@ final class RainAlertInput {
     'minimumIntensity': minimumIntensity.name,
     'quietHours': quietHours.toJson(),
     'enabled': enabled,
+    'vigilance': vigilance.toJson(),
   };
 }
 
@@ -82,6 +125,7 @@ final class RainAlertRule {
     required this.minimumIntensity,
     required this.quietHours,
     required this.enabled,
+    required this.vigilance,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -89,6 +133,7 @@ final class RainAlertRule {
   factory RainAlertRule.fromJson(Map<String, dynamic> json) {
     final location = json['location'] as Map<String, dynamic>;
     final quietHours = json['quietHours'] as Map<String, dynamic>;
+    final vigilance = json['vigilance'] as Map<String, dynamic>?;
     return RainAlertRule(
       id: json['id'] as String,
       location: AlertLocationInput(
@@ -107,6 +152,20 @@ final class RainAlertRule {
         end: quietHours['end'] as String,
       ),
       enabled: json['enabled'] as bool,
+      vigilance: vigilance == null
+          ? const OfficialAlertInput(enabled: false)
+          : OfficialAlertInput(
+              enabled: vigilance['enabled'] as bool? ?? false,
+              minimumLevel: OfficialAlertLevel.values.byName(
+                vigilance['minimumLevel'] as String? ?? 'orange',
+              ),
+              phenomena:
+                  (vigilance['phenomena'] as List<dynamic>? ??
+                          const <dynamic>[])
+                      .whereType<String>()
+                      .map(OfficialWeatherPhenomenon.values.byName)
+                      .toSet(),
+            ),
       createdAt: DateTime.parse(json['createdAt'] as String),
       updatedAt: DateTime.parse(json['updatedAt'] as String),
     );
@@ -118,6 +177,7 @@ final class RainAlertRule {
   final RainAlertIntensity minimumIntensity;
   final AlertQuietHoursInput quietHours;
   final bool enabled;
+  final OfficialAlertInput vigilance;
   final DateTime createdAt;
   final DateTime updatedAt;
 }
@@ -169,6 +229,7 @@ final class ChetiwaAlertApi {
     RainAlertIntensity? minimumIntensity,
     AlertQuietHoursInput? quietHours,
     AlertLocationInput? location,
+    OfficialAlertInput? vigilance,
   }) async {
     final data = await _api.patchData('/v1/alerts/$alertId', <String, Object?>{
       if (enabled != null) 'enabled': enabled,
@@ -176,6 +237,7 @@ final class ChetiwaAlertApi {
       if (minimumIntensity != null) 'minimumIntensity': minimumIntensity.name,
       if (quietHours != null) 'quietHours': quietHours.toJson(),
       if (location != null) 'location': location.toJson(),
+      if (vigilance != null) 'vigilance': vigilance.toJson(),
     });
     return _readAlert(data);
   }

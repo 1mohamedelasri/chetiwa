@@ -83,6 +83,12 @@ void main() {
         end: '07:00',
       ),
       enabled: true,
+      vigilance: const OfficialAlertInput(
+        enabled: true,
+        phenomena: <OfficialWeatherPhenomenon>{
+          OfficialWeatherPhenomenon.thunderstorms,
+        },
+      ),
     );
 
     final created = await api.createAlert(input);
@@ -92,6 +98,8 @@ void main() {
 
     expect(created.location.label, 'Paris, France');
     expect(created.minimumIntensity, RainAlertIntensity.moderate);
+    expect(created.vigilance.enabled, isTrue);
+    expect(created.vigilance.minimumLevel, OfficialAlertLevel.orange);
     expect(listed, hasLength(1));
     expect(updated.enabled, isFalse);
     expect(requests.map((request) => request.method), <String>[
@@ -119,6 +127,13 @@ Map<String, Object?> _alertJson({required bool enabled}) => <String, Object?>{
     'end': '07:00',
   },
   'enabled': enabled,
+  'vigilance': <String, Object?>{
+    'enabled': true,
+    'minimumLevel': 'orange',
+    'phenomena': <String>['thunderstorms'],
+    'departmentCode': '75',
+    'departmentName': 'Paris',
+  },
   'createdAt': '2026-08-20T18:30:00.000Z',
   'updatedAt': '2026-08-20T18:30:00.000Z',
 };

@@ -80,6 +80,64 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
     }
   }
 
+  Future<void> _toggleOfficialAlerts(bool enable) async {
+    if (!enable) {
+      await _setOfficialAlertsEnabled(false);
+      return;
+    }
+    final gateway = context.read<NotificationPermissionGateway>();
+    final status = _authorization ?? await gateway.status();
+    if (!mounted) return;
+    if (status.canSend) {
+      await _setOfficialAlertsEnabled(true);
+      return;
+    }
+    if (status == NotificationAuthorization.denied ||
+        status == NotificationAuthorization.permanentlyDenied ||
+        status == NotificationAuthorization.restricted) {
+      await gateway.openSettings();
+      await _refreshAuthorization();
+      return;
+    }
+    final shouldRequest = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => const SafeArea(
+        child: SingleChildScrollView(child: _PermissionExplanationSheet()),
+      ),
+    );
+    if (shouldRequest != true || !mounted) return;
+    final result = await gateway.requestPermission();
+    if (!mounted) return;
+    setState(() => _authorization = result);
+    if (result.canSend) await _setOfficialAlertsEnabled(true);
+  }
+
+  Future<void> _setOfficialAlertsEnabled(bool enabled) async {
+    final preferences = context.read<AlertPreferencesController>();
+    final coordinator = context.read<LocalRainAlertCoordinator?>();
+    await preferences.setOfficialEnabled(enabled);
+    final result = await coordinator?.sync();
+    if (enabled && result == RainAlertSyncResult.noMainLocation && mounted) {
+      await preferences.setOfficialEnabled(false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Choisissez d’abord un lieu principal dans Réglages.'),
+        ),
+      );
+    } else if (enabled && result == RainAlertSyncResult.failed && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'L’inscription aux vigilances officielles est indisponible. Réessayez plus tard.',
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _setAlertsEnabled(bool enabled) async {
     final preferences = context.read<AlertPreferencesController>();
     final coordinator = context.read<LocalRainAlertCoordinator?>();
@@ -122,7 +180,7 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
     final colors = Theme.of(context).colorScheme;
     return Consumer<AlertPreferencesController>(
       builder: (context, preferences, _) => Scaffold(
-        appBar: AppBar(title: const Text('Smart Rain Alerts')),
+        appBar: AppBar(title: const Text('Alertes météo')),
         body: ListView(
           padding: const EdgeInsets.all(ChetiwaSpacing.x6),
           children: [
@@ -256,8 +314,112 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
             ),
             const SizedBox(height: ChetiwaSpacing.x5),
             Text(
-              'Chetiwa n’enverra une alerte que si vous l’activez. Votre lieu '
-              'd’alerte et vos préférences servent uniquement à calculer cette alerte.',
+              'VIGILANCE OFFICIELLE',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: colors.onSurfaceVariant,
+                letterSpacing: 1.1,
+              ),
+            ),
+            const SizedBox(height: ChetiwaSpacing.x3),
+            _Card(
+              child: Column(
+                children: [
+                  SwitchListTile.adaptive(
+                    key: const Key('official-alerts-enabled-switch'),
+                    secondary: const Icon(Icons.warning_amber_rounded),
+                    title: const Text('Vigilance Météo-France'),
+                    subtitle: const Text(
+                      'Alertes départementales officielles · orange et rouge par défaut',
+                    ),
+                    value: preferences.officialEnabled,
+                    onChanged: _loadingAuthorization
+                        ? null
+                        : _toggleOfficialAlerts,
+                  ),
+                  IgnorePointer(
+                    ignoring: !preferences.officialEnabled,
+                    child: Opacity(
+                      opacity: preferences.officialEnabled ? 1 : .45,
+                      child: Column(
+                        children: [
+                          const Divider(height: 1),
+                          ListTile(
+                            leading: const Icon(Icons.tune_outlined),
+                            title: const Text('Niveau minimum'),
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: 10),
+                              child: SegmentedButton<OfficialAlertLevel>(
+                                segments: const [
+                                  ButtonSegment(
+                                    value: OfficialAlertLevel.yellow,
+                                    label: Text('Jaune'),
+                                  ),
+                                  ButtonSegment(
+                                    value: OfficialAlertLevel.orange,
+                                    label: Text('Orange'),
+                                  ),
+                                  ButtonSegment(
+                                    value: OfficialAlertLevel.red,
+                                    label: Text('Rouge'),
+                                  ),
+                                ],
+                                selected: {preferences.officialMinimumLevel},
+                                showSelectedIcon: false,
+                                onSelectionChanged: (selection) async {
+                                  await preferences.setOfficialMinimumLevel(
+                                    selection.first,
+                                  );
+                                  _resync();
+                                },
+                              ),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          ExpansionTile(
+                            leading: const Icon(Icons.checklist_outlined),
+                            title: const Text('Phénomènes suivis'),
+                            subtitle: Text(
+                              '${preferences.officialPhenomena.length} catégories',
+                            ),
+                            children: OfficialWeatherPhenomenon.values
+                                .map(
+                                  (phenomenon) => CheckboxListTile(
+                                    dense: true,
+                                    title: Text(
+                                      _officialPhenomenonLabel(phenomenon),
+                                    ),
+                                    value: preferences.officialPhenomena
+                                        .contains(phenomenon),
+                                    onChanged: (value) async {
+                                      if (value == false &&
+                                          preferences
+                                                  .officialPhenomena
+                                                  .length ==
+                                              1) {
+                                        return;
+                                      }
+                                      await preferences.setOfficialPhenomenon(
+                                        phenomenon,
+                                        value ?? false,
+                                      );
+                                      _resync();
+                                    },
+                                  ),
+                                )
+                                .toList(growable: false),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: ChetiwaSpacing.x5),
+            Text(
+              'Les vigilances utilisent exclusivement la source officielle '
+              'Météo-France du département. Une forte pluie prévue n’est jamais '
+              'présentée comme un orage officiel.',
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
@@ -267,6 +429,18 @@ final class _AlertsSetupScreenState extends State<AlertsSetupScreen> {
       ),
     );
   }
+
+  String _officialPhenomenonLabel(OfficialWeatherPhenomenon value) =>
+      switch (value) {
+        OfficialWeatherPhenomenon.wind => 'Vent',
+        OfficialWeatherPhenomenon.rainFlood => 'Pluie-inondation',
+        OfficialWeatherPhenomenon.thunderstorms => 'Orages',
+        OfficialWeatherPhenomenon.floods => 'Crues',
+        OfficialWeatherPhenomenon.snowIce => 'Neige-verglas',
+        OfficialWeatherPhenomenon.heatwave => 'Canicule',
+        OfficialWeatherPhenomenon.extremeCold => 'Grand froid',
+        OfficialWeatherPhenomenon.avalanches => 'Avalanches',
+      };
 
   String _authorizationText() {
     if (_loadingAuthorization) return 'Vérification de l’autorisation…';
@@ -349,13 +523,13 @@ final class _PermissionExplanationSheet extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Autoriser les alertes pluie ?',
+          'Autoriser les alertes météo ?',
           style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 12),
         const Text(
-          'Chetiwa vous avertira avant la pluie selon le délai et le seuil que '
-          'vous avez choisis. Vous pourrez désactiver ces alertes à tout moment.',
+          'Chetiwa pourra vous avertir avant la pluie et pour les vigilances '
+          'officielles que vous choisissez. Vous gardez le contrôle à tout moment.',
         ),
         const SizedBox(height: 20),
         FilledButton(

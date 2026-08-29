@@ -41,7 +41,7 @@ void main() {
     expect(preferences.enabled, isFalse);
     await tester.tap(find.byKey(const Key('smart-alerts-enabled-switch')));
     await tester.pumpAndSettle();
-    expect(find.text('Autoriser les alertes pluie ?'), findsOneWidget);
+    expect(find.text('Autoriser les alertes météo ?'), findsOneWidget);
     expect(preferences.enabled, isFalse);
 
     await tester.tap(
@@ -135,5 +135,47 @@ void main() {
     expect(gateway.requestCount, 0);
     expect(preferences.enabled, isFalse);
     expect(find.text('Autoriser les alertes pluie ?'), findsNothing);
+  });
+
+  testWidgets('keeps official vigilance separate with orange default', (
+    tester,
+  ) async {
+    final preferences = AlertPreferencesController(persist: false);
+    final activeLocation = ActiveLocationController(
+      const FixtureLocationRepository(),
+    );
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AlertPreferencesController>.value(
+            value: preferences,
+          ),
+          Provider<NotificationPermissionGateway>.value(
+            value: FixtureNotificationPermissionGateway(
+              initial: NotificationAuthorization.authorized,
+            ),
+          ),
+          ChangeNotifierProvider<ActiveLocationController>.value(
+            value: activeLocation,
+          ),
+        ],
+        child: MaterialApp(
+          theme: ChetiwaTheme.light,
+          home: const AlertsSetupScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('official-alerts-enabled-switch')),
+      400,
+    );
+    await tester.tap(find.byKey(const Key('official-alerts-enabled-switch')));
+    await tester.pumpAndSettle();
+
+    expect(preferences.officialEnabled, isTrue);
+    expect(preferences.enabled, isFalse);
+    expect(preferences.officialMinimumLevel, OfficialAlertLevel.orange);
+    expect(preferences.officialPhenomena, hasLength(8));
   });
 }

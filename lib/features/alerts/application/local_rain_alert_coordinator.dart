@@ -73,7 +73,9 @@ final class LocalRainAlertCoordinator {
   Future<RainAlertSyncResult> _performSync() async {
     try {
       await _preferences.ready;
-      if (!_preferences.enabled) {
+      final rainEnabled = _preferences.enabled;
+      final officialEnabled = _preferences.officialEnabled;
+      if (!rainEnabled && !officialEnabled) {
         final remoteDeleted = await _remoteGateway?.deactivate() ?? true;
         await _scheduler.cancel();
         return remoteDeleted
@@ -87,18 +89,29 @@ final class LocalRainAlertCoordinator {
         return RainAlertSyncResult.noMainLocation;
       }
 
-      final forecast = await _forecastRepository.getForecast(
-        location.coordinates,
-      );
+      Forecast? forecast;
+      if (rainEnabled) {
+        forecast = await _forecastRepository.getForecast(location.coordinates);
+      } else {
+        try {
+          forecast = await _forecastRepository.getForecast(
+            location.coordinates,
+          );
+        } on Object {
+          // Official alerts need only the coordinates. A forecast outage must
+          // not prevent a user from subscribing to Météo-France Vigilance.
+        }
+      }
 
       final remote = _remoteGateway;
       if (remote != null) {
         final result = await remote.syncRule(
+          rainEnabled: rainEnabled,
           location: AlertLocationInput(
             label: location.label,
             latitude: location.coordinates.latitude,
             longitude: location.coordinates.longitude,
-            timeZone: forecast.timeZone,
+            timeZone: forecast?.timeZone ?? 'Europe/Paris',
           ),
           leadMinutes: _preferences.leadMinutes,
           minimumIntensity: _preferences.minimumIntensity,
@@ -106,6 +119,11 @@ final class LocalRainAlertCoordinator {
             enabled: _preferences.quietHoursEnabled,
             start: _preferences.quietHoursStart,
             end: _preferences.quietHoursEnd,
+          ),
+          vigilance: OfficialAlertInput(
+            enabled: officialEnabled,
+            minimumLevel: _preferences.officialMinimumLevel,
+            phenomena: _preferences.officialPhenomena,
           ),
         );
         if (result == RemoteRainAlertSyncResult.registered ||
@@ -117,9 +135,18 @@ final class LocalRainAlertCoordinator {
         }
       }
 
+      if (!rainEnabled) {
+        // Official Météo-France products cannot be reproduced safely on the
+        // phone. Fail closed instead of inventing a local severe-weather alert.
+        await _scheduler.cancel();
+        return RainAlertSyncResult.failed;
+      }
+
+      final rainForecast = forecast!;
+
       final now = _clock.nowUtc;
       final minimum = _minimumIntensity(_preferences.minimumIntensity);
-      final candidates = forecast.points.where(
+      final candidates = rainForecast.points.where(
         (point) =>
             !point.time.isBefore(now) && point.intensity.index >= minimum.index,
       );
@@ -135,7 +162,7 @@ final class LocalRainAlertCoordinator {
       if (!scheduledAt.isAfter(now)) {
         scheduledAt = now.add(const Duration(seconds: 5));
       }
-      if (_isQuietTime(scheduledAt, forecast.timeZone)) {
+      if (_isQuietTime(scheduledAt, rainForecast.timeZone)) {
         await _scheduler.cancel();
         return RainAlertSyncResult.noRain;
       }
@@ -143,7 +170,7 @@ final class LocalRainAlertCoordinator {
       await _scheduler.schedule(
         RainNotification(
           scheduledAt: scheduledAt,
-          timeZone: forecast.timeZone,
+          timeZone: rainForecast.timeZone,
           locationLabel: location.label,
           eventId:
               'local:${first.time.toUtc().toIso8601String()}:'

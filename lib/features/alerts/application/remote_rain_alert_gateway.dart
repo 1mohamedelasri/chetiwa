@@ -25,10 +25,12 @@ abstract interface class RemoteRainAlertGateway {
   Future<void> initialize();
 
   Future<RemoteRainAlertSyncResult> syncRule({
+    required bool rainEnabled,
     required AlertLocationInput location,
     required int leadMinutes,
     required RainAlertIntensity minimumIntensity,
     required AlertQuietHoursInput quietHours,
+    required OfficialAlertInput vigilance,
   });
 
   Future<bool> deactivate();
@@ -75,10 +77,12 @@ final class ChetiwaRemoteRainAlertGateway implements RemoteRainAlertGateway {
 
   @override
   Future<RemoteRainAlertSyncResult> syncRule({
+    required bool rainEnabled,
     required AlertLocationInput location,
     required int leadMinutes,
     required RainAlertIntensity minimumIntensity,
     required AlertQuietHoursInput quietHours,
+    required OfficialAlertInput vigilance,
   }) async {
     final preferences = await SharedPreferences.getInstance();
     final remoteWasActive = preferences.getBool(_activeKey) ?? false;
@@ -108,7 +112,8 @@ final class ChetiwaRemoteRainAlertGateway implements RemoteRainAlertGateway {
         leadMinutes: leadMinutes,
         minimumIntensity: minimumIntensity,
         quietHours: quietHours,
-        enabled: true,
+        enabled: rainEnabled,
+        vigilance: vigilance,
       );
       final existing = await _api.listAlerts();
       if (existing.isEmpty) {
@@ -116,11 +121,12 @@ final class ChetiwaRemoteRainAlertGateway implements RemoteRainAlertGateway {
       } else {
         await _api.updateAlert(
           existing.first.id,
-          enabled: true,
+          enabled: rainEnabled,
           leadMinutes: leadMinutes,
           minimumIntensity: minimumIntensity,
           quietHours: quietHours,
           location: location,
+          vigilance: vigilance,
         );
         for (final staleRule in existing.skip(1)) {
           await _api.deleteAlert(staleRule.id);
@@ -209,6 +215,8 @@ final class FixtureRemoteRainAlertGateway implements RemoteRainAlertGateway {
   RemoteRainAlertSyncResult result;
   int syncCount = 0;
   int deactivateCount = 0;
+  bool? lastRainEnabled;
+  OfficialAlertInput? lastVigilance;
   final StreamController<String> _tokens = StreamController<String>.broadcast();
 
   @override
@@ -230,12 +238,16 @@ final class FixtureRemoteRainAlertGateway implements RemoteRainAlertGateway {
 
   @override
   Future<RemoteRainAlertSyncResult> syncRule({
+    required bool rainEnabled,
     required AlertLocationInput location,
     required int leadMinutes,
     required RainAlertIntensity minimumIntensity,
     required AlertQuietHoursInput quietHours,
+    required OfficialAlertInput vigilance,
   }) async {
     syncCount += 1;
+    lastRainEnabled = rainEnabled;
+    lastVigilance = vigilance;
     return result;
   }
 }

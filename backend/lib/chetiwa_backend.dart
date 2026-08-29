@@ -12,7 +12,10 @@ export 'src/device_alert_store.dart'
         DeviceRegistration,
         InMemoryDeviceAlertStore,
         QuietHours,
-        UnavailableDeviceAlertStore;
+        UnavailableDeviceAlertStore,
+        VigilanceAlertSettings,
+        VigilanceLevel,
+        VigilancePhenomenon;
 export 'src/firestore_device_alert_store.dart' show FirestoreDeviceAlertStore;
 export 'src/json_response_cache.dart'
     show CachedJsonResponse, JsonResponseCache;
@@ -66,3 +69,11 @@ export 'src/shared_counter.dart'
     show HttpSharedCounter, InMemorySharedCounter, SharedCounter;
 export 'src/tile_response_cache.dart'
     show CachedTileResponse, TileCachePolicy, TileLoadResult, TileResponseCache;
+export 'src/vigilance_alert_engine.dart';
+export 'src/vigilance_services.dart'
+    show
+        DepartmentResolver,
+        FirebaseVigilancePushSender,
+        FrenchDepartment,
+        GeoApiDepartmentResolver,
+        MeteoFranceVigilanceProvider;

@@ -72,6 +72,70 @@ final class QuietHours {
   final String end;
 }
 
+enum VigilanceLevel {
+  yellow(2),
+  orange(3),
+  red(4);
+
+  const VigilanceLevel(this.colorId);
+
+  final int colorId;
+
+  static VigilanceLevel fromColorId(int value) => switch (value) {
+    2 => yellow,
+    3 => orange,
+    4 => red,
+    _ => throw FormatException('Unknown vigilance color id: $value'),
+  };
+}
+
+enum VigilancePhenomenon {
+  wind(1),
+  rainFlood(2),
+  thunderstorms(3),
+  floods(4),
+  snowIce(5),
+  heatwave(6),
+  extremeCold(7),
+  avalanches(8),
+  coastalFlooding(9);
+
+  const VigilancePhenomenon(this.id);
+
+  final int id;
+
+  static VigilancePhenomenon fromId(int value) => values.firstWhere(
+    (candidate) => candidate.id == value,
+    orElse: () =>
+        throw FormatException('Unknown vigilance phenomenon id: $value'),
+  );
+}
+
+final class VigilanceAlertSettings {
+  const VigilanceAlertSettings({
+    this.enabled = false,
+    this.minimumLevel = VigilanceLevel.orange,
+    this.phenomena = const <VigilancePhenomenon>{
+      VigilancePhenomenon.wind,
+      VigilancePhenomenon.rainFlood,
+      VigilancePhenomenon.thunderstorms,
+      VigilancePhenomenon.floods,
+      VigilancePhenomenon.snowIce,
+      VigilancePhenomenon.heatwave,
+      VigilancePhenomenon.extremeCold,
+      VigilancePhenomenon.avalanches,
+    },
+    this.departmentCode,
+    this.departmentName,
+  });
+
+  final bool enabled;
+  final VigilanceLevel minimumLevel;
+  final Set<VigilancePhenomenon> phenomena;
+  final String? departmentCode;
+  final String? departmentName;
+}
+
 final class AlertRuleDraft {
   const AlertRuleDraft({
     required this.location,
@@ -79,6 +143,7 @@ final class AlertRuleDraft {
     required this.minimumIntensity,
     required this.quietHours,
     required this.enabled,
+    this.vigilance = const VigilanceAlertSettings(),
   });
 
   final AlertLocation location;
@@ -86,6 +151,7 @@ final class AlertRuleDraft {
   final String minimumIntensity;
   final QuietHours quietHours;
   final bool enabled;
+  final VigilanceAlertSettings vigilance;
 }
 
 final class AlertRuleChanges {
@@ -95,6 +161,7 @@ final class AlertRuleChanges {
     this.minimumIntensity,
     this.quietHours,
     this.enabled,
+    this.vigilance,
   });
 
   final AlertLocation? location;
@@ -102,13 +169,15 @@ final class AlertRuleChanges {
   final String? minimumIntensity;
   final QuietHours? quietHours;
   final bool? enabled;
+  final VigilanceAlertSettings? vigilance;
 
   bool get isEmpty =>
       location == null &&
       leadMinutes == null &&
       minimumIntensity == null &&
       quietHours == null &&
-      enabled == null;
+      enabled == null &&
+      vigilance == null;
 }
 
 final class AlertRuleRecord {
@@ -122,6 +191,7 @@ final class AlertRuleRecord {
     required this.enabled,
     required this.createdAt,
     required this.updatedAt,
+    this.vigilance = const VigilanceAlertSettings(),
   });
 
   final String id;
@@ -133,6 +203,7 @@ final class AlertRuleRecord {
   final bool enabled;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final VigilanceAlertSettings vigilance;
 }
 
 abstract interface class DeviceAlertStore {
@@ -249,6 +320,7 @@ final class InMemoryDeviceAlertStore implements DeviceAlertStore {
       minimumIntensity: draft.minimumIntensity,
       quietHours: draft.quietHours,
       enabled: draft.enabled,
+      vigilance: draft.vigilance,
       createdAt: instant,
       updatedAt: instant,
     );
@@ -273,6 +345,15 @@ final class InMemoryDeviceAlertStore implements DeviceAlertStore {
       minimumIntensity: changes.minimumIntensity ?? existing.minimumIntensity,
       quietHours: changes.quietHours ?? existing.quietHours,
       enabled: changes.enabled ?? existing.enabled,
+      vigilance:
+          changes.vigilance ??
+          (changes.location != null && existing.vigilance.enabled
+              ? VigilanceAlertSettings(
+                  enabled: false,
+                  minimumLevel: existing.vigilance.minimumLevel,
+                  phenomena: existing.vigilance.phenomena,
+                )
+              : existing.vigilance),
       createdAt: existing.createdAt,
       updatedAt: _now().toUtc(),
     );

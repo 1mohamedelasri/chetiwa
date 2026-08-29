@@ -80,6 +80,25 @@ void main() {
     expect(scheduler.scheduled, isNull);
   });
 
+  test('inscrit la Vigilance officielle sans activer la pluie', () async {
+    final preferences = AlertPreferencesController(persist: false);
+    await preferences.setOfficialEnabled(true);
+    final remote = FixtureRemoteRainAlertGateway();
+    final coordinator = LocalRainAlertCoordinator(
+      forecastRepository: const _FailingForecastRepository(),
+      locationRepository: _LocationRepository(paris),
+      preferences: preferences,
+      scheduler: FixtureRainNotificationScheduler(),
+      clock: FixedWeatherClock(now),
+      remoteGateway: remote,
+    );
+
+    expect(await coordinator.sync(), RainAlertSyncResult.scheduled);
+    expect(remote.lastRainEnabled, isFalse);
+    expect(remote.lastVigilance?.enabled, isTrue);
+    expect(remote.lastVigilance?.minimumLevel.name, 'orange');
+  });
+
   test(
     'conserve le distant exclusif pendant une panne de resynchronisation',
     () async {
@@ -196,6 +215,18 @@ final class _ForecastRepository implements ForecastRepository {
       ),
     ],
   );
+}
+
+final class _FailingForecastRepository implements ForecastRepository {
+  const _FailingForecastRepository();
+
+  @override
+  Future<CachedForecast?> getCachedForecast(Coordinates coordinates) async =>
+      null;
+
+  @override
+  Future<Forecast> getForecast(Coordinates coordinates) async =>
+      throw StateError('forecast unavailable');
 }
 
 final class _LocationRepository implements LocationRepository {

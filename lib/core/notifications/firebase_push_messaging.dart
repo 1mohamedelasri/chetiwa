@@ -50,6 +50,12 @@ final class FirebasePushMessagingGateway implements PushMessagingGateway {
     description: 'Prévisions locales de pluie à venir',
     importance: Importance.high,
   );
+  static const _officialChannel = AndroidNotificationChannel(
+    'official_weather_alerts',
+    'Vigilance officielle',
+    description: 'Vigilances départementales officielles Météo-France',
+    importance: Importance.high,
+  );
 
   final FirebaseMessaging _messaging;
   final FlutterLocalNotificationsPlugin _localNotifications;
@@ -69,6 +75,11 @@ final class FirebasePushMessagingGateway implements PushMessagingGateway {
           AndroidFlutterLocalNotificationsPlugin
         >()
         ?.createNotificationChannel(_channel);
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.createNotificationChannel(_officialChannel);
     await _messaging.setForegroundNotificationPresentationOptions(
       alert: true,
       badge: false,
@@ -132,15 +143,17 @@ final class FirebasePushMessagingGateway implements PushMessagingGateway {
     final stableId =
         (message.messageId ?? '${title ?? ''}|${body ?? ''}').hashCode &
         0x7fffffff;
+    final official = message.data['type'] == 'official_weather_alert';
+    final channel = official ? _officialChannel : _channel;
     await _localNotifications.show(
       stableId,
       title,
       body,
-      const NotificationDetails(
+      NotificationDetails(
         android: AndroidNotificationDetails(
-          'rain_alerts',
-          'Alertes pluie',
-          channelDescription: 'Prévisions locales de pluie à venir',
+          channel.id,
+          channel.name,
+          channelDescription: channel.description,
           importance: Importance.high,
           priority: Priority.high,
         ),
@@ -155,6 +168,11 @@ final class FirebasePushMessagingGateway implements PushMessagingGateway {
   }
 
   void _open(Map<String, dynamic> data) {
+    final official = OfficialAlertNavigationIntent.fromData(data);
+    if (official != null) {
+      _navigation?.openOfficial(official);
+      return;
+    }
     final intent = RainAlertNavigationIntent.fromData(data);
     if (intent != null) _navigation?.open(intent);
   }

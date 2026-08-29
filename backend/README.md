@@ -116,6 +116,10 @@ le moteur à 50 €. Leur activation est documentée dans
 | `RAIN_ALERT_SOFT_BUDGET_CENTS` | seuil d’avertissement, `2500` par défaut |
 | `RAIN_ALERT_HARD_BUDGET_CENTS` | coupure persistante du moteur, `5000` par défaut |
 | `RAIN_ALERT_BUDGET_CURRENCY` | devise attendue du message Cloud Billing, `EUR` par défaut |
+| `VIGILANCE_ALERTS_ENABLED` | active le worker officiel Météo-France, `false` par défaut |
+| `VIGILANCE_ALERTS_SEND_ENABLED` | autorise les pushes Vigilance après validation shadow |
+| `METEO_FRANCE_APPLICATION_ID` | secret OAuth2 Basic du portail API Météo-France |
+| `METEO_FRANCE_VIGILANCE_API_KEY` | clé Bearer alternative au flux OAuth2 |
 
 Les URLs externes doivent être HTTPS hors profil local. Le service refuse
 RainViewer en profil `production`, mais accepte LibreWXR, dont l'API publique

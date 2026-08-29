@@ -66,9 +66,19 @@ Corps de création :
     "start": "22:00",
     "end": "07:00"
   },
-  "enabled": true
+  "enabled": true,
+  "vigilance": {
+    "enabled": true,
+    "minimumLevel": "orange",
+    "phenomena": ["wind", "rainFlood", "thunderstorms", "floods"]
+  }
 }
 ```
+
+`enabled` pilote uniquement la pluie locale. `vigilance.enabled` pilote la
+famille officielle séparée. Quand elle est active, `location` est obligatoire :
+le serveur résout et conserve le département, sans accepter un code fourni par
+le téléphone.
 
 Contraintes MVP :
 
@@ -78,6 +88,8 @@ Contraintes MVP :
 - heures silencieuses au format local `HH:mm` ; le moteur les interprétera dans
   le fuseau du téléphone enregistré sur l’appareil ;
 - un appareil ne peut ni lire ni modifier les règles d’une autre installation.
+- niveau officiel `yellow`, `orange` ou `red`, avec orange par défaut ;
+- au moins une catégorie officielle quand la Vigilance est active.
 
 `PATCH` accepte tout sous-ensemble non vide des champs de création. Les réponses
 utilisent l’enveloppe `{data, meta}` commune et `Cache-Control: no-store`.

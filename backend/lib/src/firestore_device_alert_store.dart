@@ -8,6 +8,7 @@ import 'api_exception.dart';
 import 'device_alert_store.dart';
 import 'rain_alert_engine.dart';
 import 'rain_alert_operations.dart';
+import 'vigilance_alert_engine.dart';
 
 /// Persistent device and alert storage for staging and production.
 ///
@@ -18,7 +19,8 @@ final class FirestoreDeviceAlertStore
     implements
         DeviceAlertStore,
         RainAlertEngineStore,
-        RainAlertOperationsStore {
+        RainAlertOperationsStore,
+        VigilanceAlertStore {
   FirestoreDeviceAlertStore({
     required firestore.FirestoreApi api,
     required String projectId,
@@ -437,6 +439,165 @@ final class FirestoreDeviceAlertStore
       });
 
   @override
+  Future<List<ActiveVigilanceAlert>> listActiveVigilanceAlerts() => _translate(
+    () async {
+      final documents = await _query(
+        collectionId: 'alerts',
+        allDescendants: true,
+        field: 'vigilance.enabled',
+        value: _boolean(true),
+      );
+      final rules = documents.map(_alertRecord).toList(growable: false);
+      final related = await _batchGet(<String>{
+        for (final rule in rules) _deviceName(rule.ownerHash),
+        for (final rule in rules) _vigilanceStateName(rule.ownerHash, rule.id),
+      });
+      final result = <ActiveVigilanceAlert>[];
+      for (final rule in rules) {
+        final deviceDocument = related[_deviceName(rule.ownerHash)];
+        if (deviceDocument == null) continue;
+        final stateDocument =
+            related[_vigilanceStateName(rule.ownerHash, rule.id)];
+        result.add(
+          ActiveVigilanceAlert(
+            device: _deviceRecord(rule.ownerHash, deviceDocument),
+            rule: rule,
+            state: stateDocument == null
+                ? VigilanceAlertState(
+                    ownerHash: rule.ownerHash,
+                    alertId: rule.id,
+                  )
+                : _vigilanceState(rule.ownerHash, rule.id, stateDocument),
+          ),
+        );
+      }
+      return result;
+    },
+  );
+
+  @override
+  Future<void> saveVigilanceState(VigilanceAlertState state) =>
+      _translate(() async {
+        await _api.projects.databases.documents.patch(
+          _vigilanceStateDocument(state),
+          _vigilanceStateName(state.ownerHash, state.alertId),
+        );
+      });
+
+  @override
+  Future<bool> enqueueVigilanceDelivery(VigilanceDeliveryDraft delivery) =>
+      _translate(() async {
+        try {
+          await _api.projects.databases.documents.createDocument(
+            _vigilanceDeliveryDocument(delivery),
+            _documents,
+            'vigilanceDeliveries',
+            documentId: delivery.eventId,
+          );
+          return true;
+        } on firestore.DetailedApiRequestError catch (error) {
+          if (error.status == 409) return false;
+          rethrow;
+        }
+      });
+
+  @override
+  Future<List<PendingVigilanceDelivery>> listPendingVigilanceDeliveries({
+    int limit = 500,
+  }) => _translate(() async {
+    final now = _now().toUtc();
+    final documents = await _queryPendingVigilanceDeliveries(
+      now: now,
+      limit: limit,
+    );
+    final drafts = documents
+        .map(_pendingVigilanceDelivery)
+        .where(
+          (item) =>
+              !item.nextAttemptAt.isAfter(now) &&
+              item.draft.expiresAt.isAfter(now),
+        )
+        .toList();
+    final related = await _batchGet(<String>{
+      for (final item in drafts) _deviceName(item.draft.ownerHash),
+      for (final item in drafts)
+        _alertName(item.draft.ownerHash, item.draft.alertId),
+    });
+    final result = <PendingVigilanceDelivery>[];
+    for (final item in drafts) {
+      final alertDocument =
+          related[_alertName(item.draft.ownerHash, item.draft.alertId)];
+      final rule = alertDocument == null ? null : _alertRecord(alertDocument);
+      if (rule == null ||
+          !rule.vigilance.enabled ||
+          vigilanceSettingsFingerprint(rule.vigilance) !=
+              item.draft.settingsFingerprint) {
+        await _updateVigilanceDelivery(
+          item.draft.eventId,
+          <String, firestore.Value>{
+            'status': _string('cancelled'),
+            'failureReason': _string('subscription_inactive'),
+            'updatedAt': _timestamp(now),
+          },
+        );
+        continue;
+      }
+      final document = related[_deviceName(item.draft.ownerHash)];
+      if (document == null) continue;
+      final device = _deviceRecord(item.draft.ownerHash, document);
+      final token = device.pushToken;
+      if (!device.notificationsEnabled || token == null || token.isEmpty) {
+        await _updateVigilanceDelivery(
+          item.draft.eventId,
+          <String, firestore.Value>{
+            'status': _string('cancelled'),
+            'failureReason': _string('device_inactive'),
+            'updatedAt': _timestamp(now),
+          },
+        );
+        continue;
+      }
+      result.add(
+        PendingVigilanceDelivery(
+          draft: item.draft,
+          pushToken: token,
+          platform: device.platform,
+          attempts: item.attempts,
+          nextAttemptAt: item.nextAttemptAt,
+        ),
+      );
+    }
+    return result;
+  });
+
+  @override
+  Future<void> markVigilanceDeliverySent(String eventId, DateTime sentAt) =>
+      _updateVigilanceDelivery(eventId, <String, firestore.Value>{
+        'status': _string('sent'),
+        'sentAt': _timestamp(sentAt),
+        'updatedAt': _timestamp(sentAt),
+      });
+
+  @override
+  Future<void> retryVigilanceDelivery(
+    String eventId, {
+    required int attempts,
+    required DateTime nextAttemptAt,
+  }) => _updateVigilanceDelivery(eventId, <String, firestore.Value>{
+    'attempts': _integer(attempts),
+    'nextAttemptAt': _timestamp(nextAttemptAt),
+    'updatedAt': _timestamp(_now().toUtc()),
+  });
+
+  @override
+  Future<void> failVigilanceDelivery(String eventId, String reason) =>
+      _updateVigilanceDelivery(eventId, <String, firestore.Value>{
+        'status': _string('permanentFailure'),
+        'failureReason': _string(reason),
+        'updatedAt': _timestamp(_now().toUtc()),
+      });
+
+  @override
   Future<void> disableDeviceToken(String ownerHash) => _translate(() async {
     final existing = await _device(ownerHash);
     if (existing == null) return;
@@ -512,6 +673,11 @@ final class FirestoreDeviceAlertStore
       field: 'ownerHash',
       value: _string(ownerHash),
     );
+    final vigilanceDeliveries = await _query(
+      collectionId: 'vigilanceDeliveries',
+      field: 'ownerHash',
+      value: _string(ownerHash),
+    );
     final names = <String>[
       ...alerts.map((document) => document.name).whereType<String>(),
       ...alerts.map((document) {
@@ -519,7 +685,15 @@ final class FirestoreDeviceAlertStore
         final alertId = name.substring(name.lastIndexOf('/') + 1);
         return _stateName(ownerHash, alertId);
       }),
+      ...alerts.map((document) {
+        final name = document.name!;
+        final alertId = name.substring(name.lastIndexOf('/') + 1);
+        return _vigilanceStateName(ownerHash, alertId);
+      }),
       ...deliveries.map((document) => document.name).whereType<String>(),
+      ...vigilanceDeliveries
+          .map((document) => document.name)
+          .whereType<String>(),
       _deviceName(ownerHash),
     ];
     for (var offset = 0; offset < names.length; offset += 500) {
@@ -583,6 +757,7 @@ final class FirestoreDeviceAlertStore
         minimumIntensity: draft.minimumIntensity,
         quietHours: draft.quietHours,
         enabled: draft.enabled,
+        vigilance: draft.vigilance,
         createdAt: instant,
         updatedAt: instant,
       );
@@ -628,6 +803,15 @@ final class FirestoreDeviceAlertStore
       minimumIntensity: changes.minimumIntensity ?? existing.minimumIntensity,
       quietHours: changes.quietHours ?? existing.quietHours,
       enabled: changes.enabled ?? existing.enabled,
+      vigilance:
+          changes.vigilance ??
+          (changes.location != null && existing.vigilance.enabled
+              ? VigilanceAlertSettings(
+                  enabled: false,
+                  minimumLevel: existing.vigilance.minimumLevel,
+                  phenomena: existing.vigilance.phenomena,
+                )
+              : existing.vigilance),
       createdAt: existing.createdAt,
       updatedAt: _now().toUtc(),
     );
@@ -652,11 +836,24 @@ final class FirestoreDeviceAlertStore
     if (record.enabled && (pollingRelevantChange || scheduleMissing)) {
       await _makeCellDue(record.location, record.updatedAt);
     }
+    final vigilanceChanged = !_sameVigilance(
+      existing.vigilance,
+      record.vigilance,
+    );
     await _api.projects.databases.documents.patch(
       _alertDocument(record),
       _alertName(ownerHash, alertId),
       currentDocument_exists: true,
     );
+    if (vigilanceChanged) {
+      try {
+        await _api.projects.databases.documents.delete(
+          _vigilanceStateName(ownerHash, alertId),
+        );
+      } on firestore.DetailedApiRequestError catch (error) {
+        if (error.status != 404) rethrow;
+      }
+    }
     return record;
   }
 
@@ -673,6 +870,7 @@ final class FirestoreDeviceAlertStore
         writes: <firestore.Write>[
           firestore.Write(delete: name),
           firestore.Write(delete: _stateName(ownerHash, alertId)),
+          firestore.Write(delete: _vigilanceStateName(ownerHash, alertId)),
         ],
       ),
       _database,
@@ -794,6 +992,54 @@ final class FirestoreDeviceAlertStore
         .toList(growable: false);
   }
 
+  Future<List<firestore.Document>> _queryPendingVigilanceDeliveries({
+    required DateTime now,
+    required int limit,
+  }) async {
+    final response = await _api.projects.databases.documents.runQuery(
+      firestore.RunQueryRequest(
+        structuredQuery: firestore.StructuredQuery(
+          from: <firestore.CollectionSelector>[
+            firestore.CollectionSelector(collectionId: 'vigilanceDeliveries'),
+          ],
+          where: firestore.Filter(
+            compositeFilter: firestore.CompositeFilter(
+              op: 'AND',
+              filters: <firestore.Filter>[
+                firestore.Filter(
+                  fieldFilter: firestore.FieldFilter(
+                    field: firestore.FieldReference(fieldPath: 'status'),
+                    op: 'EQUAL',
+                    value: _string('pending'),
+                  ),
+                ),
+                firestore.Filter(
+                  fieldFilter: firestore.FieldFilter(
+                    field: firestore.FieldReference(fieldPath: 'nextAttemptAt'),
+                    op: 'LESS_THAN_OR_EQUAL',
+                    value: _timestamp(now),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          orderBy: <firestore.Order>[
+            firestore.Order(
+              field: firestore.FieldReference(fieldPath: 'nextAttemptAt'),
+              direction: 'ASCENDING',
+            ),
+          ],
+          limit: limit,
+        ),
+      ),
+      _documents,
+    );
+    return response
+        .map((element) => element.document)
+        .whereType<firestore.Document>()
+        .toList(growable: false);
+  }
+
   Future<Map<String, firestore.Document>> _batchGet(Set<String> names) async {
     if (names.isEmpty) return <String, firestore.Document>{};
     final result = <String, firestore.Document>{};
@@ -825,6 +1071,132 @@ final class FirestoreDeviceAlertStore
       updateMask_fieldPaths: fields.keys.toList(growable: false),
     );
   });
+
+  Future<void> _updateVigilanceDelivery(
+    String eventId,
+    Map<String, firestore.Value> fields,
+  ) => _translate(() async {
+    final name = _vigilanceDeliveryName(eventId);
+    await _api.projects.databases.documents.patch(
+      firestore.Document(name: name, fields: fields),
+      name,
+      currentDocument_exists: true,
+      updateMask_fieldPaths: fields.keys.toList(growable: false),
+    );
+  });
+
+  firestore.Document _vigilanceStateDocument(VigilanceAlertState state) =>
+      firestore.Document(
+        name: _vigilanceStateName(state.ownerHash, state.alertId),
+        fields: <String, firestore.Value>{
+          'ownerHash': _string(state.ownerHash),
+          'alertId': _string(state.alertId),
+          'phenomena': _map(<String, firestore.Value>{
+            for (final entry in state.phenomena.entries)
+              entry.key.name: _map(<String, firestore.Value>{
+                'level': _string(entry.value.level.name),
+                'beginsAt': _timestamp(entry.value.beginsAt),
+                'endsAt': _timestamp(entry.value.endsAt),
+              }),
+          }),
+          if (state.productAt case final value?) 'productAt': _timestamp(value),
+          if (state.updatedAt case final value?) 'updatedAt': _timestamp(value),
+          if (state.settingsFingerprint case final value?)
+            'settingsFingerprint': _string(value),
+          'expiresAt': _timestamp(
+            (state.updatedAt ?? _now().toUtc()).add(inactiveDeviceTtl),
+          ),
+        },
+      );
+
+  VigilanceAlertState _vigilanceState(
+    String ownerHash,
+    String alertId,
+    firestore.Document document,
+  ) {
+    final fields = document.fields ?? const <String, firestore.Value>{};
+    final rawPhenomena =
+        fields['phenomena']?.mapValue?.fields ??
+        const <String, firestore.Value>{};
+    final phenomena = <VigilancePhenomenon, VigilancePhenomenonState>{};
+    for (final entry in rawPhenomena.entries) {
+      final raw = entry.value.mapValue?.fields;
+      if (raw == null) continue;
+      phenomena[VigilancePhenomenon.values.byName(
+        entry.key,
+      )] = VigilancePhenomenonState(
+        level: VigilanceLevel.values.byName(_readString(raw, 'level')),
+        beginsAt: _readTimestamp(raw, 'beginsAt'),
+        endsAt: _readTimestamp(raw, 'endsAt'),
+      );
+    }
+    return VigilanceAlertState(
+      ownerHash: ownerHash,
+      alertId: alertId,
+      phenomena: phenomena,
+      productAt: _readOptionalTimestamp(fields, 'productAt'),
+      updatedAt: _readOptionalTimestamp(fields, 'updatedAt'),
+      settingsFingerprint: fields['settingsFingerprint']?.stringValue,
+    );
+  }
+
+  firestore.Document _vigilanceDeliveryDocument(
+    VigilanceDeliveryDraft delivery,
+  ) => firestore.Document(
+    name: _vigilanceDeliveryName(delivery.eventId),
+    fields: <String, firestore.Value>{
+      'eventId': _string(delivery.eventId),
+      'ownerHash': _string(delivery.ownerHash),
+      'alertId': _string(delivery.alertId),
+      'departmentCode': _string(delivery.departmentCode),
+      'departmentName': _string(delivery.departmentName),
+      'phenomenon': _string(delivery.phenomenon.name),
+      'kind': _string(delivery.kind.name),
+      if (delivery.level case final value?) 'level': _string(value.name),
+      if (delivery.beginsAt case final value?) 'beginsAt': _timestamp(value),
+      if (delivery.endsAt case final value?) 'endsAt': _timestamp(value),
+      'title': _string(delivery.title),
+      'body': _string(delivery.body),
+      'settingsFingerprint': _string(delivery.settingsFingerprint),
+      'status': _string('pending'),
+      'attempts': _integer(0),
+      'nextAttemptAt': _timestamp(delivery.createdAt),
+      'createdAt': _timestamp(delivery.createdAt),
+      'updatedAt': _timestamp(delivery.createdAt),
+      'expiresAt': _timestamp(delivery.expiresAt),
+    },
+  );
+
+  ({VigilanceDeliveryDraft draft, int attempts, DateTime nextAttemptAt})
+  _pendingVigilanceDelivery(firestore.Document document) {
+    final fields = document.fields ?? const <String, firestore.Value>{};
+    final levelName = fields['level']?.stringValue;
+    return (
+      draft: VigilanceDeliveryDraft(
+        eventId: _readString(fields, 'eventId'),
+        ownerHash: _readString(fields, 'ownerHash'),
+        alertId: _readString(fields, 'alertId'),
+        departmentCode: _readString(fields, 'departmentCode'),
+        departmentName: _readString(fields, 'departmentName'),
+        phenomenon: VigilancePhenomenon.values.byName(
+          _readString(fields, 'phenomenon'),
+        ),
+        kind: VigilanceDeliveryKind.values.byName(_readString(fields, 'kind')),
+        level: levelName == null
+            ? null
+            : VigilanceLevel.values.byName(levelName),
+        beginsAt: _readOptionalTimestamp(fields, 'beginsAt'),
+        endsAt: _readOptionalTimestamp(fields, 'endsAt'),
+        title: _readString(fields, 'title'),
+        body: _readString(fields, 'body'),
+        settingsFingerprint: _readString(fields, 'settingsFingerprint'),
+        createdAt: _readTimestamp(fields, 'createdAt'),
+        expiresAt: _readTimestamp(fields, 'expiresAt'),
+      ),
+      attempts: _readInteger(fields, 'attempts'),
+      nextAttemptAt: _readTimestamp(fields, 'nextAttemptAt'),
+    );
+  }
 
   firestore.Document _stateDocument(RainAlertState state) => firestore.Document(
     name: _stateName(state.ownerHash, state.alertId),
@@ -972,6 +1344,19 @@ final class FirestoreDeviceAlertStore
             'end': _string(record.quietHours.end),
           }),
           'enabled': _boolean(record.enabled),
+          'vigilance': _map(<String, firestore.Value>{
+            'enabled': _boolean(record.vigilance.enabled),
+            'minimumLevel': _string(record.vigilance.minimumLevel.name),
+            'phenomena': _array(
+              record.vigilance.phenomena
+                  .map((value) => _string(value.name))
+                  .toList(growable: false),
+            ),
+            if (record.vigilance.departmentCode case final code?)
+              'departmentCode': _string(code),
+            if (record.vigilance.departmentName case final name?)
+              'departmentName': _string(name),
+          }),
           'createdAt': _timestamp(record.createdAt),
           'updatedAt': _timestamp(record.updatedAt),
           'expiresAt': _timestamp(record.updatedAt.add(inactiveDeviceTtl)),
@@ -998,6 +1383,7 @@ final class FirestoreDeviceAlertStore
     final fields = document.fields ?? const <String, firestore.Value>{};
     final location = _readMap(fields, 'location');
     final quietHours = _readMap(fields, 'quietHours');
+    final vigilance = fields['vigilance']?.mapValue?.fields;
     final name = document.name;
     if (name == null || !name.contains('/alerts/')) {
       throw const FormatException('Invalid Firestore alert document name');
@@ -1019,6 +1405,23 @@ final class FirestoreDeviceAlertStore
         end: _readString(quietHours, 'end'),
       ),
       enabled: _readBoolean(fields, 'enabled'),
+      vigilance: vigilance == null
+          ? const VigilanceAlertSettings()
+          : VigilanceAlertSettings(
+              enabled: vigilance['enabled']?.booleanValue ?? false,
+              minimumLevel: VigilanceLevel.values.byName(
+                vigilance['minimumLevel']?.stringValue ?? 'orange',
+              ),
+              phenomena:
+                  (vigilance['phenomena']?.arrayValue?.values ??
+                          const <firestore.Value>[])
+                      .map((value) => value.stringValue)
+                      .whereType<String>()
+                      .map(VigilancePhenomenon.values.byName)
+                      .toSet(),
+              departmentCode: vigilance['departmentCode']?.stringValue,
+              departmentName: vigilance['departmentName']?.stringValue,
+            ),
       createdAt: _readTimestamp(fields, 'createdAt'),
       updatedAt: _readTimestamp(fields, 'updatedAt'),
     );
@@ -1034,6 +1437,12 @@ final class FirestoreDeviceAlertStore
 
   String _deliveryName(String eventId) =>
       '$_documents/alertDeliveries/$eventId';
+
+  String _vigilanceStateName(String ownerHash, String alertId) =>
+      '$_documents/vigilanceStates/${ownerHash}_$alertId';
+
+  String _vigilanceDeliveryName(String eventId) =>
+      '$_documents/vigilanceDeliveries/$eventId';
 
   String _cellScheduleName(String cellKey) =>
       '$_documents/alertCellSchedules/$cellKey';
@@ -1052,6 +1461,8 @@ final class FirestoreDeviceAlertStore
       firestore.Value(timestampValue: value.toUtc().toIso8601String());
   static firestore.Value _map(Map<String, firestore.Value> value) =>
       firestore.Value(mapValue: firestore.MapValue(fields: value));
+  static firestore.Value _array(List<firestore.Value> value) =>
+      firestore.Value(arrayValue: firestore.ArrayValue(values: value));
 
   static String _readString(Map<String, firestore.Value> fields, String name) {
     final value = fields[name]?.stringValue;
@@ -1104,6 +1515,17 @@ final class FirestoreDeviceAlertStore
     if (value == null) throw FormatException('Missing map field $name');
     return value;
   }
+
+  static bool _sameVigilance(
+    VigilanceAlertSettings left,
+    VigilanceAlertSettings right,
+  ) =>
+      left.enabled == right.enabled &&
+      left.minimumLevel == right.minimumLevel &&
+      left.departmentCode == right.departmentCode &&
+      left.departmentName == right.departmentName &&
+      left.phenomena.length == right.phenomena.length &&
+      left.phenomena.containsAll(right.phenomena);
 
   static String _secureId() {
     final random = Random.secure();

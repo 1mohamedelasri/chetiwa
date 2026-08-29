@@ -97,6 +97,11 @@ final class SystemRainNotificationScheduler
     try {
       final decoded = jsonDecode(payload);
       if (decoded is! Map<String, dynamic>) return;
+      final official = OfficialAlertNavigationIntent.fromData(decoded);
+      if (official != null) {
+        _navigation?.openOfficial(official);
+        return;
+      }
       final intent = RainAlertNavigationIntent.fromData(decoded);
       if (intent != null) _navigation?.open(intent);
     } on FormatException {

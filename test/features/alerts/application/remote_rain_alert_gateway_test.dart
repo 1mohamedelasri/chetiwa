@@ -46,6 +46,7 @@ void main() {
     );
 
     final result = await gateway.syncRule(
+      rainEnabled: true,
       location: const AlertLocationInput(
         label: 'Paris, France',
         latitude: 48.8566,
@@ -59,6 +60,7 @@ void main() {
         start: '22:00',
         end: '07:00',
       ),
+      vigilance: const OfficialAlertInput(enabled: false),
     );
 
     expect(result, RemoteRainAlertSyncResult.registered);
@@ -76,6 +78,9 @@ void main() {
       requests.first.headers['x-chetiwa-device-id'],
       matches(r'^[a-f0-9]{32}$'),
     );
+    final rule = jsonDecode(requests.last.body) as Map<String, dynamic>;
+    expect(rule['enabled'], isTrue);
+    expect((rule['vigilance'] as Map<String, dynamic>)['enabled'], isFalse);
 
     expect(await gateway.deactivate(), isTrue);
     expect(messaging.disabled, isTrue);
@@ -100,6 +105,7 @@ void main() {
       );
 
       final result = await gateway.syncRule(
+        rainEnabled: true,
         location: const AlertLocationInput(
           label: 'Paris, France',
           latitude: 48.8566,
@@ -113,6 +119,7 @@ void main() {
           start: '22:00',
           end: '07:00',
         ),
+        vigilance: const OfficialAlertInput(enabled: false),
       );
 
       expect(result, RemoteRainAlertSyncResult.unavailable);
@@ -139,6 +146,7 @@ void main() {
     );
 
     final result = await gateway.syncRule(
+      rainEnabled: true,
       location: const AlertLocationInput(
         label: 'Paris, France',
         latitude: 48.8566,
@@ -152,6 +160,7 @@ void main() {
         start: '22:00',
         end: '07:00',
       ),
+      vigilance: const OfficialAlertInput(enabled: false),
     );
 
     expect(result, RemoteRainAlertSyncResult.retained);

@@ -31,7 +31,10 @@ Future<void> main(List<String> arguments) async {
   // only when the remote alert engine is explicitly enabled.
   final persistentAlerts =
       config.environment == AppEnvironment.local ||
-          (!config.rainAlertsEnabled && !config.rainAlertsSendEnabled)
+          (!config.rainAlertsEnabled &&
+              !config.rainAlertsSendEnabled &&
+              !config.vigilanceAlertsEnabled &&
+              !config.vigilanceAlertsSendEnabled)
       ? null
       : await FirestoreDeviceAlertStore.connect(
           projectId: config.googleCloudProject!,

@@ -65,6 +65,13 @@ final class RuntimeConfig {
     required this.rainAlertSoftBudgetCents,
     required this.rainAlertHardBudgetCents,
     required this.rainAlertBudgetCurrency,
+    required this.vigilanceAlertsEnabled,
+    required this.vigilanceAlertsSendEnabled,
+    required this.meteoFranceVigilanceApiKey,
+    required this.meteoFranceApplicationId,
+    required this.meteoFranceVigilanceUri,
+    required this.meteoFranceTokenUri,
+    required this.departmentResolverUri,
   });
 
   factory RuntimeConfig.fromEnvironment([Map<String, String>? values]) {
@@ -135,6 +142,32 @@ final class RuntimeConfig {
     if (rainAlertHardBudgetCents <= rainAlertSoftBudgetCents) {
       throw const FormatException(
         'RAIN_ALERT_HARD_BUDGET_CENTS must exceed the soft budget',
+      );
+    }
+    final vigilanceAlertsEnabled = _boolean(
+      source['VIGILANCE_ALERTS_ENABLED'],
+      fallback: false,
+    );
+    final vigilanceAlertsSendEnabled = _boolean(
+      source['VIGILANCE_ALERTS_SEND_ENABLED'],
+      fallback: false,
+    );
+    final meteoFranceVigilanceApiKey = _optional(
+      source['METEO_FRANCE_VIGILANCE_API_KEY'],
+    );
+    final meteoFranceApplicationId = _optional(
+      source['METEO_FRANCE_APPLICATION_ID'],
+    );
+    if (vigilanceAlertsSendEnabled && !vigilanceAlertsEnabled) {
+      throw StateError(
+        'VIGILANCE_ALERTS_SEND_ENABLED requires VIGILANCE_ALERTS_ENABLED',
+      );
+    }
+    if (vigilanceAlertsEnabled &&
+        meteoFranceVigilanceApiKey == null &&
+        meteoFranceApplicationId == null) {
+      throw StateError(
+        'Official vigilance alerts require a Meteo-France credential',
       );
     }
 
@@ -238,6 +271,22 @@ final class RuntimeConfig {
       rainAlertBudgetCurrency:
           (_optional(source['RAIN_ALERT_BUDGET_CURRENCY']) ?? 'EUR')
               .toUpperCase(),
+      vigilanceAlertsEnabled: vigilanceAlertsEnabled,
+      vigilanceAlertsSendEnabled: vigilanceAlertsSendEnabled,
+      meteoFranceVigilanceApiKey: meteoFranceVigilanceApiKey,
+      meteoFranceApplicationId: meteoFranceApplicationId,
+      meteoFranceVigilanceUri: readUri(
+        'METEO_FRANCE_VIGILANCE_URL',
+        'https://public-api.meteofrance.fr/public/DPVigilance/v1/cartevigilance/encours',
+      ),
+      meteoFranceTokenUri: readUri(
+        'METEO_FRANCE_TOKEN_URL',
+        'https://portail-api.meteofrance.fr/token',
+      ),
+      departmentResolverUri: readUri(
+        'DEPARTMENT_RESOLVER_URL',
+        'https://geo.api.gouv.fr/communes',
+      ),
     );
   }
 
@@ -276,6 +325,13 @@ final class RuntimeConfig {
   final int rainAlertSoftBudgetCents;
   final int rainAlertHardBudgetCents;
   final String rainAlertBudgetCurrency;
+  final bool vigilanceAlertsEnabled;
+  final bool vigilanceAlertsSendEnabled;
+  final String? meteoFranceVigilanceApiKey;
+  final String? meteoFranceApplicationId;
+  final Uri meteoFranceVigilanceUri;
+  final Uri meteoFranceTokenUri;
+  final Uri departmentResolverUri;
 
   bool get isProduction => environment == AppEnvironment.production;
 

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../app/theme/chetiwa_tokens.dart';
 import '../../../../core/location/coordinates.dart';
@@ -171,6 +172,13 @@ final class _WeatherViewState extends State<_WeatherView>
 
   void _openRainAlert() {
     if (!mounted) return;
+    final official = _alertNavigationController.takeOfficial();
+    if (official != null) {
+      unawaited(
+        launchUrl(official.officialUrl, mode: LaunchMode.externalApplication),
+      );
+      return;
+    }
     final intent = _alertNavigationController.take();
     if (intent == null) return;
     final location = ChetiwaLocation(

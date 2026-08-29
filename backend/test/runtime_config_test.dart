@@ -20,6 +20,8 @@ void main() {
     expect(config.analyticsConsentPromptEnabled, isFalse);
     expect(config.rainAlertsEnabled, isFalse);
     expect(config.rainAlertsSendEnabled, isFalse);
+    expect(config.vigilanceAlertsEnabled, isFalse);
+    expect(config.vigilanceAlertsSendEnabled, isFalse);
     expect(config.rainAlertSoftBudgetCents, 2500);
     expect(config.rainAlertHardBudgetCents, 5000);
   });
@@ -125,6 +127,34 @@ void main() {
     expect(config.rainAlertMaxConcurrentCells, 6);
     expect(config.rainAlertSoftBudgetCents, 3000);
     expect(config.rainAlertHardBudgetCents, 6000);
+  });
+
+  test('parses official vigilance worker credentials and switches', () {
+    final config = RuntimeConfig.fromEnvironment(const <String, String>{
+      'VIGILANCE_ALERTS_ENABLED': 'true',
+      'VIGILANCE_ALERTS_SEND_ENABLED': 'true',
+      'METEO_FRANCE_APPLICATION_ID': 'encoded-application-id',
+    });
+
+    expect(config.vigilanceAlertsEnabled, isTrue);
+    expect(config.vigilanceAlertsSendEnabled, isTrue);
+    expect(config.meteoFranceApplicationId, 'encoded-application-id');
+    expect(config.meteoFranceVigilanceUri.host, 'public-api.meteofrance.fr');
+  });
+
+  test('rejects an official vigilance worker without credentials', () {
+    expect(
+      () => RuntimeConfig.fromEnvironment(const <String, String>{
+        'VIGILANCE_ALERTS_ENABLED': 'true',
+      }),
+      throwsStateError,
+    );
+    expect(
+      () => RuntimeConfig.fromEnvironment(const <String, String>{
+        'VIGILANCE_ALERTS_SEND_ENABLED': 'true',
+      }),
+      throwsStateError,
+    );
   });
 
   test('parses monetization feature flags and validates rollout', () {

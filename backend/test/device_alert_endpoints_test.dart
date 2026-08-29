@@ -44,6 +44,61 @@ void main() {
     expect(jsonEncode(body), isNot(contains('ownerHash')));
   });
 
+  test('resolves and stores an official vigilance department', () async {
+    final resolver = _DepartmentResolver(
+      const FrenchDepartment(code: '75', name: 'Paris'),
+    );
+    final app = createApp(
+      config: RuntimeConfig.fromEnvironment(const <String, String>{}),
+      now: () => instant,
+      departmentResolver: resolver,
+      deviceAlertStore: InMemoryDeviceAlertStore(now: () => instant),
+    );
+    await app(_jsonRequest('POST', '/v1/devices', _deviceBody()));
+    final response = await app(
+      _jsonRequest('POST', '/v1/alerts', <String, Object?>{
+        ..._alertBody(),
+        'enabled': false,
+        'vigilance': <String, Object?>{
+          'enabled': true,
+          'minimumLevel': 'orange',
+          'phenomena': <String>['thunderstorms', 'heatwave'],
+        },
+      }),
+    );
+    final body = await _body(response);
+    final alert =
+        (body['data'] as Map<String, Object?>)['alert'] as Map<String, Object?>;
+    final vigilance = alert['vigilance'] as Map<String, Object?>;
+
+    expect(response.statusCode, 201);
+    expect(resolver.calls, 1);
+    expect(vigilance['enabled'], isTrue);
+    expect(vigilance['departmentCode'], '75');
+    expect(vigilance['departmentName'], 'Paris');
+    expect(vigilance['phenomena'], <String>['thunderstorms', 'heatwave']);
+
+    final moved = await app(
+      _jsonRequest('PATCH', '/v1/alerts/${alert['id']}', <String, Object?>{
+        'location': <String, Object?>{
+          'label': 'Lyon, France',
+          'latitude': 45.764,
+          'longitude': 4.8357,
+          'timeZone': 'Europe/Paris',
+        },
+      }),
+    );
+    final movedBody = await _body(moved);
+    final movedAlert =
+        (movedBody['data'] as Map<String, Object?>)['alert']
+            as Map<String, Object?>;
+    expect(
+      (movedAlert['vigilance'] as Map<String, Object?>)['enabled'],
+      isFalse,
+      reason: 'A stale department must never survive a location change.',
+    );
+  });
+
   test('supports isolated alert CRUD and device cascade deletion', () async {
     final app = localApp();
     await app(_jsonRequest('POST', '/v1/devices', _deviceBody()));
@@ -258,3 +313,19 @@ Future<Map<String, Object?>> _body(Response response) async =>
 Future<String?> _errorCode(Response response) async =>
     ((await _body(response))['error'] as Map<String, Object?>)['code']
         as String?;
+
+final class _DepartmentResolver implements DepartmentResolver {
+  _DepartmentResolver(this.department);
+
+  final FrenchDepartment? department;
+  int calls = 0;
+
+  @override
+  Future<FrenchDepartment?> resolve({
+    required double latitude,
+    required double longitude,
+  }) async {
+    calls += 1;
+    return department;
+  }
+}

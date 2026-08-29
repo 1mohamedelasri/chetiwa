@@ -15,6 +15,7 @@ import 'request_rate_limiter.dart';
 import 'runtime_config.dart';
 import 'shared_counter.dart';
 import 'tile_response_cache.dart';
+import 'vigilance_services.dart';
 
 typedef _Loader = Future<Map<String, Object?>> Function();
 
@@ -30,6 +31,7 @@ Handler createApp({
   DistributedRadarQuotaGuard? distributedRadarQuota,
   TileResponseCache? tileCache,
   OperationalMetrics? operationalMetrics,
+  DepartmentResolver? departmentResolver,
 }) {
   final gateway = providers ?? ProviderGateway(config: config);
   final responseCache = cache ?? JsonResponseCache();
@@ -77,6 +79,9 @@ Handler createApp({
       (config.environment == AppEnvironment.local
           ? InMemoryDeviceAlertStore(now: clock)
           : const UnavailableDeviceAlertStore());
+  final departmentLookup =
+      departmentResolver ??
+      GeoApiDepartmentResolver(endpoint: config.departmentResolverUri);
 
   final router = Router()
     ..get('/healthz', (Request request) {
@@ -510,7 +515,7 @@ Handler createApp({
         final body = await _readJsonObject(request);
         final alert = await stateStore.createAlert(
           ownerHash,
-          _alertDraft(body),
+          await _alertDraft(body, departmentLookup),
         );
         return _dataResponse(
           <String, Object?>{'alert': _alertJson(alert)},
@@ -526,7 +531,7 @@ Handler createApp({
         final ownerHash = _installationOwnerHash(request);
         _validateAlertId(alertId);
         final body = await _readJsonObject(request);
-        final changes = _alertChanges(body);
+        final changes = await _alertChanges(body, departmentLookup);
         if (changes.isEmpty) {
           throw const ApiException(
             statusCode: 400,
@@ -814,29 +819,154 @@ DeviceRegistration _deviceRegistration(Map<String, Object?> body) {
   );
 }
 
-AlertRuleDraft _alertDraft(Map<String, Object?> body) => AlertRuleDraft(
-  location: _alertLocation(_requiredObject(body, 'location')),
-  leadMinutes: _leadMinutes(body['leadMinutes']),
-  minimumIntensity: _minimumIntensity(body['minimumIntensity']),
-  quietHours: _quietHours(_requiredObject(body, 'quietHours')),
-  enabled: _requiredBool(body, 'enabled'),
-);
+Future<AlertRuleDraft> _alertDraft(
+  Map<String, Object?> body,
+  DepartmentResolver resolver,
+) async {
+  final location = _alertLocation(_requiredObject(body, 'location'));
+  return AlertRuleDraft(
+    location: location,
+    leadMinutes: _leadMinutes(body['leadMinutes']),
+    minimumIntensity: _minimumIntensity(body['minimumIntensity']),
+    quietHours: _quietHours(_requiredObject(body, 'quietHours')),
+    enabled: _requiredBool(body, 'enabled'),
+    vigilance: await _vigilanceSettings(body['vigilance'], location, resolver),
+  );
+}
 
-AlertRuleChanges _alertChanges(Map<String, Object?> body) => AlertRuleChanges(
-  location: body.containsKey('location')
+Future<AlertRuleChanges> _alertChanges(
+  Map<String, Object?> body,
+  DepartmentResolver resolver,
+) async {
+  final location = body.containsKey('location')
       ? _alertLocation(_requiredObject(body, 'location'))
-      : null,
-  leadMinutes: body.containsKey('leadMinutes')
-      ? _leadMinutes(body['leadMinutes'])
-      : null,
-  minimumIntensity: body.containsKey('minimumIntensity')
-      ? _minimumIntensity(body['minimumIntensity'])
-      : null,
-  quietHours: body.containsKey('quietHours')
-      ? _quietHours(_requiredObject(body, 'quietHours'))
-      : null,
-  enabled: body.containsKey('enabled') ? _requiredBool(body, 'enabled') : null,
-);
+      : null;
+  final vigilance = body.containsKey('vigilance')
+      ? await _vigilanceSettings(body['vigilance'], location, resolver)
+      : null;
+  return AlertRuleChanges(
+    location: location,
+    leadMinutes: body.containsKey('leadMinutes')
+        ? _leadMinutes(body['leadMinutes'])
+        : null,
+    minimumIntensity: body.containsKey('minimumIntensity')
+        ? _minimumIntensity(body['minimumIntensity'])
+        : null,
+    quietHours: body.containsKey('quietHours')
+        ? _quietHours(_requiredObject(body, 'quietHours'))
+        : null,
+    enabled: body.containsKey('enabled')
+        ? _requiredBool(body, 'enabled')
+        : null,
+    vigilance: vigilance,
+  );
+}
+
+Future<VigilanceAlertSettings> _vigilanceSettings(
+  Object? raw,
+  AlertLocation? location,
+  DepartmentResolver resolver,
+) async {
+  if (raw == null) return const VigilanceAlertSettings();
+  if (raw is! Map<String, Object?>) {
+    throw const ApiException(
+      statusCode: 400,
+      code: 'invalid_vigilance',
+      message: 'vigilance must be a JSON object',
+    );
+  }
+  final enabled = _optionalBool(raw, 'enabled', fallback: false);
+  final levelName =
+      _optionalString(raw, 'minimumLevel', maximumLength: 16) ??
+      VigilanceLevel.orange.name;
+  final minimumLevel = VigilanceLevel.values
+      .where((value) => value.name == levelName)
+      .firstOrNull;
+  if (minimumLevel == null) {
+    throw const ApiException(
+      statusCode: 400,
+      code: 'invalid_vigilance_level',
+      message: 'minimumLevel must be yellow, orange or red',
+    );
+  }
+  final rawPhenomena = raw['phenomena'];
+  final names =
+      rawPhenomena ??
+      VigilancePhenomenon.values
+          .where((value) => value != VigilancePhenomenon.coastalFlooding)
+          .map((value) => value.name)
+          .toList(growable: false);
+  if (names is! List || names.any((value) => value is! String)) {
+    throw const ApiException(
+      statusCode: 400,
+      code: 'invalid_vigilance_phenomena',
+      message: 'phenomena must be a list of supported category names',
+    );
+  }
+  final phenomena = <VigilancePhenomenon>{};
+  for (final name in names.cast<String>()) {
+    final matches = VigilancePhenomenon.values.where(
+      (value) => value.name == name,
+    );
+    if (matches.isEmpty ||
+        matches.first == VigilancePhenomenon.coastalFlooding) {
+      throw const ApiException(
+        statusCode: 400,
+        code: 'invalid_vigilance_phenomena',
+        message: 'One or more vigilance categories are not supported',
+      );
+    }
+    phenomena.add(matches.first);
+  }
+  if (enabled && phenomena.isEmpty) {
+    throw const ApiException(
+      statusCode: 400,
+      code: 'empty_vigilance_phenomena',
+      message: 'At least one vigilance category is required',
+    );
+  }
+  if (!enabled) {
+    return VigilanceAlertSettings(
+      enabled: false,
+      minimumLevel: minimumLevel,
+      phenomena: phenomena,
+    );
+  }
+  if (location == null) {
+    throw const ApiException(
+      statusCode: 400,
+      code: 'vigilance_location_required',
+      message: 'location is required when official alerts are enabled',
+    );
+  }
+  final FrenchDepartment? department;
+  try {
+    department = await resolver.resolve(
+      latitude: location.latitude,
+      longitude: location.longitude,
+    );
+  } on Object {
+    throw const ApiException(
+      statusCode: 503,
+      code: 'department_resolver_unavailable',
+      message: 'The official vigilance area resolver is unavailable',
+    );
+  }
+  if (department == null) {
+    throw const ApiException(
+      statusCode: 422,
+      code: 'outside_vigilance_area',
+      message: 'This location is outside the supported French vigilance area',
+    );
+  }
+  return VigilanceAlertSettings(
+    enabled: true,
+    minimumLevel: minimumLevel,
+    phenomena: phenomena,
+    departmentCode: department.code,
+    departmentName: department.name,
+  );
+}
 
 AlertLocation _alertLocation(Map<String, Object?> body) {
   final latitude = _numberField(body, 'latitude', -90, 90);
@@ -927,6 +1057,15 @@ Map<String, Object?> _alertJson(AlertRuleRecord alert) => <String, Object?>{
     'end': alert.quietHours.end,
   },
   'enabled': alert.enabled,
+  'vigilance': <String, Object?>{
+    'enabled': alert.vigilance.enabled,
+    'minimumLevel': alert.vigilance.minimumLevel.name,
+    'phenomena': alert.vigilance.phenomena
+        .map((value) => value.name)
+        .toList(growable: false),
+    if (alert.vigilance.departmentCode case final code?) 'departmentCode': code,
+    if (alert.vigilance.departmentName case final name?) 'departmentName': name,
+  },
   'createdAt': alert.createdAt.toIso8601String(),
   'updatedAt': alert.updatedAt.toIso8601String(),
 };

@@ -53,6 +53,20 @@ gcloud firestore fields ttls update expiresAt \
 gcloud firestore fields ttls update expiresAt \
   --project="${project_id}" \
   --database="${database_id}" \
+  --collection-group=vigilanceStates \
+  --enable-ttl \
+  --quiet
+
+gcloud firestore fields ttls update expiresAt \
+  --project="${project_id}" \
+  --database="${database_id}" \
+  --collection-group=vigilanceDeliveries \
+  --enable-ttl \
+  --quiet
+
+gcloud firestore fields ttls update expiresAt \
+  --project="${project_id}" \
+  --database="${database_id}" \
   --collection-group=alertCellSchedules \
   --enable-ttl \
   --quiet
@@ -68,7 +82,7 @@ gcloud projects add-iam-policy-binding "${project_id}" \
   --quiet >/dev/null
 
 firebase deploy \
-  --only firestore:rules \
+  --only firestore \
   --project="${project_id}" \
   --config="${script_dir}/firebase.json" \
   --non-interactive
