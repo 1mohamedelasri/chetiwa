@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:googleapis/firestore/v1.dart' as firestore;
@@ -900,7 +901,10 @@ final class FirestoreDeviceAlertStore
       return await operation();
     } on ApiException {
       rethrow;
-    } on firestore.DetailedApiRequestError {
+    } on firestore.DetailedApiRequestError catch (error) {
+      stderr.writeln(
+        'Firestore request failed (status=${error.status}): ${error.message}',
+      );
       throw ApiException(
         statusCode: 503,
         code: 'persistent_store_unavailable',

@@ -16,6 +16,8 @@ docker network inspect librewxr_default >/dev/null
 credential=/opt/chetiwa/secrets/chetiwa-api-firestore.json
 test -r \"\$credential\"
 test \"\$(stat -c %a \"\$credential\")\" = 600
+test \"\$(stat -c %u \"\$credential\")\" = 65532
+test \"\$(stat -c %g \"\$credential\")\" = 65532
 mkdir -p '$staging/backend'"
 rsync -az --delete \
   --exclude '.dart_tool/' \
