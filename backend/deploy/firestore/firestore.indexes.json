@@ -12,6 +12,22 @@
   "fieldOverrides": [
     {
       "collectionGroup": "alerts",
+      "fieldPath": "enabled",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
+    {
+      "collectionGroup": "alerts",
+      "fieldPath": "cellKey",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
+    {
+      "collectionGroup": "alerts",
       "fieldPath": "vigilance.enabled",
       "indexes": [
         { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" },
