@@ -11,7 +11,12 @@ release_id="$(date -u +%Y%m%dT%H%M%SZ)"
 staging="/tmp/chetiwa-api-release-$release_id"
 backup="$remote_root/backend.backup-$release_id"
 
-ssh "$server" "set -eu; docker network inspect librewxr_default >/dev/null; mkdir -p '$staging/backend'"
+ssh "$server" "set -eu
+docker network inspect librewxr_default >/dev/null
+credential=/opt/chetiwa/secrets/chetiwa-api-firestore.json
+test -r \"\$credential\"
+test \"\$(stat -c %a \"\$credential\")\" = 600
+mkdir -p '$staging/backend'"
 rsync -az --delete \
   --exclude '.dart_tool/' \
   --exclude 'build/' \

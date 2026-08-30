@@ -6,6 +6,12 @@ services:
     image: chetiwa-api:local
     env_file:
       - production.env
+    environment:
+      # The credential stays outside the release tree and is never copied into
+      # the image. Google client libraries discover it through ADC.
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google-application-credentials.json
+    volumes:
+      - /opt/chetiwa/secrets/chetiwa-api-firestore.json:/run/secrets/google-application-credentials.json:ro
     ports:
       # Cloudflared runs with host networking and reaches this loopback port.
       # The API is never exposed directly on the public Hetzner interface.
