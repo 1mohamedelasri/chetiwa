@@ -215,7 +215,6 @@ final class FirestoreDeviceAlertStore
     try {
       await _api.projects.databases.documents.createDocument(
         firestore.Document(
-          name: name,
           fields: <String, firestore.Value>{
             'runId': _string(runId),
             'createdAt': _timestamp(now),
@@ -362,7 +361,7 @@ final class FirestoreDeviceAlertStore
       _translate(() async {
         try {
           await _api.projects.databases.documents.createDocument(
-            _deliveryDocument(delivery),
+            _forCreate(_deliveryDocument(delivery)),
             _documents,
             'alertDeliveries',
             documentId: delivery.eventId,
@@ -490,7 +489,7 @@ final class FirestoreDeviceAlertStore
       _translate(() async {
         try {
           await _api.projects.databases.documents.createDocument(
-            _vigilanceDeliveryDocument(delivery),
+            _forCreate(_vigilanceDeliveryDocument(delivery)),
             _documents,
             'vigilanceDeliveries',
             documentId: delivery.eventId,
@@ -764,7 +763,7 @@ final class FirestoreDeviceAlertStore
       );
       try {
         await _api.projects.databases.documents.createDocument(
-          _alertDocument(record),
+          _forCreate(_alertDocument(record)),
           _deviceName(ownerHash),
           'alerts',
           documentId: id,
@@ -1172,6 +1171,9 @@ final class FirestoreDeviceAlertStore
       'expiresAt': _timestamp(delivery.expiresAt),
     },
   );
+
+  firestore.Document _forCreate(firestore.Document document) =>
+      firestore.Document(fields: document.fields);
 
   ({VigilanceDeliveryDraft draft, int attempts, DateTime nextAttemptAt})
   _pendingVigilanceDelivery(firestore.Document document) {

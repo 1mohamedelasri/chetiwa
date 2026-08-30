@@ -381,6 +381,19 @@ final class _FakeFirestore {
       final name = '$resourceName/$id';
       if (documents.containsKey(name)) return _error(409);
       final document = jsonDecode(request.body) as Map<String, Object?>;
+      if (document.containsKey('name')) {
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'error': <String, Object?>{
+              'code': 400,
+              'message': 'document.name must not be set',
+              'status': 'INVALID_ARGUMENT',
+            },
+          }),
+          400,
+          headers: const <String, String>{'content-type': 'application/json'},
+        );
+      }
       documents[name] = document;
       return _json(<String, Object?>{'name': name, ...document});
     }
