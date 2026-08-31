@@ -51,7 +51,7 @@ dependencies:
   firebase_crashlytics: ^5.3.0
   firebase_messaging: ^16.6.0
   flutter_timezone: ^5.1.0
-  package_info_plus: ^9.0.1
+  package_info_plus: ^10.2.1
   flutter_local_notifications: ^18.0.1
   in_app_purchase: ^3.2.3
   google_mobile_ads: ^9.1.0
