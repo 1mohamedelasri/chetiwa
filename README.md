@@ -96,6 +96,9 @@ flutter analyze lib test integration_test
 flutter test
 ```
 
+Visual tests use exact macOS and Linux reference images. Linux references were
+reviewed on Ubuntu 24.04 with Flutter 3.47.1, matching CI and the release workflow.
+
 ## Implemented
 
 - Material 3 Chetiwa design tokens and dark theme

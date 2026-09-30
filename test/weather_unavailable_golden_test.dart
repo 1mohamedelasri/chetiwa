@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/platform_goldens.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -42,7 +44,7 @@ void main() {
     expect(tester.takeException(), isNull);
     await expectLater(
       find.byType(Scaffold),
-      matchesGoldenFile('goldens/weather_unavailable.png'),
+      matchesGoldenFile(platformGoldenFile('weather_unavailable.png')),
     );
   });
 }

@@ -12,6 +12,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tz;
 
+import 'support/platform_goldens.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   tz.initializeTimeZones();
@@ -70,7 +72,7 @@ void main() {
     expect(tester.takeException(), isNull);
     await expectLater(
       find.byType(Scaffold),
-      matchesGoldenFile('goldens/radar_fallback.png'),
+      matchesGoldenFile(platformGoldenFile('radar_fallback.png')),
     );
     await tester.pumpWidget(const SizedBox.shrink());
   });
