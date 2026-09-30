@@ -36,7 +36,7 @@ python3 android/release/build.py \
 ```
 
 The version/build values above are examples, not a reservation in either store.
-Complete `flutter analyze` and the app tests before the build; CI requires them.
+Complete `flutter analyze lib test integration_test` and the app tests before the build; CI requires them.
 `--verify-only` rechecks an existing release AAB against the supplied version and
 the configured upload certificate, without rebuilding it. It checks bundle
 structure, manifest and signatures; it cannot recover Dart build defines or

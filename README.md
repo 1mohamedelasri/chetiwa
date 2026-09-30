@@ -92,7 +92,7 @@ The release workflow also requires the GitHub Actions secrets
 ## Verify
 
 ```sh
-flutter analyze
+flutter analyze lib test integration_test
 flutter test
 ```
 

@@ -55,7 +55,7 @@ jobs:
       - name: Verify release source
         run: |
           dart format --output=none --set-exit-if-changed lib test integration_test
-          flutter analyze
+          flutter analyze lib test integration_test
           flutter test --concurrency=1
 
   android:
