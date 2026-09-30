@@ -14,6 +14,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  FLUTTER_VERSION: '3.47.1'
+
 jobs:
   verify-backend:
     name: Verify Dart backend
@@ -56,6 +59,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       - name: Fetch dependencies
@@ -72,6 +76,15 @@ jobs:
 
       - name: Run tests
         run: flutter test --concurrency=1
+
+      - name: Keep visual comparison failures for review
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chetiwa-golden-failures
+          path: test/failures/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Build Android debug APK
         run: flutter build apk --debug
