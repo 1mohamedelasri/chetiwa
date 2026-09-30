@@ -32,6 +32,9 @@ final class RuntimeConfig {
   const RuntimeConfig({
     required this.environment,
     required this.port,
+    required this.trustCloudflareProxy,
+    required this.networkRateLimitPerMinute,
+    required this.radarNetworkRateLimitPerMinute,
     required this.googleCloudProject,
     required this.firestoreDatabaseId,
     required this.openMeteoForecastUri,
@@ -184,6 +187,18 @@ final class RuntimeConfig {
     return RuntimeConfig(
       environment: environment,
       port: port,
+      trustCloudflareProxy: _boolean(
+        source['TRUST_CLOUDFLARE_PROXY'],
+        fallback: false,
+      ),
+      networkRateLimitPerMinute: _positiveInt(
+        source['NETWORK_RATE_LIMIT_PER_MINUTE'],
+        fallback: 1200,
+      ),
+      radarNetworkRateLimitPerMinute: _positiveInt(
+        source['RADAR_NETWORK_RATE_LIMIT_PER_MINUTE'],
+        fallback: 6000,
+      ),
       googleCloudProject: googleCloudProject,
       firestoreDatabaseId:
           _optional(source['FIRESTORE_DATABASE_ID']) ?? '(default)',
@@ -234,7 +249,7 @@ final class RuntimeConfig {
       // public API can cache, meter and replace it without an app release.
       radarTileUrlTemplate: _optionalUrlTemplate(
         source['RADAR_TILE_URL_TEMPLATE'] ??
-            'https://api.librewxr.net{frame}/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2',
+            'https://api.librewxr.net{frame}/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v3',
         trustedHttpHost: 'librewxr',
       ),
       sharedCounterUrl: _optionalUrl(source['SHARED_COUNTER_URL']),
@@ -314,6 +329,9 @@ final class RuntimeConfig {
 
   final AppEnvironment environment;
   final int port;
+  final bool trustCloudflareProxy;
+  final int networkRateLimitPerMinute;
+  final int radarNetworkRateLimitPerMinute;
   final String? googleCloudProject;
   final String firestoreDatabaseId;
   final Uri openMeteoForecastUri;

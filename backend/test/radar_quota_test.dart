@@ -1,4 +1,5 @@
 import 'package:chetiwa_backend/chetiwa_backend.dart';
+import 'package:chetiwa_backend/src/api_exception.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -153,5 +154,83 @@ void main() {
     expect(first.used, 1);
     expect(retry.used, 1);
     expect(retry.remaining, 1);
+  });
+
+  test(
+    'unknown owners fail closed at capacity without resetting live quotas',
+    () {
+      final tracker = RadarQuotaTracker(
+        maximumOwners: 1,
+        policy: const RadarQuotaPolicy(freeSessions: 1),
+      );
+      final now = DateTime.utc(2026, 9, 19);
+      tracker.evaluate(
+        ownerKey: 'existing',
+        sessionId: 'one',
+        plan: RadarPlan.free,
+        now: now,
+      );
+      expect(
+        () => tracker.evaluate(
+          ownerKey: 'new',
+          sessionId: 'one',
+          plan: RadarPlan.free,
+          now: now,
+        ),
+        throwsA(
+          isA<ApiException>().having(
+            (error) => error.code,
+            'code',
+            'radar_quota_capacity',
+          ),
+        ),
+      );
+      expect(
+        tracker
+            .evaluate(
+              ownerKey: 'existing',
+              sessionId: 'two',
+              plan: RadarPlan.free,
+              now: now,
+            )
+            .allowed,
+        isFalse,
+      );
+      expect(
+        tracker
+            .evaluate(
+              ownerKey: 'new',
+              sessionId: 'one',
+              plan: RadarPlan.free,
+              now: now.add(const Duration(days: 30)),
+            )
+            .allowed,
+        isTrue,
+      );
+    },
+  );
+
+  test('unlimited distinct session IDs saturate above the largest plan', () {
+    final tracker = RadarQuotaTracker(
+      policy: const RadarQuotaPolicy(freeSessions: 2, premiumSessions: 5),
+    );
+    final now = DateTime.utc(2026, 9, 19);
+    for (var index = 0; index < 10000; index++) {
+      final result = tracker.evaluate(
+        ownerKey: 'existing',
+        sessionId: 'session-$index',
+        plan: RadarPlan.free,
+        now: now,
+      );
+      expect(result.used, lessThanOrEqualTo(6));
+    }
+    final upgraded = tracker.evaluate(
+      ownerKey: 'existing',
+      sessionId: 'upgrade',
+      plan: RadarPlan.premium,
+      now: now,
+    );
+    expect(upgraded.allowed, isFalse);
+    expect(upgraded.used, 6);
   });
 }

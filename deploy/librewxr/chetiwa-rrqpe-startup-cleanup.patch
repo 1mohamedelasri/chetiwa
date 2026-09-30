@@ -1,0 +1,54 @@
+diff --git a/src/librewxr/sources/world/rrqpe/grid.py b/src/librewxr/sources/world/rrqpe/grid.py
+--- a/src/librewxr/sources/world/rrqpe/grid.py
++++ b/src/librewxr/sources/world/rrqpe/grid.py
+@@ -274,9 +274,31 @@ class RRQPEGrid:
+             self._persistent = False
+         self._memmap_dir.mkdir(parents=True, exist_ok=True)
+         # Drop stale .tmp files from a crash mid-write.
+         for path in self._memmap_dir.glob("*.tmp"):
+             path.unlink(missing_ok=True)
++        # Persistent RRQPE scan memmaps are fetch-side scratch data. This
++        # class does not restore them into ``_timesteps`` after a restart, so
++        # leaving them behind makes every previous process's working window
++        # invisible to the normal eviction loop. On a small persistent volume
++        # that accumulated roughly 300 MB after every recreate and eventually
++        # filled the host filesystem. Remove the unreachable files before the
++        # new process downloads its bounded recent window. Restored public
++        # radar frames live in the separate frame store and remain available
++        # during this refresh.
++        stale_memmaps = list(self._memmap_dir.glob("*.dat"))
++        stale_bytes = 0
++        for path in stale_memmaps:
++            try:
++                stale_bytes += path.stat().st_size
++                path.unlink(missing_ok=True)
++            except OSError:
++                logger.warning("Unable to remove stale RRQPE memmap %s", path)
++        if stale_memmaps:
++            logger.info(
++                "Removed %d stale RRQPE memmap(s) (%0.1f MiB)",
++                len(stale_memmaps), stale_bytes / (1024 * 1024),
++            )
+         logger.debug(
+             "RRQPE memmap directory: %s (persistent=%s, downsample=%d)",
+             self._memmap_dir, self._persistent, self._downsample,
+         )
+diff --git a/tests/test_rrqpe_grid.py b/tests/test_rrqpe_grid.py
+--- a/tests/test_rrqpe_grid.py
++++ b/tests/test_rrqpe_grid.py
+@@ -609,6 +609,15 @@ class TestBootHygiene:
+         grid = RRQPEGrid(cache_dir=tmp_path)
+         assert not stale.exists()
+         await grid.close()
++
++    async def test_unrestored_persistent_memmaps_swept_at_boot(self, tmp_path):
++        cache_dir = tmp_path / "rrqpe"
++        cache_dir.mkdir(parents=True)
++        stale = cache_dir / "123.dat"
++        stale.write_bytes(b"\x00" * 8)
++        grid = RRQPEGrid(cache_dir=tmp_path)
++        assert not stale.exists()
++        await grid.close()
+ 
+ 
+ # ── Radar-source fetch protocol (fetch_frame slotting) ─────────────────

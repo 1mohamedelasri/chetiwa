@@ -9,11 +9,12 @@ public_base_url="${CHETIWA_RADAR_BASE_URL:-https://radar.ezplatforms.com}"
 api_local_base_url="${CHETIWA_API_LOCAL_BASE_URL:-http://127.0.0.1:8081}"
 api_public_base_url="${CHETIWA_API_BASE_URL:-https://chetiwa-api.ezplatforms.com}"
 state_dir="${CHETIWA_RADAR_PREWARM_STATE_DIR:-/var/lib/chetiwa-radar-prewarm}"
-scheme="${CHETIWA_RADAR_PREWARM_SCHEME:-14}"
-# name:zoom:x:y. One tile initializes the regional frame/palette path without
-# attempting an expensive world-wide pyramid. Override as a space-separated
-# list when the launch geography changes.
-warm_target_spec="${CHETIWA_RADAR_PREWARM_TARGETS:-paris-z5:5:16:11 paris-z7:7:64:44 paris-z9:9:259:176 nashville-z5:5:8:12 nashville-z7:7:33:50 nashville-z9:9:132:200}"
+scheme="${CHETIWA_RADAR_PREWARM_SCHEME:-15}"
+# name:zoom:x:y. The app opens around display z11 and derives its pixels from
+# z10 source tiles, so warm the complete 2x2 source viewport instead of lower
+# zooms that do not share a LibreWXR/Cloudflare cache key with the phone.
+# Override as a space-separated list when the launch geography changes.
+warm_target_spec="${CHETIWA_RADAR_PREWARM_TARGETS:-paris-z10-nw:10:518:352 paris-z10-ne:10:519:352 paris-z10-sw:10:518:353 paris-z10-se:10:519:353 new-york-z10-nw:10:301:385 new-york-z10-ne:10:302:385 new-york-z10-sw:10:301:386 new-york-z10-se:10:302:386 nashville-z10-nw:10:264:400 nashville-z10-ne:10:265:400 nashville-z10-sw:10:264:401 nashville-z10-se:10:265:401}"
 read -r -a warm_targets <<<"$warm_target_spec"
 
 for command in base64 curl python3 flock; do
@@ -30,7 +31,8 @@ flock -n 9 || exit 0
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
 metadata="$work_dir/metadata.json"
-previous="$state_dir/warmed-api-frames-v3.txt"
+# A frame warmed with another palette does not seed the new origin/API key.
+previous="$state_dir/warmed-api-frames-v4-palette-$scheme-neutral-v1.txt"
 completed="$work_dir/completed.txt"
 touch "$previous" "$completed"
 
@@ -50,23 +52,72 @@ past = [frame for frame in radar.get("past") or [] if isinstance(frame, dict)]
 nowcast = [
     frame for frame in radar.get("nowcast") or [] if isinstance(frame, dict)
 ]
-latest_observation = max(
-    (frame.get("time", 0) for frame in past if isinstance(frame.get("time"), int)),
-    default=0,
-)
-keys = {
-    frame["path"]
+past_times = {
+    frame["time"]
     for frame in past
-    if isinstance(frame.get("path"), str)
+    if isinstance(frame.get("time"), int)
 }
-# Forecast PNGs are versioned by the latest observation in both the backend
-# proxy and the mobile direct-fallback URL. Seed that exact Cloudflare cache
-# key; warming the unversioned URL left real clients paying the cold render.
-keys.update(
-    f'{frame["path"]}|{latest_observation}'
+nowcast_times = [
+    frame["time"]
     for frame in nowcast
-    if isinstance(frame.get("path"), str) and latest_observation > 0
+    if isinstance(frame.get("time"), int)
+]
+
+# An observation is published before its replacement nowcast is ready. Binding
+# the still-old future paths to that newest observation made every 30-second
+# poll re-render the complete future timeline while LibreWXR was already at
+# peak RAM. Mirror the backend's stable run-anchor selection and only switch
+# cache versions after the matching nowcast generation has appeared.
+latest_raw_observation = max(past_times, default=0)
+first_nowcast = min(nowcast_times, default=0)
+last_nowcast = max(nowcast_times, default=0)
+horizon_anchor = last_nowcast - 120 * 60
+if horizon_anchor > 0 and horizon_anchor in past_times:
+    latest_observation = horizon_anchor
+elif first_nowcast > 0:
+    latest_observation = max(
+        (timestamp for timestamp in past_times if timestamp < first_nowcast),
+        default=0,
+    )
+else:
+    latest_observation = latest_raw_observation
+
+# Warm only the launch handoff: the latest observation and the first nowcast.
+# Warming every advertised timestamp across every representative viewport
+# rendered 120 frame/location pairs immediately after each memory-heavy
+# generation. That work drove the 3 GiB container into swap every ten minutes,
+# while all timestamps share the same coordinate geometry anyway. Once these
+# first two frames seed the geometry and edge path, later animation frames are
+# cheap, bounded on-demand presentations.
+keys = set()
+latest_past = max(
+    (
+        frame
+        for frame in past
+        if isinstance(frame.get("time"), int)
+        and isinstance(frame.get("path"), str)
+    ),
+    key=lambda frame: frame["time"],
+    default=None,
 )
+if latest_past is not None:
+    keys.add(latest_past["path"])
+
+first_future = min(
+    (
+        frame
+        for frame in nowcast
+        if isinstance(frame.get("time"), int)
+        and isinstance(frame.get("path"), str)
+    ),
+    key=lambda frame: frame["time"],
+    default=None,
+)
+# Forecast PNGs are versioned by the matching observation in both the backend
+# proxy and the mobile direct-fallback URL. Seed that exact cache key.
+if first_future is not None and latest_observation > 0:
+    keys.add(f'{first_future["path"]}|{latest_observation}')
+
 for key in sorted(keys):
     print(key)
 PY
@@ -84,7 +135,7 @@ warm_frame() {
     printf 'Invalid prewarm target: %s\n' "$target" >&2
     return 1
   fi
-  path="$frame/256/$zoom/$tile_x/$tile_y/$scheme/1_0.png?presentation=crisp-v2"
+  path="$frame/256/$zoom/$tile_x/$tile_y/$scheme/1_0.png?presentation=neutral-v1"
   if [[ -n "$run" ]]; then
     path="$path&run=$run"
   fi
@@ -104,12 +155,15 @@ warm_frame() {
   # cost. Seed the exact base64 frame URL emitted by /v1/radar/frames.
   frame_id="$(printf '%s' "$frame" | base64 | tr '+/' '-_' | tr -d '=\n')"
   # The .png suffix makes Cloudflare cache the API response as a static asset.
-  api_path="/v1/radar/tiles/$frame_id/$zoom/$tile_x/$tile_y.png"
+  api_path="/v1/radar/tiles/$frame_id/$zoom/$tile_x/$tile_y.png?presentation=neutral-v1"
   if [[ -n "$run" ]]; then
-    api_path="$api_path?run=$run"
+    api_path="$api_path&run=$run"
   fi
+  # The protected loopback call bypasses the tunnel. Identify this local
+  # maintenance caller for the API's explicitly trusted-proxy rate limiter.
   curl --fail --silent --show-error --retry 1 --retry-delay 1 \
     --connect-timeout 3 --max-time 45 --output /dev/null \
+    --header 'CF-Connecting-IP: 127.0.0.1' \
     "$api_local_base_url$api_path" || return 1
   curl --fail --silent --show-error --retry 1 --retry-delay 1 \
     --connect-timeout 3 --max-time 15 --output /dev/null \

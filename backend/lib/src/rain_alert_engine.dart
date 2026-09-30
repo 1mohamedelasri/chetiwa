@@ -73,6 +73,7 @@ final class RainAlertCellSchedule {
     required this.nextCheckAt,
     required this.lastCheckedAt,
     required this.mode,
+    this.version,
   });
 
   final String cellKey;
@@ -81,6 +82,9 @@ final class RainAlertCellSchedule {
   final DateTime nextCheckAt;
   final DateTime lastCheckedAt;
   final RainAlertPollingMode mode;
+
+  /// Opaque store version observed before evaluating subscribers/forecast.
+  final String? version;
 }
 
 abstract interface class RainAlertNowcastProvider {
@@ -203,9 +207,12 @@ abstract interface class RainAlertEngineStore {
 
   Future<List<ActiveRainAlert>> listActiveAlertsForCell(String cellKey);
 
-  Future<void> saveCellSchedule(RainAlertCellSchedule schedule);
+  Future<void> saveCellSchedule(
+    RainAlertCellSchedule schedule, {
+    String? expectedVersion,
+  });
 
-  Future<void> deleteCellSchedule(String cellKey);
+  Future<void> deleteCellSchedule(String cellKey, {String? expectedVersion});
 
   Future<void> saveState(RainAlertState state);
 
@@ -281,7 +288,14 @@ final class RainAlertEngine {
     try {
       final dueSchedules = await _store.listDueCellSchedules(now: startedAt);
       final byCell =
-          <String, ({RainAlertCell cell, List<ActiveRainAlert> alerts})>{};
+          <
+            String,
+            ({
+              RainAlertCell cell,
+              List<ActiveRainAlert> alerts,
+              String? version,
+            })
+          >{};
       var activeAlerts = 0;
       for (final schedule in dueSchedules) {
         final alerts = await _store.listActiveAlertsForCell(schedule.cellKey);
@@ -295,7 +309,10 @@ final class RainAlertEngine {
             )
             .toList(growable: false);
         if (eligible.isEmpty) {
-          await _store.deleteCellSchedule(schedule.cellKey);
+          await _store.deleteCellSchedule(
+            schedule.cellKey,
+            expectedVersion: schedule.version,
+          );
           continue;
         }
         activeAlerts += eligible.length;
@@ -306,6 +323,7 @@ final class RainAlertEngine {
             longitude: schedule.longitude,
           ),
           alerts: eligible,
+          version: schedule.version,
         );
       }
 
@@ -341,7 +359,10 @@ final class RainAlertEngine {
                 now: startedAt,
               );
               try {
-                await _store.saveCellSchedule(schedule);
+                await _store.saveCellSchedule(
+                  schedule,
+                  expectedVersion: group.version,
+                );
               } on Object {
                 // Polling state is a cost optimization, never a reason to
                 // suppress an otherwise valid alert evaluation.
@@ -364,6 +385,7 @@ final class RainAlertEngine {
                     nextCheckAt: startedAt.add(const Duration(minutes: 15)),
                     mode: RainAlertPollingMode.retry,
                   ),
+                  expectedVersion: group.version,
                 );
               } on Object {
                 // A failed retry-state write only causes an earlier retry.

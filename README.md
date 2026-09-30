@@ -34,29 +34,42 @@ Sans `CHETIWA_API_BASE_URL`, le profil développement conserve provisoirement
 les appels directs existants. Ce fallback est automatiquement interdit lorsque
 `CHETIWA_ENV=production`.
 
-### Tester la prévision modèle Premium jusqu'à +120 min
+### Tester l'application et la prévisualisation Premium
 
-Dans Android Studio ou IntelliJ, sélectionner
-**Chetiwa Premium +120 (debug)** dans la liste des configurations puis démarrer
-sur un téléphone ou un simulateur. La configuration JetBrains partagée se
-trouve dans `.run/Chetiwa_Premium_120_debug.run.xml`. Elle utilise les données
-LibreWXR réelles, active localement Chetiwa+ et affiche les trames modèle après
-+60 min. Elle ne simule pas un achat Store et ne peut jamais activer Premium
-lorsque `CHETIWA_ENV=production`.
+Dans Android Studio ou IntelliJ, utiliser les configurations partagées de
+`.run/` :
+
+- **Chetiwa (API, profile)** : parcours normal avec les règles et fonctionnalités
+  disponibles via l'API. À utiliser sur un téléphone physique pour évaluer les
+  performances.
+- **Chetiwa Premium (API, profile)** : même API, avec Chetiwa+ activé localement
+  pour prévisualiser son interface. Les données et l'horizon radar restent
+  limités à ce que le serveur fournit ; cette configuration ne promet pas
+  +120 min et n'active pas un achat Store.
+- **Chetiwa (API, debug)** : développement avec hot reload. Ce mode ne constitue
+  pas une mesure des performances de l'application distribuée.
+
+Ces configurations utilisent `https://chetiwa-api.ezplatforms.com` et désactivent
+le fallback direct vers les fournisseurs. La prévisualisation Premium reste
+réservée à l'environnement `staging` et est ignorée en production.
+
+Après un changement de configuration, arrêter l'application puis la relancer
+avec **Run**. Un hot reload ne remplace pas les paramètres `--dart-define`.
 
 L'équivalent en terminal est :
 
 ```sh
-flutter run \
-  --dart-define=CHETIWA_ENV=development \
+flutter run --profile \
+  --dart-define=CHETIWA_ENV=staging \
+  --dart-define=CHETIWA_API_BASE_URL=https://chetiwa-api.ezplatforms.com \
   --dart-define=CHETIWA_PREMIUM_RADAR_TEST_MODE=true \
-  --dart-define=CHETIWA_ALLOW_DIRECT_PROVIDER_FALLBACK=true
+  --dart-define=CHETIWA_ALLOW_DIRECT_PROVIDER_FALLBACK=false
 ```
 
-Le test automatisé équivalent, exécutable directement depuis IntelliJ sur un
-iPhone ou Android réel, est
-`integration_test/premium_radar_120_smoke_test.dart`. Il vérifie que la dernière
-trame est réellement classée modèle, atteint au moins +120 min et s'affiche.
+`integration_test/premium_radar_120_smoke_test.dart` est un test expérimental
+distinct du chemin API normal : il exige des trames modèle jusqu'à +120 min et
+les paramètres de développement/direct-provider correspondants. Son résultat
+ne valide pas la fluidité du parcours API sur téléphone physique.
 
 Radar uses the native Google Maps SDK on Android and iOS. Hybrid satellite is
 the default for every user; the standard Google map remains selectable. Use

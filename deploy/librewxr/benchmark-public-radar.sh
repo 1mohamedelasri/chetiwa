@@ -35,7 +35,7 @@ probe_one() {
   local content_type cache_status signature valid
   x=$((516 + index % 4))
   y=$((350 + index / 4))
-  url="$base_url$frame/256/$zoom/$x/$y/13/1_0.png"
+  url="$base_url$frame/256/$zoom/$x/$y/15/1_0.png?presentation=neutral-v1"
   headers="$work_dir/$index.headers"
   body="$work_dir/$index.png"
   metrics="$(curl --silent --show-error --connect-timeout 5 --max-time 30 \

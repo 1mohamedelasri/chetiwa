@@ -5,6 +5,21 @@ import 'package:chetiwa_backend/chetiwa_backend.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('oversized tiles never exceed or evict the cache byte budget', () {
+    final cache = TileResponseCache(maxBytes: 4);
+    CachedTileResponse tile(int length) => CachedTileResponse(
+      bytes: Uint8List(length),
+      etag: '$length',
+      storedAt: DateTime.utc(2026, 9, 19),
+    );
+    cache.write('normal', tile(4));
+    cache.write('oversized', tile(5));
+
+    expect(cache.bytes, 4);
+    expect(cache.read('normal'), isNotNull);
+    expect(cache.read('oversized'), isNull);
+  });
+
   test('tile cache evicts least recently used entries and respects bytes', () {
     final cache = TileResponseCache(maxEntries: 2, maxBytes: 4);
     CachedTileResponse tile(String value) => CachedTileResponse(

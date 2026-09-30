@@ -14,17 +14,28 @@ final class ActiveLocationController extends ChangeNotifier {
 
   final LocationRepository _repository;
   ChetiwaLocation? _location;
+  var _selectionGeneration = 0;
+  var _disposed = false;
 
   ChetiwaLocation? get location => _location;
 
   Future<void> _restore() async {
-    final saved = await _repository.getMainLocation();
-    if (saved == null) return;
-    _location = saved;
-    notifyListeners();
+    final generation = _selectionGeneration;
+    try {
+      final saved = await _repository.getMainLocation();
+      if (_disposed || generation != _selectionGeneration || saved == null) {
+        return;
+      }
+      _location = saved;
+      notifyListeners();
+    } on Object {
+      // A failed preferences read must not prevent a fresh location selection.
+    }
   }
 
   Future<void> setActive(ChetiwaLocation location) async {
+    if (_disposed) return;
+    _selectionGeneration++;
     _location = location;
     notifyListeners();
     // The active place is also the user's principal place. Persist it here so
@@ -43,7 +54,15 @@ final class ActiveLocationController extends ChangeNotifier {
   }
 
   void clear() {
+    if (_disposed) return;
+    _selectionGeneration++;
     _location = null;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 }

@@ -5,6 +5,171 @@ ni choisir à la place du propriétaire l'emplacement irréversible de Firestore
 Ne jamais ajouter une clé `.p8`, un JSON de compte de service ou un token push
 au dépôt.
 
+## État opérationnel — 19 septembre 2026
+
+Les deux schedulers du projet `chetiwa`, région `europe-west1`, sont
+**`PAUSED`**, état confirmé par CLI après les vérifications :
+
+| Scheduler | Job Cloud Run | Configuration vérifiée |
+| --- | --- | --- |
+| `chetiwa-rain-alerts-every-5m` | `chetiwa-rain-alerts` | `RAIN_ALERTS_ENABLED=false`, `RAIN_ALERTS_SEND_ENABLED=false` |
+| `chetiwa-vigilance-alerts-every-5m` | `chetiwa-vigilance-alerts` | `VIGILANCE_ALERTS_ENABLED=false`, `VIGILANCE_ALERTS_SEND_ENABLED=false` |
+
+Les 15 exécutions pluie inspectées déclaraient toutes `activeAlerts: 0` et
+`pushSent: 0`. La pause évite les lancements inutiles toutes les cinq minutes.
+La pause seule n'empêche pas une exécution manuelle. Les deux anciens jobs ont
+donc aussi été mis à jour explicitement avec `ENABLED=false` et `SEND=false`,
+puis ces quatre valeurs ont été vérifiées par CLI. Cela bloque leur évaluation
+et leurs envois avec la configuration actuelle, y compris en lancement manuel.
+Aucun job n'a été exécuté pour cette désactivation. **Ne pas réactiver ni
+exécuter les anciennes images, même en shadow mode : elles pourraient encore
+écrire un état privé sans respecter le protocole d'effacement.** Les données
+existantes sont conservées ; créer une règle ne réactive aucun job.
+
+Le scheduler vigilance conservait un état de programmation obsolète datant du
+30 août. Une séquence pause/mise à jour/reprise a rétabli son déclenchement :
+l'exécution automatique `chetiwa-vigilance-alerts-hnnt5` a été créée le
+19 septembre à `11:00:00.991 UTC` et son journal à `11:00:55.662374 UTC`
+indique `status: completed`, `mode: shadow`, `pushSent: 0`. Le scheduler a
+ensuite été suspendu pour maîtriser les coûts. Cette preuve valide le
+déclenchement automatique de l'image alors déployée ; elle ne valide ni les
+nouvelles images décrites ci-dessous ni la réception FCM/APNs sur téléphone.
+
+La seule politique TTL activée et vérifiée pendant cet audit est
+**`alertRunMetrics.expiresAt: ACTIVE`**. Le code fixe son échéance à
+`startedAt + 30 jours`. Ne pas lancer `provision-alert-store.sh` sur le projet
+existant : ce script active huit politiques TTL et modifie aussi IAM et les
+règles Firestore, au-delà du changement approuvé.
+
+L'API Firebase Rules a aussi confirmé que la version Firestore publiée le
+25 août 2026 refuse les lectures et écritures des clients avec
+`allow read, write: if false`. Les accès backend restent régis par IAM.
+
+Le budget Cloud Run affichait 5,03 EUR sur 10 EUR et une prévision de 9,01 EUR
+pour septembre avant cette intervention. Ce sont les coûts suivis hors
+économies, pas nécessairement le montant final à payer. Le plafond de dépenses
+de 10 EUR reste configuré : contrairement à un budget d'alertes uniquement,
+il peut suspendre Cloud Run à 100 %. Les dépenses déjà engagées peuvent encore
+apparaître avec le délai de facturation.
+
+Aucun service web Cloud Run n'était présent lors de la vérification. L'API
+publique `https://chetiwa-api.ezplatforms.com/healthz` répondait HTTP 200 avec
+`{"status":"ok"}` avant et après la suspension.
+
+### Mise à jour des workers existants avant toute reprise
+
+**Les deux images de workers doivent être reconstruites et remplacées avant
+réactivation.** Les anciennes images ne respectent pas les nouvelles
+protections contre les écritures après effacement d'un appareil. Le worker
+pluie doit aussi contenir les écritures/suppressions conditionnelles des
+calendriers de cellules, afin de préserver le réveil d'un nouvel abonné.
+Déployer seulement l'API Hetzner ne met pas à jour ces exécutables Cloud Run.
+
+Le téléversement de l'archive interne vers Cloud Build a été refusé par la
+revue automatique d'approbation, car ce transfert dépasse l'inspection
+autorisée. L'approbation du propriétaire est en attente ; **aucun transfert
+de cette archive n'a été effectué**. La procédure ci-dessous reste à exécuter
+après cette approbation et ne décrit pas un déploiement déjà réalisé.
+
+1. Conserver les deux schedulers `PAUSED` et les quatre drapeaux
+   `ENABLED`/`SEND` à `false`. Attendre la fin de toute ancienne exécution.
+   Relever les digests et la configuration des jobs existants pour
+   comparaison, sans publier les valeurs de secrets. Construire depuis le
+   code corrigé et testé une image backend contenant les deux exécutables,
+   la publier dans Artifact Registry et retenir son digest immuable.
+2. Mettre à jour uniquement l'image et maintenir les deux drapeaux à `false`
+   pour chaque job, jusqu'à vérification de la nouvelle image. Les
+   commandes suivantes préservent les comptes de service, autorisations IAM,
+   commandes d'exécution, références Secret Manager, autres variables et
+   limites existantes. Remplacer le digest d'exemple avant exécution :
+
+   ```sh
+   CHETIWA_WORKER_IMAGE='europe-west1-docker.pkg.dev/chetiwa/chetiwa/chetiwa-backend@sha256:REMPLACER_PAR_LE_DIGEST_VALIDE'
+
+   gcloud run jobs update chetiwa-rain-alerts \
+     --project=chetiwa --region=europe-west1 \
+     --image="$CHETIWA_WORKER_IMAGE" \
+     --update-env-vars=RAIN_ALERTS_ENABLED=false,RAIN_ALERTS_SEND_ENABLED=false
+
+   gcloud run jobs update chetiwa-vigilance-alerts \
+     --project=chetiwa --region=europe-west1 \
+     --image="$CHETIWA_WORKER_IMAGE" \
+     --update-env-vars=VIGILANCE_ALERTS_ENABLED=false,VIGILANCE_ALERTS_SEND_ENABLED=false
+   ```
+
+   Comparer ensuite les configurations : seuls le digest et les drapeaux
+   demandés doivent changer. Les commandes doivent toujours sélectionner
+   `/app/chetiwa-alert-worker` et `/app/chetiwa-vigilance-worker`
+   respectivement. Ne pas réexécuter les scripts de provisionnement pour
+   cette mise à jour. [Référence `gcloud run jobs update`](https://docs.cloud.google.com/sdk/gcloud/reference/run/jobs/update).
+
+   **Pour une mise à jour d'image uniquement, arrêter la procédure ici.**
+   Relire chaque job et comparer son compte de service et sa commande à
+   l'état précédent ; confirmer le nouveau digest, les quatre drapeaux à
+   `false` et les deux schedulers toujours `PAUSED`. Ne pas ajouter
+   `--execute-now`, lancer un job ni reprendre un scheduler dans cette étape.
+   Les essais des étapes suivantes constituent une activation distincte,
+   même sans envoi de notification, et nécessitent leur propre autorisation.
+3. Vérifier le contrôle pluie `alertControl/runtime` dans Firestore **avant
+   tout essai** : son champ `sendEnabled`, s'il existe, remplace le drapeau
+   d'environnement. Il doit être `false`, ou absent avec l'environnement à
+   `false`. Ne pas supprimer le document ni remettre à zéro ses compteurs ou
+   sa coupure budgétaire. Confirmer les nouveaux digests et l'autorisation de
+   ce test shadow, sans contourner un arrêt budgétaire. **Seulement alors**,
+   activer explicitement l'évaluation des nouvelles images en conservant
+   `SEND=false` et les schedulers en pause, puis les exécuter :
+
+   ```sh
+   gcloud run jobs update chetiwa-rain-alerts \
+     --project=chetiwa --region=europe-west1 \
+     --update-env-vars=RAIN_ALERTS_ENABLED=true,RAIN_ALERTS_SEND_ENABLED=false
+   gcloud run jobs execute chetiwa-rain-alerts \
+     --project=chetiwa --region=europe-west1 --wait
+
+   gcloud run jobs update chetiwa-vigilance-alerts \
+     --project=chetiwa --region=europe-west1 \
+     --update-env-vars=VIGILANCE_ALERTS_ENABLED=true,VIGILANCE_ALERTS_SEND_ENABLED=false
+   gcloud run jobs execute chetiwa-vigilance-alerts \
+     --project=chetiwa --region=europe-west1 --wait
+   ```
+
+4. Pour chaque exécution, vérifier le digest utilisé, `status: completed`,
+   `mode: shadow`, `pushSent: 0`, l'absence d'erreurs fournisseurs et les
+   métriques attendues. Un résultat `disabled`, un passage sans règle active
+   ou sans cellule due ne prouve pas l'évaluation réelle : compléter avec
+   une règle de test consentie et contrôler les propositions, l'effacement
+   de l'appareil et les calendriers. Mesurer aussi durée et coût Firestore.
+5. Après réussite des tests manuels, valider une échéance automatique de
+   chaque scheduler en shadow mode dans une fenêtre surveillée, puis les
+   remettre en pause et confirmer `PAUSED`. Après la fenêtre de test, ou dès
+   un échec, remettre également `ENABLED=false` et `SEND=false` sur les deux
+   jobs avec les commandes suivantes. Conserver les identifiants
+   d'exécution et journaux. La reprise durable et les envois réels exigent
+   ensuite la validation du budget, du test FCM/APNs sur appareil, de
+   l'opt-in et des heures silencieuses, ainsi qu'une décision explicite
+   d'activation. Aucun simple `resume` de l'ancienne image n'est suffisant.
+
+   ```sh
+   gcloud run jobs update chetiwa-rain-alerts \
+     --project=chetiwa --region=europe-west1 \
+     --update-env-vars=RAIN_ALERTS_ENABLED=false,RAIN_ALERTS_SEND_ENABLED=false
+   gcloud run jobs update chetiwa-vigilance-alerts \
+     --project=chetiwa --region=europe-west1 \
+     --update-env-vars=VIGILANCE_ALERTS_ENABLED=false,VIGILANCE_ALERTS_SEND_ENABLED=false
+   ```
+
+Vérification en lecture seule de la pause :
+
+```sh
+gcloud scheduler jobs describe chetiwa-rain-alerts-every-5m \
+  --project=chetiwa --location=europe-west1 --format='value(state)'
+gcloud scheduler jobs describe chetiwa-vigilance-alerts-every-5m \
+  --project=chetiwa --location=europe-west1 --format='value(state)'
+```
+
+Références : [plafonds de dépenses Google Cloud](https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps)
+et [reprise d'un scheduler](https://docs.cloud.google.com/sdk/gcloud/reference/scheduler/jobs/resume).
+
 ## 1. Obtenir et téléverser la clé APNs
 
 Prérequis : rôle **Account Holder** ou **Admin** dans Apple Developer et compte
@@ -37,6 +202,12 @@ Documentation officielle :
 
 ## 2. Créer et provisionner Firestore
 
+Cette section décrit un **nouvel environnement**. Pour le projet `chetiwa`
+existant, la base est déjà créée : ne pas répéter cette procédure. Seul le TTL
+`alertRunMetrics.expiresAt` est actuellement activé et vérifié ; les sept
+autres collections restent inchangées. Le script de provisionnement ne doit
+pas élargir automatiquement cette rétention.
+
 1. Ouvrir le projet Firebase `chetiwa` puis **Databases & Storage → Firestore →
    Create database**.
 2. Choisir **Standard edition**, base `(default)` et **Production mode**. Ce
@@ -61,8 +232,10 @@ Documentation officielle :
      chetiwa-alert-worker@chetiwa.iam.gserviceaccount.com
    ```
 
-Le script vérifie que la base existe, active les TTL pour appareils, règles,
-états et outbox, accorde l'accès Firestore/FCM au worker et déploie les règles
+Le script vérifie que la base existe et active uniquement le TTL
+`alertRunMetrics.expiresAt` (expiration écrite à 30 jours par le worker).
+Il laisse inchangées les politiques des appareils, règles, états, livraisons
+et calendriers. Il accorde l'accès Firestore/FCM au worker et déploie les règles
 deny-all côté mobile. Il ne choisit et ne crée pas automatiquement la région.
 
 Documentation officielle :
@@ -72,6 +245,11 @@ Documentation officielle :
 - <https://cloud.google.com/firestore/docs/ttl>
 
 ## 3. Déployer le job N0.4–N0.6
+
+Cette procédure concerne le provisionnement initial. Pour les deux jobs déjà
+présents dans `chetiwa`, suivre la mise à jour ciblée de l'état opérationnel
+ci-dessus ; ne pas recréer IAM, écraser l'environnement ni réactiver les
+schedulers via les scripts de provisionnement.
 
 Créer deux comptes de service séparés, puis construire l'image backend :
 
@@ -111,10 +289,10 @@ job Cloud Run ; ne jamais les copier dans le fichier YAML.
 
 ### Polling adaptatif sans nouveau service
 
-Le Scheduler continue de réveiller le job toutes les cinq minutes, mais le job
-ne contacte pas aveuglément le fournisseur pour chaque cellule. Il lit le petit
-document Firestore `alertCellSchedules/{cellKey}` et saute les cellules qui ne
-sont pas encore dues :
+Une fois explicitement réactivé, le Scheduler réveille le job toutes les cinq
+minutes, mais le job ne contacte pas aveuglément le fournisseur pour chaque
+cellule. Il lit le petit document Firestore `alertCellSchedules/{cellKey}` et
+saute les cellules qui ne sont pas encore dues :
 
 - pluie dans la fenêtre d'alerte : nouvelle vérification dans 5 minutes ;
 - pluie plus éloignée : nouvelle vérification dans 10 à 30 minutes ;
@@ -127,9 +305,10 @@ sont pas encore dues :
 Le moteur ne crée une cellule que pour une règle active appartenant à un
 appareil valide avec notifications activées. Un changement de lieu remplace la
 règle principale ; l'ancienne cellule n'est donc plus interrogée dès le passage
-suivant. Les calendriers orphelins expirent automatiquement après sept jours via
-le TTL Firestore. Ils ne contiennent aucun token, identifiant d'appareil ni
-coordonnée exacte d'utilisateur.
+suivant. Les calendriers portent une échéance `expiresAt` à sept jours ; leur
+suppression automatique nécessite la politique TTL `alertCellSchedules`, qui
+n'a pas été activée pendant cet audit. Ils ne contiennent aucun token,
+identifiant d'appareil ni coordonnée exacte d'utilisateur.
 
 Ne pas ajouter Redis, une seconde base, un Scheduler par ville ou du batching
 Open-Meteo pour cette V1. Le batching diminue le nombre de connexions HTTP mais
@@ -146,6 +325,11 @@ par jour, dix abonnés en moyenne par cellule, horizon LibreWXR court contrôlé
 maximum toutes les 15 minutes, 30 jours et tarifs Firestore Standard de
 référence en USD (`$0.03/100k` lectures et `$0.09/100k` écritures après le quota
 gratuit quotidien).
+
+Cette estimation précède les protections de concurrence ajoutées le
+19 septembre. Les écritures d'état et d'outbox ajoutent deux lectures et deux
+écritures conditionnelles de contrôle ; remesurer les opérations et les coûts
+en shadow mode avant d'utiliser ce tableau comme budget de lancement.
 
 | DAU | Alertes actives | Lectures/jour | Écritures/jour | Firestore/mois estimé | Cas dispersé : 1 cellule/utilisateur |
 | ---: | ---: | ---: | ---: | ---: | ---: |

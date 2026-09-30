@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 4
     steps:
       - uses: actions/checkout@v4
-      - name: Probe metadata, cold paths and immediate CDN hits
+      - name: Probe metadata, cold paths and bounded CDN cache convergence
         env:
           CHETIWA_PROBE_REGION: github-hosted-runner
         run: deploy/librewxr/probe-public-radar.sh

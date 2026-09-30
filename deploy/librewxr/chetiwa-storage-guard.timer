@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Chetiwa storage pressure every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=chetiwa-storage-guard.service
+
+[Install]
+WantedBy=timers.target

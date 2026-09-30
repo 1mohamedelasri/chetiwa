@@ -134,6 +134,30 @@ void main() {
     expect(calls, 1);
   });
 
+  test('provider transport errors never expose commercial API keys', () async {
+    config = RuntimeConfig.fromEnvironment(const <String, String>{
+      'OPEN_METEO_API_KEY': 'private-commercial-key',
+    });
+    final app = appWith(
+      MockClient((request) async {
+        throw http.ClientException('connection failed', request.url);
+      }),
+    );
+    final response = await app(
+      Request(
+        'GET',
+        Uri.parse(
+          'http://localhost/v1/forecast?latitude=48.8566&longitude=2.3522',
+        ),
+      ),
+    );
+    final body = await response.readAsString();
+    expect(response.statusCode, 503);
+    expect(body, contains('provider_unavailable'));
+    expect(body, isNot(contains('private-commercial-key')));
+    expect(body, isNot(contains('apikey')));
+  });
+
   test('forecast serves stale data when its provider is unavailable', () async {
     var succeeds = true;
     final app = appWith(
@@ -157,6 +181,91 @@ void main() {
     expect(stale.headers['x-cache'], 'STALE');
     expect(stale.headers['warning'], contains('Response is stale'));
   });
+
+  test(
+    'concurrent cold forecasts share one provider request and ETag',
+    () async {
+      final origin = Completer<http.Response>();
+      var calls = 0;
+      final app = appWith(
+        MockClient((_) {
+          calls++;
+          return origin.future;
+        }),
+      );
+      final uri = Uri.parse(
+        'http://localhost/v1/forecast?latitude=48.8566&longitude=2.3522',
+      );
+      final requests = List.generate(
+        8,
+        (_) => Future<Response>.sync(() => app(Request('GET', uri))),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, 1);
+      origin.complete(http.Response(jsonEncode(_forecastFixture), 200));
+      final responses = await Future.wait(requests);
+
+      expect(
+        responses.map((response) => response.statusCode),
+        everyElement(200),
+      );
+      expect(
+        responses.map((response) => response.headers['etag']).toSet(),
+        hasLength(1),
+      );
+      expect(
+        responses.where((response) => response.headers['x-cache'] == 'MISS'),
+        hasLength(1),
+      );
+      expect(
+        responses.where(
+          (response) => response.headers['x-cache'] == 'COALESCED',
+        ),
+        hasLength(7),
+      );
+      await Future.wait(
+        responses.map((response) => response.read().drain<void>()),
+      );
+    },
+  );
+
+  test(
+    'invalid radar frame encodings and paths never call an upstream',
+    () async {
+      var calls = 0;
+      final app = appWith(
+        MockClient((_) async {
+          calls++;
+          return http.Response('unexpected upstream call', 200);
+        }),
+      );
+      final frames = <String>[
+        'A', // Impossible base64 length.
+        '_w', // Invalid UTF-8.
+        for (final path in [
+          '@127.0.0.1:8080/healthz#',
+          '//127.0.0.1/healthz',
+          '/v2/../healthz',
+          '/v2/%2e%2e/healthz',
+          '/v2/radar?target=other',
+          '/v2/radar#fragment',
+          r'/v2\other',
+        ])
+          base64Url.encode(utf8.encode(path)).replaceAll('=', ''),
+      ];
+      for (final frame in frames) {
+        final response = await app(
+          Request(
+            'GET',
+            Uri.parse('http://localhost/v1/radar/tiles/$frame/7/64/44'),
+          ),
+        );
+        expect(response.statusCode, 400, reason: frame);
+        expect(await response.readAsString(), contains('invalid_radar_frame'));
+      }
+      expect(calls, 0);
+    },
+  );
 
   test('location search returns the stable Chetiwa contract', () async {
     final app = appWith(
@@ -211,7 +320,8 @@ void main() {
               'CountryCode': 'BEL',
               'Region': 'Bruxelles-Capitale',
             },
-            'location': <String, Object?>{'x': 4.3517, 'y': 50.8503},
+            // ArcGIS may snap the label to a nearby address.
+            'location': <String, Object?>{'x': 4.36, 'y': 50.86},
           }),
           200,
         );
@@ -226,10 +336,15 @@ void main() {
       ),
     );
     final text = await response.readAsString();
+    final body = jsonDecode(text) as Map<String, Object?>;
+    final data = body['data'] as Map<String, Object?>;
+    final location = data['location'] as Map<String, Object?>;
 
     expect(response.statusCode, 200);
     expect(text, contains('Bruxelles'));
     expect(text, isNot(contains('test-key')));
+    expect(location['latitude'], 50.8503);
+    expect(location['longitude'], 4.3517);
   });
 
   test('LibreWXR radar exposes observations and nowcast frames', () async {
@@ -324,7 +439,7 @@ void main() {
     );
     expect(
       (frames[1] as Map<String, Object?>)['tileUrlTemplate'],
-      'https://radar.ezplatforms.com/future/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2&run=1776707400',
+      'https://radar.ezplatforms.com/future/256/{z}/{x}/{y}/15/1_0.png?presentation=neutral-v1&run=1776707400',
     );
     expect(
       frames.whereType<Map<String, Object?>>().any(
@@ -651,7 +766,7 @@ void main() {
       'ARCGIS_API_KEY': 'test-key',
       'RADAR_PROVIDER': 'librewxr',
       'RADAR_TILE_URL_TEMPLATE':
-          'https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2',
+          'https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/15/1_0.png?presentation=neutral-v1',
     });
     final png = base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+3MxZ5wAAAABJRU5ErkJggg==',
@@ -694,7 +809,7 @@ void main() {
       'RADAR_METADATA_URL':
           'https://radar.ezplatforms.com/public/weather-maps.json',
       'RADAR_TILE_URL_TEMPLATE':
-          'https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/14/1_0.png',
+          'https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/15/1_0.png',
     });
     final app = appWith(
       MockClient(
@@ -732,7 +847,15 @@ void main() {
     final frame =
         (data['frames'] as List<Object?>).single as Map<String, Object?>;
 
-    expect(frame['tileUrlTemplate'], endsWith('/{z}/{x}/{y}.png'));
+    final tileTemplate = frame['tileUrlTemplate'] as String;
+    final tileUri = Uri.parse(
+      tileTemplate
+          .replaceAll('{z}', '7')
+          .replaceAll('{x}', '64')
+          .replaceAll('{y}', '44'),
+    );
+    expect(tileUri.path, endsWith('/7/64/44.png'));
+    expect(tileUri.queryParameters['presentation'], 'neutral-v1');
   });
 
   test('concurrent identical radar tiles render only once', () async {
@@ -740,7 +863,7 @@ void main() {
       'ARCGIS_API_KEY': 'test-key',
       'RADAR_PROVIDER': 'librewxr',
       'RADAR_TILE_URL_TEMPLATE':
-          'https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/14/1_0.png',
+          'https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/15/1_0.png',
     });
     final png = base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+3MxZ5wAAAABJRU5ErkJggg==',

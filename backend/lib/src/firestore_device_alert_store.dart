@@ -265,7 +265,7 @@ final class FirestoreDeviceAlertStore
     final active = <ActiveRainAlert>[];
     for (final rule in rules) {
       final deviceDocument = related[_deviceName(rule.ownerHash)];
-      if (deviceDocument == null) continue;
+      if (deviceDocument == null || _isDeleting(deviceDocument)) continue;
       final device = _deviceRecord(rule.ownerHash, deviceDocument);
       final stateDocument = related[_stateName(rule.ownerHash, rule.id)];
       active.add(
@@ -313,64 +313,69 @@ final class FirestoreDeviceAlertStore
       });
 
   @override
-  Future<void> saveCellSchedule(RainAlertCellSchedule schedule) =>
-      _translate(() async {
-        final name = _cellScheduleName(schedule.cellKey);
-        await _api.projects.databases.documents.patch(
-          firestore.Document(
-            name: name,
-            fields: <String, firestore.Value>{
-              'cellKey': _string(schedule.cellKey),
-              'latitude': _double(schedule.latitude),
-              'longitude': _double(schedule.longitude),
-              'nextCheckAt': _timestamp(schedule.nextCheckAt),
-              'lastCheckedAt': _timestamp(schedule.lastCheckedAt),
-              'mode': _string(schedule.mode.name),
-              // Firestore TTL removes state shortly after a cell no longer has
-              // an active rule. The engine itself never polls inactive cells.
-              'expiresAt': _timestamp(
-                schedule.lastCheckedAt.add(const Duration(days: 7)),
-              ),
-            },
-          ),
-          name,
-        );
-      });
+  Future<void> saveCellSchedule(
+    RainAlertCellSchedule schedule, {
+    String? expectedVersion,
+  }) => _translate(() async {
+    final document = _cellScheduleDocument(schedule);
+    try {
+      await _api.projects.databases.documents.patch(
+        document,
+        document.name!,
+        updateMask_fieldPaths: document.fields!.keys.toList(growable: false),
+        currentDocument_exists: expectedVersion == null ? false : null,
+        currentDocument_updateTime: expectedVersion,
+      );
+    } on firestore.DetailedApiRequestError catch (error) {
+      // Never reread/retry an obsolete forecast over a subscriber wakeup.
+      if (!_isWriteConflict(error) && error.status != 404) rethrow;
+    }
+  });
 
   @override
-  Future<void> deleteCellSchedule(String cellKey) => _translate(() async {
+  Future<void> deleteCellSchedule(
+    String cellKey, {
+    String? expectedVersion,
+  }) => _translate(() async {
+    var version = expectedVersion;
+    if (version == null) {
+      final current = await _getOrNull(_cellScheduleName(cellKey));
+      if (current == null) return;
+      version = _documentVersion(current);
+      // API cleanup does not have a worker snapshot. Observe a version BEFORE
+      // checking membership, then fence the delete against any later wakeup.
+      if ((await listActiveAlertsForCell(cellKey)).isNotEmpty) return;
+    }
     try {
       await _api.projects.databases.documents.delete(
         _cellScheduleName(cellKey),
+        currentDocument_updateTime: version,
       );
     } on firestore.DetailedApiRequestError catch (error) {
-      if (error.status != 404) rethrow;
+      if (!_isWriteConflict(error) && error.status != 404) rethrow;
     }
   });
 
   @override
   Future<void> saveState(RainAlertState state) => _translate(() async {
-    await _api.projects.databases.documents.patch(
-      _stateDocument(state),
-      _stateName(state.ownerHash, state.alertId),
+    await _commitForActiveAlert(
+      state.ownerHash,
+      state.alertId,
+      firestore.Write(update: _stateDocument(state)),
     );
   });
 
   @override
   Future<bool> enqueueDelivery(AlertDeliveryDraft delivery) =>
       _translate(() async {
-        try {
-          await _api.projects.databases.documents.createDocument(
-            _forCreate(_deliveryDocument(delivery)),
-            _documents,
-            'alertDeliveries',
-            documentId: delivery.eventId,
-          );
-          return true;
-        } on firestore.DetailedApiRequestError catch (error) {
-          if (error.status == 409) return false;
-          rethrow;
-        }
+        return _commitForActiveAlert(
+          delivery.ownerHash,
+          delivery.alertId,
+          firestore.Write(
+            update: _deliveryDocument(delivery),
+            currentDocument: firestore.Precondition(exists: false),
+          ),
+        );
       });
 
   @override
@@ -392,7 +397,7 @@ final class FirestoreDeviceAlertStore
         for (final item in drafts) {
           final deviceDocument =
               deviceDocuments[_deviceName(item.draft.ownerHash)];
-          if (deviceDocument == null) continue;
+          if (deviceDocument == null || _isDeleting(deviceDocument)) continue;
           final device = _deviceRecord(item.draft.ownerHash, deviceDocument);
           final token = device.pushToken;
           if (!device.notificationsEnabled || token == null || token.isEmpty) {
@@ -455,7 +460,7 @@ final class FirestoreDeviceAlertStore
       final result = <ActiveVigilanceAlert>[];
       for (final rule in rules) {
         final deviceDocument = related[_deviceName(rule.ownerHash)];
-        if (deviceDocument == null) continue;
+        if (deviceDocument == null || _isDeleting(deviceDocument)) continue;
         final stateDocument =
             related[_vigilanceStateName(rule.ownerHash, rule.id)];
         result.add(
@@ -478,27 +483,24 @@ final class FirestoreDeviceAlertStore
   @override
   Future<void> saveVigilanceState(VigilanceAlertState state) =>
       _translate(() async {
-        await _api.projects.databases.documents.patch(
-          _vigilanceStateDocument(state),
-          _vigilanceStateName(state.ownerHash, state.alertId),
+        await _commitForActiveAlert(
+          state.ownerHash,
+          state.alertId,
+          firestore.Write(update: _vigilanceStateDocument(state)),
         );
       });
 
   @override
   Future<bool> enqueueVigilanceDelivery(VigilanceDeliveryDraft delivery) =>
       _translate(() async {
-        try {
-          await _api.projects.databases.documents.createDocument(
-            _forCreate(_vigilanceDeliveryDocument(delivery)),
-            _documents,
-            'vigilanceDeliveries',
-            documentId: delivery.eventId,
-          );
-          return true;
-        } on firestore.DetailedApiRequestError catch (error) {
-          if (error.status == 409) return false;
-          rethrow;
-        }
+        return _commitForActiveAlert(
+          delivery.ownerHash,
+          delivery.alertId,
+          firestore.Write(
+            update: _vigilanceDeliveryDocument(delivery),
+            currentDocument: firestore.Precondition(exists: false),
+          ),
+        );
       });
 
   @override
@@ -543,7 +545,7 @@ final class FirestoreDeviceAlertStore
         continue;
       }
       final document = related[_deviceName(item.draft.ownerHash)];
-      if (document == null) continue;
+      if (document == null || _isDeleting(document)) continue;
       final device = _deviceRecord(item.draft.ownerHash, document);
       final token = device.pushToken;
       if (!device.notificationsEnabled || token == null || token.isEmpty) {
@@ -599,24 +601,28 @@ final class FirestoreDeviceAlertStore
 
   @override
   Future<void> disableDeviceToken(String ownerHash) => _translate(() async {
-    final existing = await _device(ownerHash);
-    if (existing == null) return;
-    final disabled = DeviceRecord(
-      ownerHash: existing.ownerHash,
-      platform: existing.platform,
-      locale: existing.locale,
-      timeZone: existing.timeZone,
-      notificationsEnabled: false,
-      appVersion: existing.appVersion,
-      createdAt: existing.createdAt,
-      updatedAt: _now().toUtc(),
-      expiresAt: existing.expiresAt,
-    );
-    await _api.projects.databases.documents.patch(
-      _deviceDocument(disabled),
-      _deviceName(ownerHash),
-      currentDocument_exists: true,
-    );
+    final existing = await _getOrNull(_deviceName(ownerHash));
+    if (existing == null || _isDeleting(existing)) return;
+    try {
+      await _api.projects.databases.documents.patch(
+        firestore.Document(
+          fields: {
+            'notificationsEnabled': _boolean(false),
+            'updatedAt': _timestamp(_now().toUtc()),
+          },
+        ),
+        _deviceName(ownerHash),
+        currentDocument_updateTime: _documentVersion(existing),
+        updateMask_fieldPaths: [
+          'notificationsEnabled',
+          'updatedAt',
+          'pushToken',
+        ],
+      );
+    } on firestore.DetailedApiRequestError catch (error) {
+      // A newer registration/deletion wins over an old token failure.
+      if (!_isWriteConflict(error) && error.status != 404) rethrow;
+    }
   });
 
   @override
@@ -629,7 +635,11 @@ final class FirestoreDeviceAlertStore
     String ownerHash,
     DeviceRegistration registration,
   ) async {
-    final existing = await _device(ownerHash);
+    final document = await _getOrNull(_deviceName(ownerHash));
+    if (document != null) _requireNotDeleting(document);
+    final existing = document == null
+        ? null
+        : _deviceRecord(ownerHash, document);
     final instant = _now().toUtc();
     final record = DeviceRecord(
       ownerHash: ownerHash,
@@ -645,9 +655,42 @@ final class FirestoreDeviceAlertStore
       updatedAt: instant,
       expiresAt: instant.add(inactiveDeviceTtl),
     );
-    await _api.projects.databases.documents.patch(
-      _deviceDocument(record),
-      _deviceName(ownerHash),
+    final becameEligible =
+        record.notificationsEnabled &&
+        (record.pushToken?.isNotEmpty ?? false) &&
+        (existing == null ||
+            !existing.notificationsEnabled ||
+            !(existing.pushToken?.isNotEmpty ?? false) ||
+            !existing.expiresAt.isAfter(instant));
+    final cells = <String, AlertLocation>{};
+    if (becameEligible && document != null) {
+      for (final alert in await _listAlertDocuments(ownerHash)) {
+        final rule = _alertRecord(alert);
+        if (rule.enabled) {
+          cells[RainAlertCell.fromLocation(
+                rule.location,
+                sizeDegrees: rainAlertCellSizeDegrees,
+              ).key] =
+              rule.location;
+        }
+      }
+    }
+    await _api.projects.databases.documents.commit(
+      firestore.CommitRequest(
+        writes: [
+          firestore.Write(
+            update: _deviceDocument(record),
+            currentDocument: document == null
+                ? firestore.Precondition(exists: false)
+                : firestore.Precondition(
+                    updateTime: _documentVersion(document),
+                  ),
+          ),
+          for (final location in cells.values)
+            _cellWakeupWrite(location, instant),
+        ],
+      ),
+      _database,
     );
     return record;
   }
@@ -657,7 +700,8 @@ final class FirestoreDeviceAlertStore
       _translate(() => _deleteDevice(ownerHash));
 
   Future<bool> _deleteDevice(String ownerHash) async {
-    if (await _device(ownerHash) == null) return false;
+    final tombstone = await _beginDeviceDeletion(ownerHash);
+    if (tombstone == null) return false;
     final alerts = await _listAlertDocuments(ownerHash);
     final affectedCellKeys = alerts
         .map(_alertRecord)
@@ -668,17 +712,20 @@ final class FirestoreDeviceAlertStore
           ).key,
         )
         .toSet();
-    final deliveries = await _query(
-      collectionId: 'alertDeliveries',
-      field: 'ownerHash',
-      value: _string(ownerHash),
-    );
-    final vigilanceDeliveries = await _query(
-      collectionId: 'vigilanceDeliveries',
-      field: 'ownerHash',
-      value: _string(ownerHash),
-    );
-    final names = <String>[
+    final ownedCollections = await Future.wait([
+      for (final collection in [
+        'alertStates',
+        'vigilanceStates',
+        'alertDeliveries',
+        'vigilanceDeliveries',
+      ])
+        _query(
+          collectionId: collection,
+          field: 'ownerHash',
+          value: _string(ownerHash),
+        ),
+    ]);
+    final names = <String>{
       ...alerts.map((document) => document.name).whereType<String>(),
       ...alerts.map((document) {
         final name = document.name!;
@@ -690,23 +737,31 @@ final class FirestoreDeviceAlertStore
         final alertId = name.substring(name.lastIndexOf('/') + 1);
         return _vigilanceStateName(ownerHash, alertId);
       }),
-      ...deliveries.map((document) => document.name).whereType<String>(),
-      ...vigilanceDeliveries
-          .map((document) => document.name)
-          .whereType<String>(),
-      _deviceName(ownerHash),
-    ];
-    for (var offset = 0; offset < names.length; offset += 500) {
-      final end = min(offset + 500, names.length);
-      await _api.projects.databases.documents.commit(
-        firestore.CommitRequest(
-          writes: names
-              .sublist(offset, end)
-              .map((name) => firestore.Write(delete: name))
-              .toList(growable: false),
+      for (final collection in ownedCollections)
+        ...collection.map((document) => document.name).whereType<String>(),
+    }.toList(growable: false);
+    for (var offset = 0; offset < names.length; offset += 499) {
+      final end = min(offset + 499, names.length);
+      if (!await _commitDeletionBatch(tombstone, [
+        _versionFence(tombstone),
+        ...names
+            .sublist(offset, end)
+            .map((name) => firestore.Write(delete: name)),
+      ])) {
+        return true;
+      }
+    }
+    // Keep the marker until every private collection is erased. A failed batch
+    // leaves it in place so a repeated DELETE can safely resume.
+    if (!await _commitDeletionBatch(tombstone, [
+      firestore.Write(
+        delete: tombstone.name,
+        currentDocument: firestore.Precondition(
+          updateTime: _documentVersion(tombstone),
         ),
-        _database,
-      );
+      ),
+    ])) {
+      return true;
     }
     for (final cellKey in affectedCellKeys) {
       if ((await listActiveAlertsForCell(cellKey)).isEmpty) {
@@ -736,19 +791,39 @@ final class FirestoreDeviceAlertStore
     String ownerHash,
     AlertRuleDraft draft,
   ) async {
-    await _requireDevice(ownerHash);
-    final existing = await _listAlertDocuments(ownerHash);
-    if (existing.length >= maximumAlertsPerDevice) {
-      throw ApiException(
-        statusCode: 409,
-        code: 'alert_limit_reached',
-        message: 'A maximum of $maximumAlertsPerDevice alerts is allowed',
-      );
-    }
-
     final instant = _now().toUtc();
-    for (var attempt = 0; attempt < 3; attempt += 1) {
+    for (var attempt = 0; attempt < 6; attempt += 1) {
+      // Read the parent version BEFORE counting rules. Every successful create
+      // changes that version in the same atomic commit as the new rule, so two
+      // instances cannot both consume the last available slot. This works for
+      // existing devices without migrating or maintaining an alert-count field.
+      final device = await _getOrNull(_deviceName(ownerHash));
+      if (device == null) {
+        throw const ApiException(
+          statusCode: 409,
+          code: 'device_not_registered',
+          message: 'Register this installation before managing alerts',
+        );
+      }
+      _requireNotDeleting(device);
+      if (device.updateTime == null) {
+        throw const FormatException('Device document has no update time');
+      }
+      final existing = await _listAlertDocuments(ownerHash);
+      if (existing.length >= maximumAlertsPerDevice) {
+        throw ApiException(
+          statusCode: 409,
+          code: 'alert_limit_reached',
+          message: 'A maximum of $maximumAlertsPerDevice alerts is allowed',
+        );
+      }
       final id = _idGenerator();
+      // A real field change is required: Firestore keeps updateTime unchanged
+      // for no-op writes, including a reused ID after deletion.
+      final quotaRevision =
+          (_readOptionalInteger(device.fields ?? {}, 'alertQuotaRevision') ??
+              0) +
+          1;
       final record = AlertRuleRecord(
         id: id,
         ownerHash: ownerHash,
@@ -762,19 +837,35 @@ final class FirestoreDeviceAlertStore
         updatedAt: instant,
       );
       try {
-        await _api.projects.databases.documents.createDocument(
-          _forCreate(_alertDocument(record)),
-          _deviceName(ownerHash),
-          'alerts',
-          documentId: id,
+        await _api.projects.databases.documents.commit(
+          firestore.CommitRequest(
+            writes: <firestore.Write>[
+              firestore.Write(
+                update: firestore.Document(
+                  name: _deviceName(ownerHash),
+                  fields: {'alertQuotaRevision': _integer(quotaRevision)},
+                ),
+                updateMask: firestore.DocumentMask(
+                  fieldPaths: ['alertQuotaRevision'],
+                ),
+                currentDocument: firestore.Precondition(
+                  updateTime: device.updateTime,
+                ),
+              ),
+              firestore.Write(
+                update: _alertDocument(record),
+                currentDocument: firestore.Precondition(exists: false),
+              ),
+              if (record.enabled) _cellWakeupWrite(record.location, instant),
+            ],
+          ),
+          _database,
         );
-        if (record.enabled) {
-          await _makeCellDue(record.location, instant);
-        }
-        return record;
       } on firestore.DetailedApiRequestError catch (error) {
-        if (error.status != 409 || attempt == 2) rethrow;
+        if (!_isWriteConflict(error) || attempt == 5) rethrow;
+        continue;
       }
+      return record;
     }
     throw StateError('Could not allocate a unique alert identifier');
   }
@@ -791,7 +882,7 @@ final class FirestoreDeviceAlertStore
     String alertId,
     AlertRuleChanges changes,
   ) async {
-    await _requireDevice(ownerHash);
+    final device = await _requireDevice(ownerHash);
     final existingDocument = await _getOrNull(_alertName(ownerHash, alertId));
     if (existingDocument == null) return null;
     final existing = _alertRecord(existingDocument);
@@ -833,17 +924,25 @@ final class FirestoreDeviceAlertStore
         record.enabled &&
         !pollingRelevantChange &&
         await _getOrNull(_cellScheduleName(nextCell.key)) == null;
-    if (record.enabled && (pollingRelevantChange || scheduleMissing)) {
-      await _makeCellDue(record.location, record.updatedAt);
-    }
     final vigilanceChanged = !_sameVigilance(
       existing.vigilance,
       record.vigilance,
     );
-    await _api.projects.databases.documents.patch(
-      _alertDocument(record),
-      _alertName(ownerHash, alertId),
-      currentDocument_exists: true,
+    await _api.projects.databases.documents.commit(
+      firestore.CommitRequest(
+        writes: [
+          _versionFence(device),
+          firestore.Write(
+            update: _alertDocument(record),
+            currentDocument: firestore.Precondition(
+              updateTime: _documentVersion(existingDocument),
+            ),
+          ),
+          if (record.enabled && (pollingRelevantChange || scheduleMissing))
+            _cellWakeupWrite(record.location, record.updatedAt),
+        ],
+      ),
+      _database,
     );
     if (vigilanceChanged) {
       try {
@@ -862,12 +961,13 @@ final class FirestoreDeviceAlertStore
       _translate(() => _deleteAlert(ownerHash, alertId));
 
   Future<bool> _deleteAlert(String ownerHash, String alertId) async {
-    await _requireDevice(ownerHash);
+    final device = await _requireDevice(ownerHash);
     final name = _alertName(ownerHash, alertId);
     if (await _getOrNull(name) == null) return false;
     await _api.projects.databases.documents.commit(
       firestore.CommitRequest(
         writes: <firestore.Write>[
+          _versionFence(device),
           firestore.Write(delete: name),
           firestore.Write(delete: _stateName(ownerHash, alertId)),
           firestore.Write(delete: _vigilanceStateName(ownerHash, alertId)),
@@ -878,12 +978,12 @@ final class FirestoreDeviceAlertStore
     return true;
   }
 
-  Future<void> _makeCellDue(AlertLocation location, DateTime now) {
+  firestore.Write _cellWakeupWrite(AlertLocation location, DateTime now) {
     final cell = RainAlertCell.fromLocation(
       location,
       sizeDegrees: rainAlertCellSizeDegrees,
     );
-    return saveCellSchedule(
+    final document = _cellScheduleDocument(
       RainAlertCellSchedule(
         cellKey: cell.key,
         latitude: cell.latitude,
@@ -893,6 +993,164 @@ final class FirestoreDeviceAlertStore
         mode: RainAlertPollingMode.retry,
       ),
     );
+    return firestore.Write(
+      update: document,
+      // Preserve the revision before incrementing; replacing the whole document
+      // could reset it to 1 and make an identical wakeup a no-op.
+      updateMask: firestore.DocumentMask(
+        fieldPaths: document.fields!.keys.toList(growable: false),
+      ),
+      updateTransforms: [
+        firestore.FieldTransform(
+          fieldPath: 'wakeupRevision',
+          increment: _integer(1),
+        ),
+      ],
+    );
+  }
+
+  firestore.Document _cellScheduleDocument(RainAlertCellSchedule schedule) =>
+      firestore.Document(
+        name: _cellScheduleName(schedule.cellKey),
+        fields: {
+          'cellKey': _string(schedule.cellKey),
+          'latitude': _double(schedule.latitude),
+          'longitude': _double(schedule.longitude),
+          'nextCheckAt': _timestamp(schedule.nextCheckAt),
+          'lastCheckedAt': _timestamp(schedule.lastCheckedAt),
+          'mode': _string(schedule.mode.name),
+          'expiresAt': _timestamp(
+            schedule.lastCheckedAt.add(const Duration(days: 7)),
+          ),
+        },
+      );
+
+  static bool _isDeleting(firestore.Document document) =>
+      document.fields?['deleting']?.booleanValue == true;
+
+  static void _requireNotDeleting(firestore.Document document) {
+    if (_isDeleting(document)) {
+      throw const ApiException(
+        statusCode: 409,
+        code: 'device_deletion_in_progress',
+        message:
+            'This installation is being deleted; retry after deletion completes',
+      );
+    }
+  }
+
+  static String _documentVersion(firestore.Document document) {
+    final version = document.updateTime;
+    if (version == null || version.isEmpty) {
+      throw const FormatException('Document has no update time');
+    }
+    return version;
+  }
+
+  static bool _isWriteConflict(firestore.DetailedApiRequestError error) {
+    final body = error.jsonResponse?['error'];
+    return error.status == 409 ||
+        error.status == 412 ||
+        (error.status == 400 &&
+            body is Map &&
+            body['status'] == 'FAILED_PRECONDITION');
+  }
+
+  /// A masked no-op still checks the version atomically without changing it.
+  /// Other writers can proceed; a deletion marker invalidates all older fences.
+  static firestore.Write _versionFence(firestore.Document document) {
+    final updatedAt = document.fields?['updatedAt'];
+    if (updatedAt == null) {
+      throw const FormatException('Document has no updatedAt');
+    }
+    return firestore.Write(
+      update: firestore.Document(
+        name: document.name,
+        fields: {'updatedAt': updatedAt},
+      ),
+      updateMask: firestore.DocumentMask(fieldPaths: ['updatedAt']),
+      currentDocument: firestore.Precondition(
+        updateTime: _documentVersion(document),
+      ),
+    );
+  }
+
+  Future<firestore.Document?> _beginDeviceDeletion(String ownerHash) async {
+    final name = _deviceName(ownerHash);
+    for (var attempt = 0; attempt < 6; attempt++) {
+      final device = await _getOrNull(name);
+      if (device == null || _isDeleting(device)) return device;
+      try {
+        return await _api.projects.databases.documents.patch(
+          firestore.Document(
+            fields: {
+              'deleting': _boolean(true),
+              'notificationsEnabled': _boolean(false),
+              'deletionStartedAt': _timestamp(_now().toUtc()),
+            },
+          ),
+          name,
+          currentDocument_updateTime: _documentVersion(device),
+          // Remove the token immediately. A pending erasure must not disappear
+          // through TTL before its remaining child collections are cleaned.
+          updateMask_fieldPaths: [
+            'deleting',
+            'notificationsEnabled',
+            'deletionStartedAt',
+            'pushToken',
+            'expiresAt',
+          ],
+        );
+      } on firestore.DetailedApiRequestError catch (error) {
+        if (!_isWriteConflict(error) || attempt == 5) rethrow;
+      }
+    }
+    throw StateError('Could not begin device deletion');
+  }
+
+  Future<bool> _commitDeletionBatch(
+    firestore.Document tombstone,
+    List<firestore.Write> writes,
+  ) async {
+    try {
+      await _api.projects.databases.documents.commit(
+        firestore.CommitRequest(writes: writes),
+        _database,
+      );
+      return true;
+    } on firestore.DetailedApiRequestError catch (error) {
+      if (_isWriteConflict(error)) {
+        final current = await _getOrNull(tombstone.name!);
+        // Another DELETE completed. Never erase a later registration or its
+        // children with the old deletion request's captured names.
+        if (current == null || !_isDeleting(current)) return false;
+      }
+      rethrow;
+    }
+  }
+
+  Future<bool> _commitForActiveAlert(
+    String ownerHash,
+    String alertId,
+    firestore.Write write,
+  ) async {
+    final device = await _getOrNull(_deviceName(ownerHash));
+    if (device == null || _isDeleting(device)) return false;
+    final alert = await _getOrNull(_alertName(ownerHash, alertId));
+    if (alert == null) return false;
+    try {
+      await _api.projects.databases.documents.commit(
+        firestore.CommitRequest(
+          writes: [_versionFence(device), _versionFence(alert), write],
+        ),
+        _database,
+      );
+      return true;
+    } on firestore.DetailedApiRequestError catch (error) {
+      // The captured evaluation is obsolete or its outbox event already exists.
+      if (_isWriteConflict(error)) return false;
+      rethrow;
+    }
   }
 
   Future<T> _translate<T>(Future<T> Function() operation) async {
@@ -918,13 +1176,12 @@ final class FirestoreDeviceAlertStore
     }
   }
 
-  Future<DeviceRecord?> _device(String ownerHash) async {
+  Future<firestore.Document> _requireDevice(String ownerHash) async {
     final document = await _getOrNull(_deviceName(ownerHash));
-    return document == null ? null : _deviceRecord(ownerHash, document);
-  }
-
-  Future<void> _requireDevice(String ownerHash) async {
-    if (await _device(ownerHash) != null) return;
+    if (document != null) {
+      _requireNotDeleting(document);
+      return document;
+    }
     throw const ApiException(
       statusCode: 409,
       code: 'device_not_registered',
@@ -1172,9 +1429,6 @@ final class FirestoreDeviceAlertStore
     },
   );
 
-  firestore.Document _forCreate(firestore.Document document) =>
-      firestore.Document(fields: document.fields);
-
   ({VigilanceDeliveryDraft draft, int attempts, DateTime nextAttemptAt})
   _pendingVigilanceDelivery(firestore.Document document) {
     final fields = document.fields ?? const <String, firestore.Value>{};
@@ -1256,6 +1510,7 @@ final class FirestoreDeviceAlertStore
       nextCheckAt: _readTimestamp(fields, 'nextCheckAt'),
       lastCheckedAt: _readTimestamp(fields, 'lastCheckedAt'),
       mode: RainAlertPollingMode.values.byName(_readString(fields, 'mode')),
+      version: _documentVersion(document),
     );
   }
 

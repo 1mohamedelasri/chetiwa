@@ -28,13 +28,16 @@ final class ChetiwaApiClient {
     required http.Client client,
     InstallationIdProvider installationIdProvider =
         const InstallationIdProvider(),
+    Duration requestTimeout = const Duration(seconds: 15),
   }) : _baseUri = baseUri,
        _client = client,
-       _installationIdProvider = installationIdProvider;
+       _installationIdProvider = installationIdProvider,
+       _requestTimeout = requestTimeout;
 
   final Uri _baseUri;
   final http.Client _client;
   final InstallationIdProvider _installationIdProvider;
+  final Duration _requestTimeout;
   final Map<Uri, _CachedApiBody> _responseCache = {};
 
   Future<Map<String, dynamic>> getData(
@@ -54,7 +57,7 @@ final class ChetiwaApiClient {
               if (cached != null) 'if-none-match': cached.etag,
             },
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(_requestTimeout);
       if (response.statusCode == 304 && cached != null) {
         return _decodeData(cached.body);
       }
@@ -134,10 +137,12 @@ final class ChetiwaApiClient {
           ...headers,
         });
       if (body != null) request.body = body;
-      final streamed = await _client
+      // Include reading the body in the deadline: receiving HTTP headers does
+      // not mean a stalled mobile connection will finish its response stream.
+      final response = await _client
           .send(request)
-          .timeout(const Duration(seconds: 15));
-      final response = await http.Response.fromStream(streamed);
+          .then(http.Response.fromStream)
+          .timeout(_requestTimeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw _exceptionFromResponse(response);
       }

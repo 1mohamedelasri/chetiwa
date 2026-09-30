@@ -11,6 +11,19 @@ Le serveur de lancement actuel est une VM Hetzner **dédiée à LibreWXR**, avec
 2 Gio de swap de sécurité. Pour absorber davantage de trafic ou réactiver le
 préchauffage, passer d'abord à 8 Gio de RAM.
 
+Le profil installe également une garde stockage toutes les cinq minutes et une
+règle locale `DOCKER-USER` qui bloque l'accès public direct au port 8080. Le
+tunnel et l'API continuent de joindre LibreWXR par leurs chemins privés. Après
+chaque redémarrage de la VM, vérifier que les quatre unités sont actives :
+
+```bash
+systemctl is-active \
+  chetiwa-origin-firewall.service \
+  chetiwa-storage-guard.timer \
+  chetiwa-radar-watchdog.timer \
+  chetiwa-radar-prewarm.timer
+```
+
 ## Profil initial
 
 Le fichier [`hetzner-small.env`](../../deploy/librewxr/hetzner-small.env)
@@ -149,20 +162,28 @@ signé et encore valide. Tant que cette validation n'est pas déployée,
 
    ```text
    RADAR_METADATA_URL=https://radar.ezplatforms.com/public/weather-maps.json
-   RADAR_TILE_URL_TEMPLATE=https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2
+   RADAR_TILE_URL_TEMPLATE=https://radar.ezplatforms.com{frame}/256/{z}/{x}/{y}/15/1_0.png?presentation=neutral-v1
    PUBLIC_BASE_URL=https://api.<domaine>
    ```
 
 L'APK continue d'appeler le backend Chetiwa : elle ne connaît jamais
 l'URL privée de l'origine, ni aucun jeton d'infrastructure.
 
-La palette versionnée `14` est la LUT Chetiwa gris-vers-rouge appliquée par
-`chetiwa-drops-palette.patch` puis rendue sans second flou RGBA par
-`chetiwa-crisp-presentation.patch`. Son nouvel identifiant invalide les
-anciennes tuiles Cloudflare sans purge globale. Elle laisse les faibles échos en gris avec une
-opacité progressive et réserve le rouge aux noyaux de précipitation. Le patch
-est conservé avec le code de déploiement pour que la modification AGPL reste
-reproductible et publiable avec le reste des sources du service.
+La palette versionnée `15` est la LUT neutre Chetiwa ajoutée par
+`chetiwa-neutral-rain-palette.patch`. Elle conserve les faibles échos en gris
+(jusqu'à 28 dBZ), puis passe au rose et au rouge pour les échos plus intenses.
+Elle réutilise exactement les mêmes valeurs radar, la même géométrie et le
+rendu sans second flou RGBA. Une couleur exprime l'intensité, pas le niveau
+certain d'une prévision ni une mesure de pluie au sol.
+
+L'ancienne palette `14` teignait déjà la pluie faible en rose/rouge. Elle reste
+inchangée pour compatibilité ; les nouvelles métadonnées API utilisent `15`
+et `presentation=neutral-v1`. Changer seulement la query ne suffit pas : le
+cache PNG persistant de l'origine inclut l'identifiant de palette mais pas
+son contenu. Déployer la palette `15` et vérifier qu'elle est annoncée dans
+les métadonnées avant de déployer l'API qui la sélectionne. Pour annuler le
+changement complet, rétablir d'abord l'API précédente, puis l'image radar
+précédente. Le code et les patches AGPL restent conservés avec les sources.
 
 ## Monter en charge
 

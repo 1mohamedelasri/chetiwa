@@ -33,8 +33,10 @@ backend/deploy/firestore/provision-alert-store.sh \
   PROJECT_ID CLOUD_RUN_SERVICE_ACCOUNT '(default)'
 ```
 
-Le script active le TTL sur appareils, règles, états et outbox, puis accorde
-`roles/datastore.user` et l'envoi FCM au compte du worker. Les règles fournies
+Le script active uniquement le TTL `alertRunMetrics.expiresAt`, dont le worker
+fixe l'expiration à 30 jours, puis accorde `roles/datastore.user` et l'envoi FCM
+au compte du worker. Les autres politiques de rétention restent inchangées.
+Les règles fournies
 refusent tout accès direct depuis les applications mobiles. Le déploiement du
 job et de son Scheduler est détaillé dans `smart-rain-alerts-runbook.md`.
 

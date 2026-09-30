@@ -31,6 +31,7 @@ abstract final class RadarMapSmokeTestBridge {
   static int Function()? _tileOverlayCount;
   static String? Function()? _presentedTileTemplate;
   static bool Function()? _tileHandoffPending;
+  static bool Function()? _surfaceReady;
   static String Function()? _debugState;
   static int _maxTileOverlayCount = 0;
   static int _mapCreationCount = 0;
@@ -40,6 +41,7 @@ abstract final class RadarMapSmokeTestBridge {
     required int Function() tileOverlayCount,
     required String? Function() presentedTileTemplate,
     required bool Function() tileHandoffPending,
+    required bool Function() surfaceReady,
     required String Function() debugState,
   }) {
     if (!_enabled) return;
@@ -47,6 +49,7 @@ abstract final class RadarMapSmokeTestBridge {
     _tileOverlayCount = tileOverlayCount;
     _presentedTileTemplate = presentedTileTemplate;
     _tileHandoffPending = tileHandoffPending;
+    _surfaceReady = surfaceReady;
     _debugState = debugState;
     _maxTileOverlayCount = 0;
     _mapCreationCount++;
@@ -58,6 +61,7 @@ abstract final class RadarMapSmokeTestBridge {
     _tileOverlayCount = null;
     _presentedTileTemplate = null;
     _tileHandoffPending = null;
+    _surfaceReady = null;
     _debugState = null;
   }
 
@@ -80,6 +84,8 @@ abstract final class RadarMapSmokeTestBridge {
       _enabled && (_tileHandoffPending?.call() ?? false);
 
   static int get mapCreationCount => _enabled ? _mapCreationCount : 0;
+
+  static bool get surfaceReady => _enabled && (_surfaceReady?.call() ?? false);
 
   static String get debugState => _enabled
       ? _debugState?.call() ?? 'Radar map detached'
@@ -190,7 +196,9 @@ final class _RadarMapState extends State<_RadarMap>
   LatLng? _lastCenter;
   late final AnimationController _tileTransitionController;
   late final AnimationController _playheadController;
+  (DateTime, String?)? _playheadFrame;
   final List<String?> _tileTemplates = List<String?>.filled(2, null);
+  final List<RadarFrame?> _tileFrames = List<RadarFrame?>.filled(2, null);
   final List<RadarGoogleTileProvider?> _tileProviders =
       List<RadarGoogleTileProvider?>.filled(2, null);
   final List<bool> _tileSlotUsesModelSnapshot = List<bool>.filled(2, false);
@@ -211,7 +219,6 @@ final class _RadarMapState extends State<_RadarMap>
   var _radarTilesLoading = false;
   var _playbackBufferWarmInProgress = false;
   var _visibleTileRetryCount = 0;
-  var _autoplayRequested = false;
   // The BLoC owns the frame index while Google Maps paints tile overlays on a
   // separate native surface. This gate stops only the automatic clock during
   // a handoff so the cursor can never run ahead of the last confirmed image.
@@ -405,7 +412,7 @@ final class _RadarMapState extends State<_RadarMap>
     _dataRefreshTimer?.cancel();
     _preparationRevealTimer?.cancel();
     _preparationEscapeTimer?.cancel();
-    _radarBloc.add(const RadarPlaybackPaused());
+    _radarBloc.add(const RadarPlaybackPaused(isUserInitiated: false));
     RadarMapSmokeTestBridge.detach(_mapController);
     _mapController?.dispose();
     _tileTransitionController.dispose();
@@ -440,15 +447,35 @@ final class _RadarMapState extends State<_RadarMap>
         _showTilePreparation = false;
       });
     }
-    if (_resumePlaybackAfterCameraMove &&
-        !_cameraIsMoving &&
-        !_timelineScrubbing &&
-        widget.isActive) {
-      _resumePlaybackAfterCameraMove = false;
-      _radarBloc.add(const RadarPlaybackResumed());
-    }
+    _resumePlaybackAfterPresentationIfReady();
     _scheduleSurfaceReady();
     _maybeStartAutoplay();
+  }
+
+  void _resumePlaybackAfterPresentationIfReady() {
+    if (!mounted ||
+        !_resumePlaybackAfterCameraMove ||
+        !_surfaceReady ||
+        !_frontViewportPresentationReady ||
+        _resumeRecoveryInProgress ||
+        _cameraIsMoving ||
+        _timelineScrubbing ||
+        !widget.isActive ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    // Native tile callbacks can precede the surface's settling window. Keep
+    // this intent until both gates are ready, otherwise the listener suspends
+    // an early resume again and autoplay can remain blocked indefinitely.
+    _resumePlaybackAfterCameraMove = false;
+    final state = _radarBloc.state;
+    _radarBloc.add(
+      RadarPlaybackResumed(
+        remainingFrameDuration: state is RadarReady
+            ? _remainingPlayheadDuration(state)
+            : RadarFramePolicy.playbackFrameDuration,
+      ),
+    );
   }
 
   void _handleSuccessfulRadarTile() {
@@ -499,6 +526,7 @@ final class _RadarMapState extends State<_RadarMap>
     // its initial TileProvider. A new overlay generation plus the camera move
     // below is sufficient and avoids the blank/recreation race entirely.
     _tileTemplates.fillRange(0, _tileTemplates.length, null);
+    _tileFrames.fillRange(0, _tileFrames.length, null);
     _tileProviders.fillRange(0, _tileProviders.length, null);
     _tileSlotUsesModelSnapshot.fillRange(
       0,
@@ -509,7 +537,6 @@ final class _RadarMapState extends State<_RadarMap>
     _incomingTileSlot = null;
     _radarTilesLoading = true;
     _visibleTileRetryCount = 0;
-    _autoplayRequested = false;
     _tilePlaybackClockHeld = false;
     _showTilePreparation = true;
     _preparationDeadlineExpired = false;
@@ -562,6 +589,7 @@ final class _RadarMapState extends State<_RadarMap>
         _showTilePreparation = false;
       });
       _preparationEscapeTimer?.cancel();
+      _resumePlaybackAfterPresentationIfReady();
       _maybeStartAutoplay();
     });
   }
@@ -630,53 +658,45 @@ final class _RadarMapState extends State<_RadarMap>
       _frontTileSlot = incoming;
       _incomingTileSlot = null;
     });
+    _reconcileVisibleRadarPresentation();
     _releasePlaybackClockAfterTileHandoff();
   }
 
   double get _tileCrossFadeProgress =>
       Curves.easeInOutCubic.transform(_tileTransitionController.value);
 
-  void _setTileSlot(int slot, String template, {required bool modelSnapshot}) {
+  void _setTileSlot(int slot, RadarFrame frame) {
+    final template = frame.tileUrlTemplate!;
     _tileTemplates[slot] = template;
+    _tileFrames[slot] = frame;
     _tileProviders[slot] = _tileCache.providerFor(template);
-    _tileSlotUsesModelSnapshot[slot] = modelSnapshot;
+    _tileSlotUsesModelSnapshot[slot] = frame.isModelForecast;
   }
 
-  void _initializeFirstTileFrame(
-    String template, {
-    required bool modelSnapshot,
-  }) {
+  void _initializeFirstTileFrame(RadarFrame frame) {
     if (_tileTemplates[_frontTileSlot] != null) return;
-    _setTileSlot(_frontTileSlot, template, modelSnapshot: modelSnapshot);
+    _setTileSlot(_frontTileSlot, frame);
   }
 
-  void _queueTileFrameTransition(
-    String template, {
-    required bool modelSnapshot,
-  }) {
+  void _queueTileFrameTransition(RadarFrame frame) {
     if (!mounted || !widget.isActive || _cameraIsMoving) return;
+    final template = frame.tileUrlTemplate!;
     if (_tileTemplates[_frontTileSlot] == template &&
         _incomingTileSlot == null) {
+      if (_tileFrames[_frontTileSlot] != frame) {
+        setState(() => _tileFrames[_frontTileSlot] = frame);
+      }
       _releasePlaybackClockAfterTileHandoff();
       return;
     }
     final incoming = _incomingTileSlot;
     if (incoming != null && _tileTemplates[incoming] == template) return;
     final generation = ++_tileTransitionGeneration;
-    unawaited(
-      _transitionToTileFrame(
-        template,
-        generation,
-        modelSnapshot: modelSnapshot,
-      ),
-    );
+    unawaited(_transitionToTileFrame(frame, generation));
   }
 
-  Future<void> _transitionToTileFrame(
-    String template,
-    int generation, {
-    required bool modelSnapshot,
-  }) async {
+  Future<void> _transitionToTileFrame(RadarFrame frame, int generation) async {
+    final template = frame.tileUrlTemplate!;
     // A fast scrub can supersede an incoming timestamp before the native map
     // paints it. Keep the known-good front frame instead of promoting an
     // unconfirmed overlay and exposing a blank flash.
@@ -688,7 +708,7 @@ final class _RadarMapState extends State<_RadarMap>
     }
 
     final targetSlot = 1 - _frontTileSlot;
-    _setTileSlot(targetSlot, template, modelSnapshot: modelSnapshot);
+    _setTileSlot(targetSlot, frame);
     await _clearRadarTileSlot(targetSlot);
     // Keep the previous timestamp fully visible until every known tile in the
     // incoming viewport is available. Swapping after only one tile produced
@@ -778,6 +798,10 @@ final class _RadarMapState extends State<_RadarMap>
         _incomingTileSlot = null;
       });
       _lastTileHandoffDiagnostic = 'presented-$preparedTiles';
+      // Tile callbacks can all finish before this slot becomes the front.
+      // Reconcile again now: an idle autoplay request previously declined
+      // because selection was not yet presented must get another chance.
+      _reconcileVisibleRadarPresentation();
       _releasePlaybackClockAfterTileHandoff();
       return;
     }
@@ -866,9 +890,9 @@ final class _RadarMapState extends State<_RadarMap>
   void _holdPlaybackClockForTileHandoff() {
     if (!mounted) return;
     _tilePlaybackClockHeld = true;
-    _playheadController
-      ..stop()
-      ..value = 0;
+    // Keep the visible phase during a hold. Resetting to zero here made the
+    // cursor jump backward by a full weather step on every native layer swap.
+    _playheadController.stop();
     // This event is deliberately idempotent. A lifecycle resume may restart
     // the BLoC timer while a native handoff is still pending, so every playing
     // state with an unpresented tile reasserts the gate.
@@ -882,8 +906,29 @@ final class _RadarMapState extends State<_RadarMap>
     final clockWasHeld = _tilePlaybackClockHeld;
     _tilePlaybackClockHeld = false;
     if (!clockWasHeld || !state.isPlaying) return;
-    _radarBloc.add(const RadarPlaybackClockReleased());
-    unawaited(_playheadController.forward(from: 0));
+    _syncPlayhead(state);
+    _radarBloc.add(
+      RadarPlaybackClockReleased(
+        remainingFrameDuration: _remainingPlayheadDuration(state),
+      ),
+    );
+  }
+
+  Duration _remainingPlayheadDuration(RadarReady state) {
+    final phase = (
+      state.selectedFrame.time,
+      state.selectedFrame.tileUrlTemplate,
+    );
+    if (_playheadFrame != phase ||
+        state.selectedIndex >= state.frames.length - 1) {
+      return RadarFramePolicy.playbackFrameDuration;
+    }
+    return Duration(
+      microseconds:
+          (RadarFramePolicy.playbackFrameDuration.inMicroseconds *
+                  (1 - _playheadController.value))
+              .ceil(),
+    );
   }
 
   void _cancelTileTransition({required bool invalidatePending}) {
@@ -964,6 +1009,10 @@ final class _RadarMapState extends State<_RadarMap>
 
   void _revealPreparationIfStillNeeded() {
     _preparationRevealTimer?.cancel();
+    // Once the native map has painted a usable surface, recovery must stay in
+    // place. Replacing that surface with a full-screen loader turns a transient
+    // tile retry into an apparent app freeze.
+    if (_surfaceReady) return;
     if (_showTilePreparation) _armPreparationEscape();
     if (_tileCache.readyTileCount.value > 0 || _preparationDeadlineExpired) {
       return;
@@ -1017,8 +1066,7 @@ final class _RadarMapState extends State<_RadarMap>
             WidgetsBinding.instance.lifecycleState !=
                 AppLifecycleState.resumed) ||
         _timelineScrubbing ||
-        _cameraIsMoving ||
-        _autoplayRequested) {
+        _cameraIsMoving) {
       return;
     }
     final state = _radarBloc.state;
@@ -1030,29 +1078,50 @@ final class _RadarMapState extends State<_RadarMap>
     if (needsNetworkTile && _tileCache.readyTileCount.value == 0) {
       return;
     }
-    _autoplayRequested = true;
+    // The BLoC owns suspension and explicit user-pause intent. Repeated
+    // readiness requests are idempotent; a request rejected while suspended
+    // must not permanently latch autoplay off in this widget.
     _radarBloc.add(const RadarPlaybackStarted());
   }
 
   void _syncPlayhead(RadarState state) {
     if (state is! RadarReady ||
-        !widget.isActive ||
-        !_surfaceReady ||
-        _resumeRecoveryInProgress ||
         _timelineScrubbing ||
-        !state.isPlaying ||
-        !_isSelectedTilePresented(state) ||
-        state.frames.length < 2 ||
-        state.selectedIndex >= state.frames.length - 1) {
+        (!state.isPlaying &&
+            !_resumePlaybackAfterCameraMove &&
+            !_resumeRecoveryInProgress) ||
+        state.frames.length < 2) {
       _playheadController
         ..stop()
         ..value = 0;
+      _playheadFrame = null;
       return;
     }
-    // Every real frame change restarts a linear visual clock. The BLoC uses
-    // the exact same duration, so the cursor reaches the next timestamp at the
-    // instant the corresponding source frame becomes selected.
-    unawaited(_playheadController.forward(from: 0));
+    // Camera/surface recovery suspends playback automatically. Keep the
+    // current phase, just as for a pending frame, until that viewport returns.
+    if (!widget.isActive ||
+        !_surfaceReady ||
+        _resumeRecoveryInProgress ||
+        !state.isPlaying ||
+        !_isSelectedTilePresented(state)) {
+      _playheadController.stop();
+      return;
+    }
+    final phase = (
+      state.selectedFrame.time,
+      state.selectedFrame.tileUrlTemplate,
+    );
+    if (_playheadFrame != phase) {
+      _playheadFrame = phase;
+      _playheadController.value = 0;
+    }
+    if (state.selectedIndex >= state.frames.length - 1) {
+      _playheadController.stop();
+      return;
+    }
+    if (!_tilePlaybackClockHeld && !_playheadController.isAnimating) {
+      unawaited(_playheadController.forward());
+    }
   }
 
   void _handleTimelineScrubStarted() {
@@ -1120,6 +1189,7 @@ final class _RadarMapState extends State<_RadarMap>
           // A parent lifecycle callback can request resume while the native map
           // is still rebuilding. Keep the intent in the BLoC, but never let the
           // timeline outrun a blank or partially restored viewport.
+          _resumePlaybackAfterCameraMove = true;
           _radarBloc.add(const RadarPlaybackSuspended());
         } else if (!_isSelectedTilePresented(state)) {
           // The BLoC has selected the next timestamp, but the native map still
@@ -1127,7 +1197,6 @@ final class _RadarMapState extends State<_RadarMap>
           // requested and presented the complete incoming viewport.
           _holdPlaybackClockForTileHandoff();
         } else {
-          _autoplayRequested = false;
           _releasePlaybackClockAfterTileHandoff();
         }
       }
@@ -1191,19 +1260,21 @@ final class _RadarMapState extends State<_RadarMap>
         _lastCenter = center;
         final tileUrl = frame.tileUrlTemplate;
         if (tileUrl != null) {
-          _initializeFirstTileFrame(
-            tileUrl,
-            modelSnapshot: frame.isModelForecast,
-          );
+          _initializeFirstTileFrame(frame);
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
-              _queueTileFrameTransition(
-                tileUrl,
-                modelSnapshot: frame.isModelForecast,
-              );
+              _queueTileFrameTransition(frame);
             }
           });
         }
+        // Selection can advance before the incoming native layer is ready.
+        // Keep the old image's time, point value and provenance together until
+        // the front slot is actually promoted, including across metadata runs.
+        final presentedFrame = tileUrl == null
+            ? frame
+            : _tileFrames[_frontTileSlot] ?? frame;
+        final framePending =
+            presentedFrame.tileUrlTemplate != frame.tileUrlTemplate;
         return ClipRRect(
           borderRadius: BorderRadius.circular(ChetiwaRadius.large),
           child: Stack(
@@ -1249,6 +1320,7 @@ final class _RadarMapState extends State<_RadarMap>
                                 !_isSelectedTilePresented(
                                   _radarBloc.state as RadarReady,
                                 )),
+                        surfaceReady: () => _surfaceReady,
                         debugState: () {
                           final provider = _tileProviders[_frontTileSlot];
                           final incoming = _incomingTileSlot;
@@ -1264,6 +1336,10 @@ final class _RadarMapState extends State<_RadarMap>
                               'incomingSuccessful=${incomingProvider?.successfulCoordinateCount} '
                               'recent=${_tileCache.recentCoordinateCount} '
                               'surfaceReady=$_surfaceReady '
+                              'selectedPresented=${_radarBloc.state is RadarReady && _isSelectedTilePresented(_radarBloc.state as RadarReady)} '
+                              'active=${widget.isActive} '
+                              'lifecycle=${WidgetsBinding.instance.lifecycleState} '
+                              'resumeRecovery=$_resumeRecoveryInProgress '
                               'cameraMoving=$_cameraIsMoving '
                               'resumeAfterCamera=$_resumePlaybackAfterCameraMove '
                               'clockHeld=$_tilePlaybackClockHeld '
@@ -1277,10 +1353,7 @@ final class _RadarMapState extends State<_RadarMap>
                       final selectedTemplate =
                           state.selectedFrame.tileUrlTemplate;
                       if (selectedTemplate != null) {
-                        _queueTileFrameTransition(
-                          selectedTemplate,
-                          modelSnapshot: state.selectedFrame.isModelForecast,
-                        );
+                        _queueTileFrameTransition(state.selectedFrame);
                       }
                       final overlayGeneration = _tileOverlayGeneration;
                       // iOS may preserve a native NO_TILE decision across map
@@ -1373,7 +1446,9 @@ final class _RadarMapState extends State<_RadarMap>
                     child: IgnorePointer(
                       child: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 220),
-                        child: _showTilePreparation
+                        // A late asynchronous retry must never cover a map
+                        // that has already reached a usable first paint.
+                        child: _showTilePreparation && !_surfaceReady
                             ? const _RadarPreparingSurface(
                                 key: ValueKey('radar-preparation-visible'),
                               )
@@ -1400,9 +1475,11 @@ final class _RadarMapState extends State<_RadarMap>
                     Expanded(
                       child: _CompactRadarStatus(
                         forecast: widget.forecast,
-                        selectedInstant: frame.time,
-                        frame: frame,
-                        pointRainRateMmPerHour: frame.pointRainRateMmPerHour,
+                        selectedInstant: presentedFrame.time,
+                        frame: presentedFrame,
+                        pointRainRateMmPerHour:
+                            presentedFrame.pointRainRateMmPerHour,
+                        framePending: framePending,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -1438,7 +1515,10 @@ final class _RadarMapState extends State<_RadarMap>
               Positioned(
                 left: 8,
                 bottom: _timelineHeight + 36,
-                child: _RadarLegend(radarVisible: _radarVisible, frame: frame),
+                child: _RadarLegend(
+                  radarVisible: _radarVisible,
+                  frame: presentedFrame,
+                ),
               ),
               Positioned(
                 left: 0,
@@ -1446,9 +1526,13 @@ final class _RadarMapState extends State<_RadarMap>
                 bottom: 0,
                 child: RadarTimeline(
                   state: state,
+                  presentedFrame: presentedFrame,
                   forecast: widget.forecast,
                   snapshot: widget.snapshot,
                   playbackProgress: _playheadController,
+                  preservePlaybackPhase:
+                      _resumePlaybackAfterCameraMove ||
+                      _resumeRecoveryInProgress,
                   scrubFraction: _timelineScrubFraction,
                   modelForecastLocked: widget.modelForecastLocked,
                   onScrubStarted: _handleTimelineScrubStarted,
@@ -1513,10 +1597,7 @@ final class _RadarMapState extends State<_RadarMap>
       if (latest is RadarReady && !_isSelectedTilePresented(latest)) {
         final latestTemplate = latest.selectedFrame.tileUrlTemplate;
         if (latestTemplate != null) {
-          _queueTileFrameTransition(
-            latestTemplate,
-            modelSnapshot: latest.selectedFrame.isModelForecast,
-          );
+          _queueTileFrameTransition(latest.selectedFrame);
         }
       }
       return selectedReady == expectedTiles;
@@ -1617,10 +1698,7 @@ final class _RadarMapState extends State<_RadarMap>
       _armVisibleTileWatchdog(state);
       final selectedTemplate = state.selectedFrame.tileUrlTemplate;
       if (selectedTemplate != null) {
-        _queueTileFrameTransition(
-          selectedTemplate,
-          modelSnapshot: state.selectedFrame.isModelForecast,
-        );
+        _queueTileFrameTransition(state.selectedFrame);
       }
     }
     if (!_resumePlaybackAfterCameraMove) {
@@ -1711,8 +1789,7 @@ final class _RadarMapState extends State<_RadarMap>
           WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
         return;
       }
-      _resumePlaybackAfterCameraMove = false;
-      _radarBloc.add(const RadarPlaybackResumed());
+      _resumePlaybackAfterPresentationIfReady();
     });
   }
 
@@ -1735,13 +1812,19 @@ final class _RadarMapState extends State<_RadarMap>
   Future<void> _retryVisibleRadar(RadarReady state) async {
     if (!_mapReady || state.selectedFrame.tileUrlTemplate == null) return;
     final generation = ++_viewportRequestGeneration;
+    final showBlockingPreparation =
+        !_surfaceReady &&
+        _tileCache.readyTileCount.value == 0 &&
+        !_preparationDeadlineExpired;
     setState(() {
       _radarTilesLoading = true;
-      if (_tileCache.readyTileCount.value == 0 &&
-          !_preparationDeadlineExpired) {
+      if (showBlockingPreparation) {
         _showTilePreparation = true;
       }
     });
+    // Any cold-start path that can display the blocking preparation surface
+    // must also own a deadline. Post-first-paint retries never display it.
+    if (showBlockingPreparation) _armPreparationEscape();
     final expectedTiles = math.min(_tileCache.recentCoordinateCount, 8);
     final ready = await _tileCache.prefetchNextFrames(
       frameTemplates: [state.selectedFrame.tileUrlTemplate!],
@@ -1757,8 +1840,11 @@ final class _RadarMapState extends State<_RadarMap>
       setState(() {
         _radarTilesLoading = false;
         _showTilePreparation =
-            !_preparationDeadlineExpired && !_frontViewportPresentationReady;
+            !_surfaceReady &&
+            !_preparationDeadlineExpired &&
+            !_frontViewportPresentationReady;
       });
+      if (_showTilePreparation) _armPreparationEscape();
       if (expectedTiles == 0) {
         _tileProviders[_frontTileSlot]?.resetPresentationTracking();
         await _clearRadarTileSlot(_frontTileSlot);
@@ -1798,12 +1884,7 @@ final class _RadarMapState extends State<_RadarMap>
     final latest = _radarBloc.state;
     if (latest is RadarReady) {
       unawaited(_warmPlaybackBuffer(latest));
-      if (_resumePlaybackAfterCameraMove &&
-          widget.isActive &&
-          !_timelineScrubbing) {
-        _resumePlaybackAfterCameraMove = false;
-        _radarBloc.add(const RadarPlaybackResumed());
-      }
+      _resumePlaybackAfterPresentationIfReady();
     }
   }
 
@@ -1939,8 +2020,8 @@ final class _RadarMapState extends State<_RadarMap>
                 Text(
                   key: const Key('radar-precipitation-explanation'),
                   context.l10n.isFrench
-                      ? 'Gris = écho très faible, rose/rouge = pluie plus intense. Ce ne sont pas des nuages. Le Graph suit la valeur LibreWXR exactement au point.'
-                      : 'Grey = very weak echo, pink/red = stronger rain. These are not clouds. Graph follows the exact LibreWXR value at the point.',
+                      ? 'Gris = écho faible, rose/rouge = pluie plus intense. La couleur indique l’intensité, pas la certitude. Le Graph utilise les prévisions LibreWXR au point quand elles sont disponibles, sinon le modèle météo.'
+                      : 'Grey = weak echo, pink/red = stronger rain. Color indicates intensity, not certainty. Graph uses LibreWXR point forecasts when available, otherwise the weather model.',
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontSize: 12,
@@ -2135,12 +2216,14 @@ final class _CompactRadarStatus extends StatelessWidget {
     required this.selectedInstant,
     required this.frame,
     required this.pointRainRateMmPerHour,
+    this.framePending = false,
   });
 
   final Forecast forecast;
   final DateTime selectedInstant;
   final RadarFrame frame;
   final double? pointRainRateMmPerHour;
+  final bool framePending;
 
   @override
   Widget build(BuildContext context) {
@@ -2152,19 +2235,24 @@ final class _CompactRadarStatus extends StatelessWidget {
     final modelRate =
         frame.pointRainRateMmPerHour ??
         forecast.rainPointAt(selectedInstant)?.rateMmPerHour;
-    final usesRadarProjection =
-        frame.isModelForecast && frame.pointRainRateMmPerHour != null;
+    final pointSourceLabel = frame.pointRainRateMmPerHour == null
+        ? (context.l10n.isFrench ? 'modèle météo' : 'weather model')
+        : frame.pointRainSource == 'radar'
+        ? (context.l10n.isFrench ? 'projection radar' : 'radar projection')
+        : (context.l10n.isFrench
+              ? 'prévision fournisseur'
+              : 'provider forecast');
     final modelAtPoint = modelRate == null
         ? (context.l10n.isFrench
               ? '$location · prévision au point indisponible'
               : '$location · point forecast unavailable')
         : modelRate < 0.05
         ? (context.l10n.isFrench
-              ? '$location · ${usesRadarProjection ? 'projection radar' : 'modèle'} sèche au point'
-              : '$location · ${usesRadarProjection ? 'radar projection' : 'model'} dry at point')
+              ? '$location · $pointSourceLabel sèche au point'
+              : '$location · $pointSourceLabel dry at point')
         : (context.l10n.isFrench
-              ? '$location · ${usesRadarProjection ? 'projection radar' : 'modèle'} ${modelRate.toStringAsFixed(1)} mm/h au point'
-              : '$location · ${usesRadarProjection ? 'radar projection' : 'model'} ${modelRate.toStringAsFixed(1)} mm/h at point');
+              ? '$location · $pointSourceLabel ${modelRate.toStringAsFixed(1)} mm/h au point'
+              : '$location · $pointSourceLabel ${modelRate.toStringAsFixed(1)} mm/h at point');
     final observationDetail = context.l10n.isFrench
         ? '$location · image radar observée'
         : '$location · observed radar image';
@@ -2180,16 +2268,16 @@ final class _CompactRadarStatus extends StatelessWidget {
     final nowcastAtPoint = switch (pointRainRateMmPerHour) {
       null =>
         context.l10n.isFrench
-            ? '$location · mesure au point indisponible'
-            : '$location · point reading unavailable',
+            ? '$location · prévision au point indisponible'
+            : '$location · point forecast unavailable',
       < 0.05 =>
         context.l10n.isFrench
-            ? '$location · sec au point · pluie proche possible'
-            : '$location · dry at point · nearby rain possible',
+            ? '$location · $pointSourceLabel sèche au point · pluie proche possible'
+            : '$location · $pointSourceLabel dry at point · nearby rain possible',
       final rate =>
         context.l10n.isFrench
-            ? '$location · ${rate.toStringAsFixed(1)} mm/h au point'
-            : '$location · ${rate.toStringAsFixed(1)} mm/h at point',
+            ? '$location · $pointSourceLabel ${rate.toStringAsFixed(1)} mm/h au point'
+            : '$location · $pointSourceLabel ${rate.toStringAsFixed(1)} mm/h at point',
     };
     return Container(
       height: 48,
@@ -2225,7 +2313,7 @@ final class _CompactRadarStatus extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${WeatherTimeZone.displayHourMinute(selectedInstant)} · $frameState',
+                    '${WeatherTimeZone.displayHourMinute(selectedInstant)} · $frameState${framePending ? (context.l10n.isFrench ? ' · chargement' : ' · loading') : ''}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -2363,8 +2451,8 @@ final class _RadarLegend extends StatelessWidget {
                               ? 'Prévision étendue par extrapolation du déplacement radar. La même cellule est advectée côté serveur ; après 60 min, sa position devient plus incertaine. Ce n’est ni une observation radar ni une carte de nuages.'
                               : 'Extended forecast extrapolated from radar motion. The same cell is advected on the server; after 60 minutes, its position becomes less certain. This is neither a radar observation nor a cloud map.')
                         : (context.l10n.isFrench
-                              ? 'Gris = écho faible ou incertain, rose = pluie modérée, rouge = pluie forte. Ce calque ne montre pas les nuages.'
-                              : 'Grey = weak or uncertain echo, pink = moderate rain, red = heavy rain. This layer does not show clouds.'),
+                              ? 'Gris = écho faible, rose = pluie modérée, rouge = pluie plus forte. La couleur indique l’intensité, pas la certitude. Ce calque ne montre pas les nuages.'
+                              : 'Grey = weak echo, pink = moderate rain, red = stronger rain. Color indicates intensity, not certainty. This layer does not show clouds.'),
                     child: const Icon(Icons.info_outline_rounded, size: 11),
                   ),
                 ],
@@ -2496,9 +2584,11 @@ final class _UserLocationMarker extends StatelessWidget {
 final class RadarTimeline extends StatelessWidget {
   const RadarTimeline({
     required this.state,
+    this.presentedFrame,
     required this.forecast,
     required this.snapshot,
     required this.playbackProgress,
+    this.preservePlaybackPhase = false,
     this.scrubFraction,
     this.modelForecastLocked = false,
     this.onScrubStarted,
@@ -2507,9 +2597,13 @@ final class RadarTimeline extends StatelessWidget {
   });
 
   final RadarReady state;
+
+  /// The image actually retained in the native front slot during a handoff.
+  final RadarFrame? presentedFrame;
   final Forecast forecast;
   final ForecastSnapshot snapshot;
   final Animation<double> playbackProgress;
+  final bool preservePlaybackPhase;
   final ValueNotifier<double?>? scrubFraction;
   final bool modelForecastLocked;
   final VoidCallback? onScrubStarted;
@@ -2518,6 +2612,7 @@ final class RadarTimeline extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final timelineColors = _RadarTimelineColors.of(context);
+    final displayedFrame = presentedFrame ?? state.selectedFrame;
     final nowInstant = snapshot.nowUtc;
     final alignedForecast = alignForecastWithRadarNowcast(
       forecast,
@@ -2544,8 +2639,8 @@ final class RadarTimeline extends StatelessWidget {
       key: const Key('radar-local-time'),
       label:
           '${context.l10n.isFrench ? 'Chronologie radar · heure du téléphone' : 'Radar timeline · phone time'} · '
-          '${WeatherTimeZone.displayUtcOffsetLabel(state.selectedFrame.time)} · '
-          '${WeatherTimeZone.displayHourMinute(state.selectedFrame.time)}',
+          '${WeatherTimeZone.displayUtcOffsetLabel(displayedFrame.time)} · '
+          '${WeatherTimeZone.displayHourMinute(displayedFrame.time)}',
       child: Container(
         height: 104,
         padding: const EdgeInsets.fromLTRB(14, 5, 14, 7),
@@ -2690,6 +2785,30 @@ final class RadarTimeline extends StatelessWidget {
   }
 
   DateTime _cursorTime(BuildContext context, DateTime displayEnd) {
+    final displayedFrame = presentedFrame;
+    if (displayedFrame != null &&
+        displayedFrame.tileUrlTemplate != state.selectedFrame.tileUrlTemplate) {
+      // Keep the interpolation phase of the retained image while its
+      // successor is pending. Labels still describe that retained image.
+      // Scrubbing or a user pause remains anchored to the real frame time.
+      if ((state.isPlaying || preservePlaybackPhase) &&
+          scrubFraction?.value == null &&
+          MediaQuery.maybeOf(context)?.disableAnimations != true) {
+        final presentedIndex = state.frames.indexWhere(
+          (frame) =>
+              frame.time == displayedFrame.time &&
+              frame.tileUrlTemplate == displayedFrame.tileUrlTemplate,
+        );
+        if (presentedIndex >= 0 && presentedIndex + 1 < state.frames.length) {
+          return RadarFramePolicy.interpolateFrameTime(
+            displayedFrame.time,
+            state.frames[presentedIndex + 1].time,
+            playbackProgress.value,
+          );
+        }
+      }
+      return displayedFrame.time;
+    }
     final activeScrub = scrubFraction?.value;
     if (activeScrub != null) {
       final window = RadarFramePolicy.timelineWindow(
@@ -2705,7 +2824,7 @@ final class RadarTimeline extends StatelessWidget {
       );
     }
     final selected = state.selectedFrame.time;
-    if (!state.isPlaying ||
+    if ((!state.isPlaying && !preservePlaybackPhase) ||
         MediaQuery.maybeOf(context)?.disableAnimations == true ||
         state.selectedIndex >= state.frames.length - 1) {
       return selected;

@@ -41,6 +41,15 @@ Handler createApp({
   // frame. Keep it isolated from the low-volume JSON API bucket so normal
   // playback cannot throttle forecast, location or session calls.
   final radarTileLimiter = tileRateLimiter ?? RequestRateLimiter(limit: 600);
+  // Device identifiers are caller-controlled, so a separate network budget
+  // bounds rotations of those identifiers. Keep NAT/household headroom above
+  // the individual-device limits and separate radar fan-out from JSON calls.
+  final networkLimiter = RequestRateLimiter(
+    limit: config.networkRateLimitPerMinute,
+  );
+  final radarNetworkLimiter = RequestRateLimiter(
+    limit: config.radarNetworkRateLimitPerMinute,
+  );
   final metrics = operationalMetrics ?? OperationalMetrics();
   final binaryTileCache = tileCache ?? TileResponseCache();
   final sharedCounter = config.sharedCounterUrl == null
@@ -335,7 +344,16 @@ Handler createApp({
           frame.length + (4 - frame.length % 4) % 4,
           '=',
         );
-        final providerFrame = utf8.decode(base64Url.decode(paddedFrame));
+        late final String providerFrame;
+        try {
+          providerFrame = utf8.decode(base64Url.decode(paddedFrame));
+        } on FormatException {
+          throw const ApiException(
+            statusCode: 400,
+            code: 'invalid_radar_frame',
+            message: 'frame must contain a valid encoded provider path',
+          );
+        }
         final z = int.tryParse(zValue);
         final x = int.tryParse(xValue);
         // The canonical public URL carries a .png suffix so Cloudflare treats
@@ -584,7 +602,16 @@ Handler createApp({
       .addMiddleware(operationalMetricsMiddleware(metrics))
       .addMiddleware(_responseHeaders())
       .addMiddleware(_gzipResponses())
-      .addMiddleware(_rateLimit(limiter, radarTileLimiter, clock))
+      .addMiddleware(
+        _rateLimit(
+          limiter,
+          radarTileLimiter,
+          networkLimiter,
+          radarNetworkLimiter,
+          clock,
+          trustCloudflareProxy: config.trustCloudflareProxy,
+        ),
+      )
       .addHandler(router.call);
 }
 
@@ -632,15 +659,28 @@ Future<Response> _serveCached({
   }
 
   try {
-    final data = await loader();
-    final body = jsonEncode(<String, Object?>{
-      'data': data,
-      'meta': <String, Object?>{'generatedAt': instant.toIso8601String()},
+    final loaded = await cache.loadOnce(key, () async {
+      final data = await loader();
+      final storedAt = now().toUtc();
+      final body = jsonEncode(<String, Object?>{
+        'data': data,
+        'meta': <String, Object?>{'generatedAt': storedAt.toIso8601String()},
+      });
+      final etag = '"${sha256.convert(utf8.encode(body))}"';
+      final entry = CachedJsonResponse(
+        body: body,
+        etag: etag,
+        storedAt: storedAt,
+      );
+      cache.write(key, entry);
+      return entry;
     });
-    final etag = '"${sha256.convert(utf8.encode(body))}"';
-    final entry = CachedJsonResponse(body: body, etag: etag, storedAt: instant);
-    cache.write(key, entry);
-    return _cachedResponse(request, entry, cacheStatus: 'MISS', policy: policy);
+    return _cachedResponse(
+      request,
+      loaded.entry,
+      cacheStatus: loaded.joined ? 'COALESCED' : 'MISS',
+      policy: policy,
+    );
   } on ApiException catch (error) {
     if (existing != null && existing.canServeStale(instant, policy)) {
       return _staleResponse(request, existing, policy);
@@ -1292,50 +1332,91 @@ Middleware _responseHeaders() => (Handler innerHandler) {
 Middleware _rateLimit(
   RequestRateLimiter limiter,
   RequestRateLimiter tileLimiter,
-  DateTime Function() now,
-) => (Handler innerHandler) {
+  RequestRateLimiter networkLimiter,
+  RequestRateLimiter tileNetworkLimiter,
+  DateTime Function() now, {
+  required bool trustCloudflareProxy,
+}) => (Handler innerHandler) {
   return (Request request) async {
     if (!request.url.path.startsWith('v1/')) {
       return innerHandler(request);
     }
     final isRadarTile = request.url.path.startsWith('v1/radar/tiles/');
+    final String networkKey;
+    try {
+      networkKey = _networkClientKey(
+        request,
+        trustCloudflareProxy: trustCloudflareProxy,
+      );
+    } on ApiException catch (error) {
+      return _apiError(error);
+    }
+    final instant = now();
+    final networkBucket = isRadarTile ? tileNetworkLimiter : networkLimiter;
+    final networkDecision = networkBucket.evaluate(networkKey, instant);
+    if (!networkDecision.allowed) {
+      return _rateLimitExceeded(networkDecision);
+    }
     final bucket = isRadarTile ? tileLimiter : limiter;
-    final clientKey = _clientKey(request);
+    final clientKey = _clientKey(request, networkKey);
     final decision = bucket.evaluate(
       '$clientKey:${isRadarTile ? 'radar-tiles' : 'api'}',
-      now(),
+      instant,
     );
     final headers = <String, String>{
       'x-ratelimit-limit': decision.limit.toString(),
       'x-ratelimit-remaining': decision.remaining.toString(),
     };
     if (!decision.allowed) {
-      return _jsonResponse(const <String, Object?>{
-        'error': <String, Object?>{
-          'code': 'rate_limit_exceeded',
-          'message': 'Too many requests; retry later',
-        },
-      }, statusCode: 429).change(
-        headers: <String, String>{
-          ...headers,
-          'retry-after': decision.retryAfter.inSeconds.clamp(1, 60).toString(),
-        },
-      );
+      return _rateLimitExceeded(decision);
     }
     final response = await innerHandler(request);
     return response.change(headers: headers);
   };
 };
 
-String _clientKey(Request request) {
+Response _rateLimitExceeded(RateLimitDecision decision) =>
+    _jsonResponse(const <String, Object?>{
+      'error': <String, Object?>{
+        'code': 'rate_limit_exceeded',
+        'message': 'Too many requests; retry later',
+      },
+    }, statusCode: 429).change(
+      headers: <String, String>{
+        'x-ratelimit-limit': decision.limit.toString(),
+        'x-ratelimit-remaining': '0',
+        'retry-after': decision.retryAfter.inSeconds.clamp(1, 60).toString(),
+      },
+    );
+
+String _clientKey(Request request, String networkKey) {
   final deviceId = request.headers['x-chetiwa-device-id'];
   if (deviceId != null &&
       RegExp(r'^[A-Za-z0-9._-]{8,128}$').hasMatch(deviceId)) {
     return 'device:$deviceId';
   }
-  final forwarded = request.headers['x-forwarded-for']?.split(',').first.trim();
-  if (forwarded != null && forwarded.isNotEmpty && forwarded.length <= 64) {
-    return 'ip:$forwarded';
+  return networkKey;
+}
+
+String _networkClientKey(
+  Request request, {
+  required bool trustCloudflareProxy,
+}) {
+  // Enable this only when every request reaches the API through a trusted
+  // Cloudflare proxy/tunnel and direct access to the origin is prevented.
+  if (trustCloudflareProxy) {
+    final raw = request.headers['cf-connecting-ip']?.trim();
+    final address = raw == null || raw.contains('%')
+        ? null
+        : InternetAddress.tryParse(raw);
+    if (address == null) {
+      throw const ApiException(
+        statusCode: 400,
+        code: 'invalid_client_ip',
+        message: 'A valid proxy client address is required',
+      );
+    }
+    return 'ip:${address.address}';
   }
   final connection = request.context['shelf.io.connection_info'];
   if (connection is HttpConnectionInfo) {

@@ -15,59 +15,15 @@ gcloud firestore databases describe \
   --project="${project_id}" \
   --database="${database_id}" >/dev/null
 
-gcloud firestore fields ttls update expiresAt \
-  --project="${project_id}" \
-  --database="${database_id}" \
-  --collection-group=devices \
-  --enable-ttl \
-  --quiet
-
+# Only diagnostic metrics have an approved automatic-deletion policy. Their
+# expiresAt is written by the worker at run start + 30 days. Stored expiresAt
+# fields in other collections do not authorize enabling TTL on user records.
+# Leave existing policies on those collections unchanged; any expansion needs
+# a separately reviewed retention change, rather than a routine provisioning run.
 gcloud firestore fields ttls update expiresAt \
   --project="${project_id}" \
   --database="${database_id}" \
   --collection-group=alertRunMetrics \
-  --enable-ttl \
-  --quiet
-
-gcloud firestore fields ttls update expiresAt \
-  --project="${project_id}" \
-  --database="${database_id}" \
-  --collection-group=alertDeliveries \
-  --enable-ttl \
-  --quiet
-
-gcloud firestore fields ttls update expiresAt \
-  --project="${project_id}" \
-  --database="${database_id}" \
-  --collection-group=alerts \
-  --enable-ttl \
-  --quiet
-
-gcloud firestore fields ttls update expiresAt \
-  --project="${project_id}" \
-  --database="${database_id}" \
-  --collection-group=alertStates \
-  --enable-ttl \
-  --quiet
-
-gcloud firestore fields ttls update expiresAt \
-  --project="${project_id}" \
-  --database="${database_id}" \
-  --collection-group=vigilanceStates \
-  --enable-ttl \
-  --quiet
-
-gcloud firestore fields ttls update expiresAt \
-  --project="${project_id}" \
-  --database="${database_id}" \
-  --collection-group=vigilanceDeliveries \
-  --enable-ttl \
-  --quiet
-
-gcloud firestore fields ttls update expiresAt \
-  --project="${project_id}" \
-  --database="${database_id}" \
-  --collection-group=alertCellSchedules \
   --enable-ttl \
   --quiet
 

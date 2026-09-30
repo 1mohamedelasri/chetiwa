@@ -76,7 +76,18 @@ final class ChetiwaLocationRepository implements LocationRepository {
       final raw = data['location'];
       if (raw is Map<String, dynamic>) {
         final location = _locationFromApi(raw);
-        if (location != null) return location;
+        if (location != null) {
+          // Reverse geocoders commonly snap their result to the nearest
+          // address or road. Keep that useful label, but never replace the
+          // exact point selected on the map (or returned by the device GPS).
+          return ChetiwaLocation(
+            city: location.city,
+            country: location.country,
+            administrativeArea: location.administrativeArea,
+            coordinates: coordinates,
+            acquisition: acquisition,
+          );
+        }
       }
     } on ChetiwaApiException {
       // Weather still works at raw GPS coordinates when reverse geocoding is

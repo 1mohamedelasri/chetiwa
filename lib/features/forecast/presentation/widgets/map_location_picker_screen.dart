@@ -214,7 +214,6 @@ final class _MapLocationPickerScreenState
             rotateGesturesEnabled: false,
             tiltGesturesEnabled: false,
             zoomControlsEnabled: false,
-            padding: const EdgeInsets.only(bottom: 96),
             onMapCreated: (controller) {
               _mapController = controller;
               _mapReady = true;
@@ -239,8 +238,11 @@ final class _MapLocationPickerScreenState
           ),
           const IgnorePointer(
             child: Center(
-              child: Padding(
-                padding: EdgeInsets.only(bottom: 34),
+              // The camera target is the exact centre of the unpadded map.
+              // Lift the icon by half its height so its pointed tip—not the
+              // middle of the artwork—lands on that coordinate.
+              child: FractionalTranslation(
+                translation: Offset(0, -0.5),
                 child: Icon(
                   Icons.location_pin,
                   color: ChetiwaColors.accentPrimary,

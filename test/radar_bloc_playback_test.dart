@@ -10,6 +10,150 @@ import 'package:chetiwa/core/weather/weather_data_provenance.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('buffer release uses the remaining visual frame interval', (
+    tester,
+  ) async {
+    final bloc = RadarBloc(const FixtureRadarRepository());
+    addTearDown(bloc.close);
+    bloc.add(const RadarRequested());
+    await tester.pump();
+    bloc.add(const RadarPlaybackStarted());
+    await tester.pump();
+    final initial = (bloc.state as RadarReady).selectedIndex;
+    bloc.add(const RadarPlaybackClockHeld());
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    expect((bloc.state as RadarReady).selectedIndex, initial);
+
+    bloc.add(
+      const RadarPlaybackClockReleased(
+        remainingFrameDuration: Duration(milliseconds: 500),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 499));
+    expect((bloc.state as RadarReady).selectedIndex, initial);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect((bloc.state as RadarReady).selectedIndex, initial + 1);
+    await tester.pump(const Duration(milliseconds: 1999));
+    expect((bloc.state as RadarReady).selectedIndex, initial + 1);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect((bloc.state as RadarReady).selectedIndex, initial + 2);
+
+    // A late buffer completion must not undo a user pause.
+    bloc.add(const RadarPlaybackPaused());
+    await tester.pump();
+    bloc.add(
+      const RadarPlaybackClockReleased(remainingFrameDuration: Duration.zero),
+    );
+    await tester.pump(const Duration(seconds: 3));
+    expect((bloc.state as RadarReady).selectedIndex, initial + 2);
+    expect((bloc.state as RadarReady).isPlaying, isFalse);
+
+    bloc.add(const RadarPlaybackToggled());
+    await tester.pump();
+    final recoveryStart = (bloc.state as RadarReady).selectedIndex;
+    bloc.add(const RadarPlaybackSuspended());
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    bloc.add(
+      const RadarPlaybackResumed(
+        remainingFrameDuration: Duration(milliseconds: 500),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 499));
+    expect((bloc.state as RadarReady).selectedIndex, recoveryStart);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect((bloc.state as RadarReady).selectedIndex, recoveryStart + 1);
+    bloc.add(const RadarPlaybackPaused());
+    await tester.pump();
+  });
+
+  test(
+    'rejected autoplay can retry after resume and native promotion',
+    () async {
+      final bloc = RadarBloc(const FixtureRadarRepository());
+      addTearDown(bloc.close);
+      bloc.add(const RadarRequested());
+      await bloc.stream.firstWhere((state) => state is RadarReady);
+      bloc.add(const RadarPlaybackSuspended());
+      bloc.add(const RadarPlaybackStarted());
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect((bloc.state as RadarReady).isPlaying, isFalse);
+
+      // Recovery may finish while an incoming native layer is still pending.
+      // Resume has no previous play intent, so it deliberately emits no state.
+      bloc.add(const RadarPlaybackResumed());
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect((bloc.state as RadarReady).isPlaying, isFalse);
+      final playing = bloc.stream.firstWhere(
+        (state) => state is RadarReady && state.isPlaying,
+      );
+      // Successful promotion must retry this idempotent readiness request.
+      bloc.add(const RadarPlaybackStarted());
+      await playing.timeout(const Duration(seconds: 2));
+    },
+  );
+
+  test('readiness cannot undo a user pause made during an outage', () async {
+    final bloc = RadarBloc(const FixtureRadarRepository());
+    addTearDown(bloc.close);
+    bloc.add(const RadarRequested());
+    await bloc.stream.firstWhere((state) => state is RadarReady);
+    bloc.add(const RadarPlaybackStarted());
+    await bloc.stream.firstWhere(
+      (state) => state is RadarReady && state.isPlaying,
+    );
+    bloc.add(const RadarPlaybackSuspended());
+    await bloc.stream.firstWhere(
+      (state) => state is RadarReady && !state.isPlaying,
+    );
+    bloc.add(const RadarPlaybackPaused());
+    bloc.add(const RadarPlaybackResumed());
+    bloc.add(const RadarPlaybackStarted());
+    bloc.add(const RadarPlaybackStarted());
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect((bloc.state as RadarReady).isPlaying, isFalse);
+    final playing = bloc.stream.firstWhere(
+      (state) => state is RadarReady && state.isPlaying,
+    );
+    bloc.add(const RadarPlaybackToggled());
+    await playing.timeout(const Duration(seconds: 2));
+  });
+
+  test('late native readiness cannot play while backgrounded', () async {
+    final bloc = RadarBloc(const FixtureRadarRepository());
+    addTearDown(bloc.close);
+    bloc.add(const RadarRequested());
+    await bloc.stream.firstWhere((state) => state is RadarReady);
+    bloc.add(const RadarPlaybackSuspended());
+    for (var index = 0; index < 3; index++) {
+      bloc.add(const RadarPlaybackStarted());
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect((bloc.state as RadarReady).isPlaying, isFalse);
+    final playing = bloc.stream.firstWhere(
+      (state) => state is RadarReady && state.isPlaying,
+    );
+    bloc.add(const RadarPlaybackResumed());
+    bloc.add(const RadarPlaybackStarted());
+    await playing.timeout(const Duration(seconds: 2));
+  });
+
+  test('widget cleanup does not suppress later session autoplay', () async {
+    final bloc = RadarBloc(const FixtureRadarRepository());
+    addTearDown(bloc.close);
+    bloc.add(const RadarRequested());
+    await bloc.stream.firstWhere((state) => state is RadarReady);
+    bloc.add(const RadarPlaybackPaused(isUserInitiated: false));
+    final playing = bloc.stream.firstWhere(
+      (state) => state is RadarReady && state.isPlaying,
+    );
+    bloc.add(const RadarPlaybackStarted());
+    await playing.timeout(const Duration(seconds: 2));
+  });
+
   test('autoplay start is idempotent and never toggles playback off', () async {
     final bloc = RadarBloc(const FixtureRadarRepository());
     addTearDown(bloc.close);

@@ -13,15 +13,65 @@ on:
 permissions:
   contents: read
 
+env:
+  FLUTTER_VERSION: '3.47.1'
+
 jobs:
-  android:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Validate release inputs
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_BUILD_NUMBER: ${{ inputs.build_number }}
+          API_BASE_URL: ${{ secrets.CHETIWA_API_BASE_URL }}
+        run: |
+          python3 - <<'PY'
+          import importlib.util
+          import os
+
+          spec = importlib.util.spec_from_file_location("release", "android/release/build.py")
+          release = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(release)
+          assert release.FLUTTER_VERSION == os.environ["FLUTTER_VERSION"]
+          release.validate_inputs(os.environ["RELEASE_VERSION"],
+                                  os.environ["RELEASE_BUILD_NUMBER"],
+                                  os.environ["API_BASE_URL"])
+          PY
+      - name: Test release artifact checks
+        run: python3 -m unittest discover -s android/release -p 'test_*.py'
+      - run: flutter pub get --enforce-lockfile
+      - name: Verify release source
+        run: |
+          dart format --output=none --set-exit-if-changed lib test integration_test
+          flutter analyze
+          flutter test --concurrency=1
+
+  android:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Restore Android upload key
         env:
@@ -30,15 +80,31 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          test -n "$KEYSTORE_BASE64"
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/upload-keystore.jks
-          {
-            printf 'storePassword=%s\n' "$STORE_PASSWORD"
-            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
-            printf 'keyAlias=%s\n' "$KEY_ALIAS"
-            printf 'storeFile=../upload-keystore.jks\n'
-          } > android/key.properties
-      - run: flutter pub get
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          required = ("KEYSTORE_BASE64", "STORE_PASSWORD", "KEY_PASSWORD", "KEY_ALIAS")
+          if any(not os.environ.get(name) for name in required):
+              raise SystemExit("All four Android upload-signing secrets are required.")
+          # java.util.Properties consumes backslash escapes. Preserve passwords exactly.
+          def escaped(value):
+              return "".join(f"\\u{unit:04x}" for unit in
+                            [int.from_bytes(value.encode("utf-16-be")[i:i+2], "big")
+                             for i in range(0, len(value.encode("utf-16-be")), 2)])
+
+          os.umask(0o077)
+          Path("android/upload-keystore.jks").write_bytes(
+              base64.b64decode(os.environ["KEYSTORE_BASE64"], validate=True))
+          values = {"storePassword": os.environ["STORE_PASSWORD"],
+                    "keyPassword": os.environ["KEY_PASSWORD"],
+                    "keyAlias": os.environ["KEY_ALIAS"],
+                    "storeFile": "../upload-keystore.jks"}
+          Path("android/key.properties").write_text(
+              "".join(f"{key}={escaped(value)}\n" for key, value in values.items()))
+          PY
+      - run: flutter pub get --enforce-lockfile
       - name: Configure restricted Google Maps Android key
         env:
           MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
@@ -48,21 +114,26 @@ jobs:
       - name: Build signed Android App Bundle
         env:
           API_BASE_URL: ${{ secrets.CHETIWA_API_BASE_URL }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_BUILD_NUMBER: ${{ inputs.build_number }}
         run: >-
-          flutter build appbundle --release
-          --build-name=${{ inputs.version }}
-          --build-number=${{ inputs.build_number }}
-          --dart-define=CHETIWA_ENV=production
-          --dart-define=CHETIWA_API_BASE_URL=$API_BASE_URL
-          --dart-define=CHETIWA_ALLOW_DIRECT_PROVIDER_FALLBACK=false
+          python3 android/release/build.py
+          --version "$RELEASE_VERSION"
+          --build-number "$RELEASE_BUILD_NUMBER"
       - uses: actions/upload-artifact@v4
         with:
           name: chetiwa-android-${{ inputs.version }}-${{ inputs.build_number }}
-          path: build/app/outputs/bundle/release/app-release.aab
+          path: |
+            build/app/outputs/bundle/release/app-release.aab
+            build/app/outputs/bundle/release/release-verification.json
           if-no-files-found: error
           retention-days: 14
+      - name: Remove temporary signing material
+        if: always()
+        run: rm -f android/key.properties android/upload-keystore.jks
 
   ios-unsigned:
+    needs: verify
     runs-on: macos-latest
     timeout-minutes: 35
     steps:
@@ -70,8 +141,18 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
-      - run: flutter pub get
+      - name: Verify App Store SDK toolchain
+        run: |
+          xcodebuild -version
+          python3 - <<'PY'
+          import subprocess
+          sdk = subprocess.check_output(["xcrun", "--sdk", "iphoneos", "--show-sdk-version"], text=True).strip()
+          if int(sdk.split(".")[0]) < 26:
+              raise SystemExit("The iOS candidate requires the iOS 26 SDK or newer.")
+          PY
+      - run: flutter pub get --enforce-lockfile
       - name: Configure restricted Google Maps iOS key
         env:
           MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_IOS_API_KEY }}
@@ -81,12 +162,14 @@ jobs:
       - name: Build unsigned iOS archive candidate
         env:
           API_BASE_URL: ${{ secrets.CHETIWA_API_BASE_URL }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_BUILD_NUMBER: ${{ inputs.build_number }}
         run: >-
           flutter build ios --release --no-codesign
-          --build-name=${{ inputs.version }}
-          --build-number=${{ inputs.build_number }}
+          --build-name="$RELEASE_VERSION"
+          --build-number="$RELEASE_BUILD_NUMBER"
           --dart-define=CHETIWA_ENV=production
-          --dart-define=CHETIWA_API_BASE_URL=$API_BASE_URL
+          --dart-define="CHETIWA_API_BASE_URL=$API_BASE_URL"
           --dart-define=CHETIWA_ALLOW_DIRECT_PROVIDER_FALLBACK=false
       - name: Package unsigned iOS candidate
         run: >-

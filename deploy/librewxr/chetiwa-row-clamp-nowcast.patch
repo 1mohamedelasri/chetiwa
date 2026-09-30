@@ -1,0 +1,53 @@
+--- a/src/librewxr/data/nowcast.py
++++ b/src/librewxr/data/nowcast.py
+@@ -1329,10 +1329,12 @@
+     and reuses them across forecast steps (they are identical for every
+     step); when omitted they are built here (direct-call / test path).
+ 
+-    ``max_px`` optionally applies ``_clamp_flow`` to the upscaled field
+-    right here — the old pipeline clamped the full-res field once after
+-    upscaling, and clamping after upscale (not before) is what keeps
+-    the warp output bit-identical.  ``_generate_sync`` passes the
++    ``max_px`` optionally applies ``_clamp_flow`` after upscaling.
++    For float32 flow, clamp each destination-row block to bound temporary
++    arrays; other dtypes retain the original whole-field clamp, including
++    its float32 rounding on rows below the cap when another row exceeds it.
++    Clamp arithmetic and upscale-before-clamp ordering stay unchanged.
++    ``_generate_sync`` passes the
+     per-region cap only when the stored low-res clamp actually fired;
+     otherwise the upscaled field is provably within the cap already
+     (bilinear upscaling is a convex combination) and the clamp would be
+@@ -1353,7 +1355,11 @@
+     h, w = frame.shape
+     if flow.shape[0] != h or flow.shape[1] != w:
+         flow = _upscale_flow(flow, (h, w))
+-    if max_px is not None:
++    # The global helper rounds through float32 whenever any vector exceeds
++    # the cap. Keep that behavior for other input dtypes, even on rows that
++    # individually need no clamping.
++    clamp_rows = max_px is not None and flow.dtype == np.dtype(np.float32)
++    if max_px is not None and not clamp_rows:
+         flow = _clamp_flow(flow, max_px)
+     if wrap:
+         pad = min(_WRAP_FLOW_PAD, w // 8)
+@@ -1375,6 +1381,11 @@
+     for row_start in range(0, h, _REMAP_CHUNK_ROWS):
+         row_end = min(row_start + _REMAP_CHUNK_ROWS, h)
+         flow_rows = flow[row_start:row_end]
++        if clamp_rows:
++            # Clamp is elementwise: wrapping before this operation repeats
++            # the same source vectors without changing their arithmetic.
++            # The helper copies only when needed and never mutates input.
++            flow_rows = _clamp_flow(flow_rows, max_px)
+         # Support both sparse axes and callers supplying dense cached grids.
+         row_xs = xs if xs.shape[0] == 1 else xs[row_start:row_end]
+         row_ys = ys if ys.shape[0] == 1 else ys[row_start:row_end]
+@@ -1389,7 +1400,7 @@
+             ),
+             borderValue=0,
+         )
+-        del map_x, map_y
++        del map_x, map_y, flow_rows
+     if wrap:
+         warped = warped[:, pad : pad + w]
+ 

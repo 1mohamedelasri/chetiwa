@@ -1,0 +1,16 @@
+[Unit]
+Description=Block direct public access to the Chetiwa LibreWXR origin
+After=docker.service network-online.target
+Wants=docker.service network-online.target
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+EnvironmentFile=-/etc/chetiwa-origin-firewall.env
+ExecStart=/usr/local/sbin/chetiwa-origin-firewall apply
+ExecReload=/usr/local/sbin/chetiwa-origin-firewall apply
+ExecStop=/usr/local/sbin/chetiwa-origin-firewall remove
+
+[Install]
+WantedBy=multi-user.target

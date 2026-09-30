@@ -1,5 +1,11 @@
 # Fiches App Store et Google Play — Chetiwa
 
+Statut au 30 septembre 2026 : **textes préparés, non validés pour publication**.
+La variante ci-dessous inclut les alertes. Ne la soumettre qu'après validation
+des envois distants sur la build de review. Si la première release exclut les
+alertes, appliquer la variante sans alertes décrite plus bas et masquer la
+fonction dans cette build ; une modification du texte seule ne suffit pas.
+
 ## Français
 
 - **Nom** : `Chetiwa : pluie et radar`
@@ -13,7 +19,7 @@
 Chetiwa vous aide à comprendre la pluie autour du lieu qui compte maintenant.
 
 • Un graphique clair pour voir quand la pluie commence et son intensité.
-• Un radar animé qui démarre automatiquement et reste fluide pendant vos déplacements sur la carte.
+• Un radar animé qui démarre automatiquement et permet d'explorer la carte.
 • Des prévisions horaires et sur plusieurs jours.
 • Des alertes pluie facultatives, configurées sans créer de compte.
 • Recherche, carte ou position actuelle : vous choisissez toujours le point affiché.
@@ -35,7 +41,7 @@ Les données météo et radar sont indicatives et ne remplacent pas les alertes 
 Chetiwa helps you understand the rain around the place that matters right now.
 
 • A clear graph showing when rain starts and how intense it may become.
-• An animated radar that starts automatically and stays responsive as you move around the map.
+• An animated radar that starts automatically and lets you explore the map.
 • Hourly and multi-day forecasts.
 • Optional rain alerts, with no account required.
 • Search, map or current position: you always choose the displayed point.
@@ -49,8 +55,11 @@ Weather and radar information is indicative and does not replace official safety
 - Aucun compte requis.
 - Graph s'ouvre au lancement ; Radar démarre automatiquement.
 - La localisation peut être refusée : utiliser la recherche ou la carte.
-- Alertes : Réglages → Smart Rain Alerts. L'envoi distant n'est testable que si
-  Firestore/FCM sont activés pour l'environnement de review.
+- Alertes : Réglages → Smart Rain Alerts. Avant soumission de cette variante,
+  les workers corrigés et l'envoi Firestore/FCM/APNs doivent être actifs et
+  vérifiés pour l'environnement de review. Les jobs étaient désactivés et
+  leurs schedulers en pause lors de l'audit du 19 septembre ; aucune promesse
+  de notification ne peut être validée à partir de la seule interface.
 - Publicité et Chetiwa+ sont masqués dans la première release (`flags=false`).
 
 ## Captures requises
@@ -64,3 +73,27 @@ Weather and radar information is indicative and does not replace official safety
 Produire au minimum un jeu iPhone 6,7 pouces et un jeu Android téléphone. Ne pas
 utiliser une capture avec bande de debug, notifications personnelles, batterie
 faible ou données fournisseur périmées.
+
+## Variante si les alertes sont reportées après la v1
+
+Cette option reste une décision produit à confirmer. Elle n'est pas appliquée
+au code par ce document.
+
+- Description courte Play FR : `Graphique de pluie, radar animé et prévisions pour le lieu de votre choix.`
+- Play short description EN: `Rain graph, animated radar and forecasts for any place you choose.`
+- Retirer la ligne d'alertes dans chacune des descriptions complètes, les
+  mots-clés `alerte`/`alert`, la note de review et la capture d'alertes.
+- Garder les permissions et déclarations Store alignées avec ce qui reste
+  réellement présent/collecté dans la build ; ne pas déduire leur suppression
+  de la seule absence de promesse marketing.
+
+## Validation des éléments publics
+
+- [ ] Nom de l'éditeur et coordonnées publiques confirmés.
+- [ ] URLs privacy/support/conditions publiées et liées dans l'app.
+- [ ] Comportement des alertes et disponibilité des données testés dans les
+  pays de lancement sélectionnés.
+- [ ] Captures réalisées avec la build finale et les fonctions accessibles.
+- [ ] Langues, appareils pris en charge et captures Store cohérents, y compris
+  les captures iPad si cette famille reste prise en charge.
+- [ ] Mentions fournisseur reprises selon les licences réellement validées.

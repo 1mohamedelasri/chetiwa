@@ -50,6 +50,8 @@ final class ChetiwaRadarRepository implements RadarRepository {
         final frame = mapped[index];
         final time = DateTime.parse(frame['time'] as String).toUtc();
         final point = pointSamples[time.millisecondsSinceEpoch];
+        final isForecast =
+            frame['kind'] == 'nowcast' || frame['kind'] == 'model';
         return RadarFrame(
           time: time,
           progress: mapped.length == 1 ? 1 : index / (mapped.length - 1),
@@ -60,11 +62,11 @@ final class ChetiwaRadarRepository implements RadarRepository {
             _ => WeatherDataKind.radarObservation,
           },
           providerName: providerName,
-          pointRainRateMmPerHour: frame['kind'] == 'nowcast'
+          pointRainRateMmPerHour: isForecast
               ? point?.rainRateMmPerHour ??
                     (frame['pointRainRateMmPerHour'] as num?)?.toDouble()
               : null,
-          pointRainSource: frame['kind'] == 'nowcast'
+          pointRainSource: isForecast
               ? point?.source ?? frame['pointRainSource'] as String?
               : null,
         );

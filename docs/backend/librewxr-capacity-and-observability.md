@@ -1,5 +1,162 @@
 # Capacité et supervision météo/radar — audit du 27 août 2026
 
+## Enregistrement reproductible — 30 septembre 2026
+
+[`capacity-check.py`](../../deploy/librewxr/capacity-check.py) est un outil de
+lecture seule, sans dépendance Python externe, pour Linux avec cgroup v2. Il
+enregistre l'identité du conteneur, la RAM, le swap, les compteurs noyau, la
+pression mémoire/I/O et les horodatages des quatre observations et six
+prévisions. Les seuls appels Docker sont `inspect` et `logs`; aucun déploiement,
+rafraîchissement forcé, changement de limite ou test de charge n'est exécuté.
+Il ne lit pas les variables d'environnement. Il conserve uniquement la catégorie
+et l'horodatage des événements IFS/nowcast/publication, jamais les logs bruts.
+
+Depuis un poste disposant déjà d'un accès SSH autorisé, recueillir d'abord une
+fenêtre de quinze minutes sur la VM actuelle (aucune modification de pare-feu
+ou de forfait n'est nécessaire pour cet outil) :
+
+```bash
+ssh root@116.203.124.254 'python3 - record --duration 900 --interval 10' \
+  < deploy/librewxr/capacity-check.py \
+  > tmp/production-audit/capacity-2026-09-30.jsonl
+```
+
+Puis contrôler le fichier local en déclarant la limite réellement attendue,
+actuellement 3 Gio :
+
+```bash
+python3 deploy/librewxr/capacity-check.py assess \
+  tmp/production-audit/capacity-2026-09-30.jsonl --expected-radar-mib 3072
+```
+
+Le code de sortie est **1** pour une pression mesurée, **2** pour des éléments
+manquants et **0** uniquement pour un contrôle mémoire complet et favorable.
+Un court enregistrement peut démontrer un échec sans contenir un cycle horaire
+IFS; il ne peut pas démontrer une réussite sans ce cycle. Après un correctif,
+utiliser une nouvelle fenêtre de 4 800 secondes (`--duration 4800`, valeur par
+défaut) et vérifier les phases réellement observées. Une durée seule ne suffit
+pas : il faut un nouveau fetch IFS terminé, les six nowcasts, une publication
+complète dont les horodatages avancent et au moins 60 secondes de stabilisation.
+
+Pendant la régénération, une nouvelle observation peut faire expirer la première
+ancienne prévision : le serveur expose alors brièvement quatre observations et
+cinq prévisions. Le rapport distingue ces transitions des publications terminées.
+Il tolère uniquement une séquence alignée à dix minutes, sans changement de
+contenu au milieu de la transition, rétablie à six prévisions dans une borne
+conservatrice de 120 secondes (intervalle d'échantillonnage compris). La
+publication terminée et les 60 dernières secondes de stabilisation doivent
+contenir les quatre observations et six prévisions alignées. Une fenêtre
+persistante, malformée ou non rétablie reste incomplète. Les anomalies de
+métadonnées ne suppriment jamais les mesures noyau valides : une pression mémoire
+avérée reste un échec même si la couverture des frames est insuffisante.
+
+Le contrôle refuse les redémarrages, les resets de compteurs, les interruptions,
+les données absentes et les fenêtres incomplètes. Les seuils conservateurs
+locaux de dépistage sont : aucun nouvel événement `high`/`max`/OOM, RAM radar
+échantillonnée au plus à 90 % de sa limite, au moins 512 Mio de RAM hôte
+disponible, croissance du swap radar au plus 64 Mio, I/O swap hôte p95 au plus
+1 Mio/s, pression mémoire `some avg10` au plus 5 % au pic et 1 % au p95. Les
+pics historiques du noyau sont rapportés séparément; ils ne prouvent pas une
+pression nouvelle. Les valeurs de swap et de PSI hôte concernent tous les
+services, pas seulement le radar.
+
+Ces seuils sont un filtre de diagnostic, pas un SLA ni une garantie de débit.
+La marge après les limites radar/API est informative; le budget proposé pour
+une VM plus grande n'impose pas une augmentation de forfait à la VM actuelle.
+Tout résultat conserve `productionReady: false` : il faut encore vérifier
+l'inventaire réel des services, la stabilité des pics et du régime établi,
+puis corréler les mesures avec des lectures API/tuiles concurrentes bornées.
+La suite hors réseau est disponible via
+`python3 deploy/librewxr/capacity-check-test.py`.
+
+## Contrôle mémoire noyau — 19 septembre 2026
+
+L'audit a constaté un écart de supervision : la courbe Netdata
+`cgroup_librewxr-librewxr-1.mem_usage` affichait zéro swap alors que le noyau
+mesurait plus de 1 Gio dans `memory.swap.current`. Pour décider d'un correctif
+ou d'un changement de capacité, vérifier directement le cgroup v2 du conteneur.
+Les commandes suivantes sont en lecture seule, à exécuter sur l'origine :
+
+```bash
+radar_pid=$(docker inspect --format '{{.State.Pid}}' librewxr-librewxr-1)
+radar_cgroup=$(awk -F: '$1 == "0" { print $3 }' "/proc/$radar_pid/cgroup")
+radar_cgroup_dir="/sys/fs/cgroup$radar_cgroup"
+for radar_metric in memory.current memory.max memory.peak memory.swap.current \
+  memory.events memory.pressure io.pressure; do
+  printf '%s\n' "$radar_metric"
+  cat "$radar_cgroup_dir/$radar_metric"
+done
+vmstat 1 5
+```
+
+Les valeurs `memory.*` simples sont en octets. `memory.events` contient des
+compteurs : `max` signale une rencontre avec la limite, `oom` et `oom_kill`
+signalent les échecs d'allocation et les processus tués. `memory.pressure`
+donne les pourcentages de temps bloqué sur 10/60/300 secondes et un total
+cumulé en microsecondes. Les colonnes `si`/`so` de `vmstat` mesurent les échanges
+swap du serveur entier, pas seulement ceux de LibreWXR.
+
+Relever les compteurs avant et après une publication complète du radar et de
+ses prévisions, avec le même conteneur et sans compilation concurrente.
+Comparer les **deltas**, le swap actif, les échanges swap et la pression ; un
+pic historique ou des pages froides en swap ne suffisent pas à établir une
+latence actuelle. Un redémarrage recrée le cgroup et remet ses compteurs à
+zéro : relancer la résolution du PID/chemin et conserver une nouvelle base de
+mesure. Ne pas conclure à une amélioration en comparant deux totaux de durées
+différentes. Les correctifs de grilles float32 puis d'axes creux réduisent les
+allocations sans changer les pixels, la couverture ou la durée des prévisions ;
+ils ne constituent pas une garantie d'absence de pression sur cette VM.
+
+
+Le 19 septembre, les trois correctifs (coordonnées float32, axes creux,
+remappage par blocs de 512 lignes) ont été déployés sans réduire les régions,
+la résolution ou les six prévisions. Une publication naturelle complète,
+mesurée de 11:50:17 à 12:04:26 UTC avec 60 secondes de stabilisation, a encore
+ajouté **931 événements de limite mémoire**, sans OOM, avec un swap passant de
+54 à 866 Mio. La pression noyau `avg10` a atteint 19,55 %. Ce cycle comprenait
+également un rafraîchissement ECMWF IFS : il ne permet pas de classer les
+performances des versions à partir d'un seul cycle différent. Les correctifs
+réduisent des allocations vérifiées, mais la marge mémoire reste insuffisamment
+validée avant une ouverture publique. Une hausse de capacité payante ou une
+réduction supplémentaire des allocations doit être décidée et mesurée ; ne pas
+augmenter simplement la limite du conteneur sur cet hôte d'environ 3,8 Gio.
+
+## Protection du stockage déployée le 29 août 2026
+
+L'incident `no space left on device` venait notamment de memmaps RRQPE
+persistants que le processus suivant ne rechargeait pas et ne pouvait donc
+jamais évincer. Le correctif de démarrage supprime uniquement ces fichiers
+fetch-side devenus inaccessibles avant de reconstruire la fenêtre récente. Lors
+du premier déploiement, 81 fichiers représentant 2 259,5 Mio ont été retirés ;
+le volume LibreWXR est passé d'environ 3,6 Gio à 1,3 Gio et l'utilisation de la
+racine de 31 % à 22 %.
+
+`chetiwa-storage-guard.timer` contrôle toutes les cinq minutes :
+
+- disque et inodes : avertissement 70 %, critique 85 %, urgence 90 % ;
+- RRQPE : avertissement 512 Mio, critique 1 Gio ;
+- couche Docker LibreWXR : avertissement 1,5 Gio, critique 2,5 Gio.
+
+La dernière mesure est lisible sans outil externe :
+
+```bash
+cat /var/lib/chetiwa-storage-guard/status.env
+systemctl status chetiwa-storage-guard.timer
+journalctl -u chetiwa-storage-guard.service -n 30 --no-pager
+```
+
+Le service ne supprime jamais automatiquement une donnée active. Pour recevoir
+les changements d'état hors du serveur, connecter un agent de supervision tel
+que Netdata Cloud puis router les alertes `disk.space`, `disk.inodes` et l'état
+systemd de la garde vers l'e-mail ou le canal d'astreinte retenu.
+
+Les trois conteneurs utilisent aussi `json-file` avec `max-size=10m` et
+`max-file=3`. Si le tunnel a été créé manuellement sans ces limites, appliquer :
+
+```bash
+deploy/librewxr/recreate-cloudflared-bounded-logs.sh root@116.203.124.254
+```
+
 ## Audit de latence et correctifs de production
 
 Le ralentissement n'avait pas une cause unique. Le chemin complet a été mesuré

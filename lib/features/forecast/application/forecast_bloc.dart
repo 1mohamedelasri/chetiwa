@@ -102,12 +102,9 @@ final class ForecastBloc extends Bloc<ForecastEvent, ForecastState> {
   Coordinates _coordinates = Coordinates.paris;
   String? _selectedLocationName;
   Timer? _clockTimer;
+  Future<ChetiwaLocation?>? _mainLocationRestore;
   var _didRestoreMainLocation = false;
-
-  Forecast _withSelectedLocation(Forecast forecast) =>
-      _selectedLocationName == null
-      ? forecast
-      : forecast.copyWith(locationName: _selectedLocationName);
+  var _loadGeneration = 0;
 
   ForecastReady _ready(
     Forecast forecast, {
@@ -122,23 +119,35 @@ final class ForecastBloc extends Bloc<ForecastEvent, ForecastState> {
   );
 
   Future<void> _load(ForecastEvent event, Emitter<ForecastState> emit) async {
-    if (event is ForecastRequested && !_didRestoreMainLocation) {
+    final generation = ++_loadGeneration;
+    if (!_didRestoreMainLocation) {
+      final savedLocation = await (_mainLocationRestore ??=
+          _restoreMainLocation());
+      if (generation != _loadGeneration || emit.isDone) return;
       _didRestoreMainLocation = true;
-      final savedLocation = await _locationRepository?.getMainLocation();
       if (savedLocation != null) {
         _coordinates = savedLocation.coordinates;
         _selectedLocationName = savedLocation.label;
       }
     }
+    // Bloc event handlers may overlap. Keep the data and label tied to the
+    // same request, and discard old work after an explicit location change.
+    final requestedCoordinates = _coordinates;
+    final requestedLocationName = _selectedLocationName;
+    Forecast withSelectedLocation(Forecast forecast) =>
+        requestedLocationName == null
+        ? forecast
+        : forecast.copyWith(locationName: requestedLocationName);
     ForecastReady? visible =
         event is! ForecastLocationChanged && state is ForecastReady
         ? state as ForecastReady
         : null;
     if (event is! ForecastRefreshed) {
-      final cached = await _repository.getCachedForecast(_coordinates);
+      final cached = await _repository.getCachedForecast(requestedCoordinates);
+      if (generation != _loadGeneration || emit.isDone) return;
       if (cached != null) {
         visible = _ready(
-          _withSelectedLocation(cached.forecast),
+          withSelectedLocation(cached.forecast),
           health: WeatherDataHealth(
             freshness: cached.isStaleAt(_clock.nowUtc)
                 ? WeatherDataFreshness.cachedStale
@@ -165,12 +174,11 @@ final class ForecastBloc extends Bloc<ForecastEvent, ForecastState> {
       emit(visible);
     }
     try {
-      emit(
-        _ready(
-          _withSelectedLocation(await _repository.getForecast(_coordinates)),
-        ),
-      );
+      final forecast = await _repository.getForecast(requestedCoordinates);
+      if (generation != _loadGeneration || emit.isDone) return;
+      emit(_ready(withSelectedLocation(forecast)));
     } on Object catch (error) {
+      if (generation != _loadGeneration || emit.isDone) return;
       final issue = weatherDataIssueFrom(error);
       if (visible != null) {
         emit(
@@ -189,10 +197,20 @@ final class ForecastBloc extends Bloc<ForecastEvent, ForecastState> {
     }
   }
 
+  Future<ChetiwaLocation?> _restoreMainLocation() async {
+    try {
+      return await _locationRepository?.getMainLocation();
+    } on Object {
+      // Local preferences are optional; the user can still search or use GPS.
+      return null;
+    }
+  }
+
   Future<void> _changeLocation(
     ForecastLocationChanged event,
     Emitter<ForecastState> emit,
   ) async {
+    _didRestoreMainLocation = true;
     _selectedLocationName = event.location.label;
     _coordinates = event.location.coordinates;
     await _load(event, emit);

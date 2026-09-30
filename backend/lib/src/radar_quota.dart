@@ -45,10 +45,15 @@ final class RadarQuotaDecision {
 /// In-memory by design for the local/staging foundation. Production must use
 /// a shared implementation before Cloud Run is scaled beyond one instance.
 final class RadarQuotaTracker {
-  RadarQuotaTracker({this.policy = const RadarQuotaPolicy()});
+  RadarQuotaTracker({
+    this.policy = const RadarQuotaPolicy(),
+    this.maximumOwners = 10000,
+  }) : assert(maximumOwners > 0);
 
   final RadarQuotaPolicy policy;
+  final int maximumOwners;
   final Map<String, _RadarWindow> _windows = {};
+  DateTime? _nextExpirySweep;
 
   RadarQuotaDecision evaluate({
     required String ownerKey,
@@ -57,11 +62,34 @@ final class RadarQuotaTracker {
     required DateTime now,
   }) {
     final instant = now.toUtc();
+    if (_nextExpirySweep == null ||
+        !instant.isBefore(_nextExpirySweep!) ||
+        _windows.length >= maximumOwners) {
+      _windows.removeWhere((_, window) => !instant.isBefore(window.resetAt));
+      _nextExpirySweep = instant.add(const Duration(minutes: 1));
+    }
     final current = _windows[ownerKey];
+    if (current == null && _windows.length >= maximumOwners) {
+      // Evicting a live owner would reset that owner's quota. Fail closed for
+      // new owners until a window expires, while existing owners keep working.
+      throw const ApiException(
+        statusCode: 503,
+        code: 'radar_quota_capacity',
+        message: 'Radar session capacity reached; retry later',
+      );
+    }
     final window = current == null || !instant.isBefore(current.resetAt)
         ? _RadarWindow(startedAt: instant, resetAt: instant.add(policy.window))
         : current;
-    if (window.sessionIds.add(sessionId)) window.used++;
+    final largestLimit = policy.freeSessions > policy.premiumSessions
+        ? policy.freeSessions
+        : policy.premiumSessions;
+    // Once every supported plan is over quota, further distinct identifiers
+    // cannot change the decision. Saturate accounting instead of retaining
+    // attacker-controlled session IDs for the remainder of the month.
+    if (window.used <= largestLimit && window.sessionIds.add(sessionId)) {
+      window.used++;
+    }
     _windows[ownerKey] = window;
     final limit = policy.limitFor(plan);
     final allowed = window.used <= limit;
@@ -74,7 +102,10 @@ final class RadarQuotaTracker {
     );
   }
 
-  void clear() => _windows.clear();
+  void clear() {
+    _windows.clear();
+    _nextExpirySweep = null;
+  }
 }
 
 final class DistributedRadarQuotaGuard {

@@ -1,0 +1,35 @@
+diff --git a/src/librewxr/data/nowcast.py b/src/librewxr/data/nowcast.py
+--- a/src/librewxr/data/nowcast.py
++++ b/src/librewxr/data/nowcast.py
+@@ -933,7 +933,9 @@
+         if not forecast_regions:
+             return [], {}
+ 
+-        # Precompute the float32 mgrid coordinate grids ONCE per region
++        # Allocate coordinate grids directly in float32: an int64 mgrid then
++        # astype temporarily holds three times the final grid memory.
++        # Precompute these coordinate grids ONCE per region
+         # instead of rebuilding them for every forecast step — xs/ys are
+         # identical across all steps (only map_x/map_y, which are
+         # steps·flow away from them, vary per step).  Built up-front for
+@@ -946,7 +948,7 @@
+             data = latest_regions.get(region_name)
+             if flow is not None and data is not None:
+                 h, w = data.shape
+-                ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
++                ys, xs = np.indices((h, w), dtype=np.float32)
+                 coord_grids[region_name] = (ys, xs)
+ 
+         # Generate extrapolated frames for each step.  Phase B submits
+@@ -1357,9 +1359,9 @@
+         # Coordinate grid over the PADDED frame (column indices are P-space
+         # already — the crop back below restores the unwrapped view).  The
+         # row axis never wraps.
+-        ys, xs = np.mgrid[0:h, 0 : w + 2 * pad].astype(np.float32)
++        ys, xs = np.indices((h, w + 2 * pad), dtype=np.float32)
+     elif xs is None or ys is None:
+-        ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
++        ys, xs = np.indices((h, w), dtype=np.float32)
+ 
+     map_x = xs - steps * flow[..., 0]
+     map_y = ys - steps * flow[..., 1]

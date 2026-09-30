@@ -3,7 +3,10 @@ FROM dart:stable AS build
 WORKDIR /app
 COPY pubspec.* ./
 RUN dart pub get
-COPY . .
+# Only compilation inputs enter the image/cache. Server-side environment files
+# and deployment credentials must never enter a Docker build context layer.
+COPY lib/ ./lib/
+COPY bin/ ./bin/
 RUN dart compile exe bin/server.dart -o /app/chetiwa-api && \
     dart compile exe bin/alert_worker.dart -o /app/chetiwa-alert-worker && \
     dart compile exe bin/vigilance_worker.dart -o /app/chetiwa-vigilance-worker && \

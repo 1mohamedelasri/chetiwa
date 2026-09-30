@@ -31,6 +31,7 @@ Future<void> main() async {
     rainAlertCellSizeDegrees: config.rainAlertCellSizeDegrees,
   );
   FirebaseRainAlertPushSender? sender;
+  ProviderGateway? provider;
   final startedAt = DateTime.now().toUtc();
   final stopwatch = Stopwatch()..start();
   try {
@@ -79,7 +80,7 @@ Future<void> main() async {
       return;
     }
 
-    final provider = ProviderGateway(config: config);
+    provider = ProviderGateway(config: config);
     final engine = RainAlertEngine(
       store: store,
       provider: ProviderRainAlertNowcast(provider),
@@ -197,6 +198,7 @@ Future<void> main() async {
     );
     Error.throwWithStackTrace(error, stackTrace);
   } finally {
+    provider?.close();
     await sender?.close();
     await store.close();
   }

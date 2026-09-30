@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'bounded_http.dart';
+
 /// Counter boundary used by the quota guard. The in-memory implementation is
 /// safe for local and one-instance staging only; production must configure the
 /// HTTP implementation backed by a shared Redis/Firestore counter service.
@@ -33,12 +35,16 @@ final class InMemorySharedCounter implements SharedCounter {
 /// Calls a small internal counter service. This keeps Cloud Run instances
 /// stateless while the counter service provides atomic INCR + TTL semantics.
 final class HttpSharedCounter implements SharedCounter {
-  HttpSharedCounter({required Uri endpoint, http.Client? client})
-    : _endpoint = endpoint,
-      _client = client ?? http.Client();
+  HttpSharedCounter({
+    required Uri endpoint,
+    http.Client? client,
+    this.requestTimeout = const Duration(seconds: 3),
+  }) : _endpoint = endpoint,
+       _client = client ?? http.Client();
 
   final Uri _endpoint;
   final http.Client _client;
+  final Duration requestTimeout;
 
   @override
   Future<int> increment(
@@ -46,8 +52,11 @@ final class HttpSharedCounter implements SharedCounter {
     required Duration ttl,
     int amount = 1,
   }) async {
-    final response = await _client.post(
+    final response = await boundedHttpRequest(
+      _client,
+      'POST',
       _endpoint,
+      timeout: requestTimeout,
       headers: const {'content-type': 'application/json'},
       body: jsonEncode(<String, Object>{
         'key': key,

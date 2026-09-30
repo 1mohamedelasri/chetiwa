@@ -4,6 +4,67 @@ import 'package:test/test.dart';
 void main() {
   final baseNow = DateTime.utc(2026, 8, 24, 10);
 
+  void wake(_MemoryEngineStore store) {
+    final current = store.schedules.values.single;
+    store.schedules[current.cellKey] = RainAlertCellSchedule(
+      cellKey: current.cellKey,
+      latitude: current.latitude,
+      longitude: current.longitude,
+      nextCheckAt: baseNow,
+      lastCheckedAt: baseNow,
+      mode: RainAlertPollingMode.retry,
+      version: '2',
+    );
+  }
+
+  for (final fails in [false, true]) {
+    test(
+      'worker ${fails ? 'retry' : 'success'} keeps its original schedule version after a wakeup',
+      () async {
+        final store = _MemoryEngineStore([_alert(owner: 'racing-owner')]);
+        final provider =
+            _NowcastProvider([
+                RainNowcastSample(
+                  time: baseNow.add(const Duration(hours: 4)),
+                  rateMmPerHour: 0,
+                ),
+              ])
+              ..beforeNowcast = () {
+                wake(store);
+                if (fails) throw StateError('provider unavailable');
+              };
+        await RainAlertEngine(
+          store: store,
+          provider: provider,
+          now: () => baseNow,
+          localTime: (utc, _) => utc,
+        ).run();
+        expect(store.savedVersions, ['1']);
+        expect(store.schedules.values.single.version, '2');
+        expect(store.schedules.values.single.nextCheckAt, baseNow);
+      },
+    );
+  }
+
+  test(
+    'empty-cell worker cleanup keeps the original version after a wakeup',
+    () async {
+      final store = _MemoryEngineStore([_alert(owner: 'racing-owner')]);
+      store.listCellOverride = (_) {
+        wake(store);
+        return [];
+      };
+      await RainAlertEngine(
+        store: store,
+        provider: _NowcastProvider([]),
+        now: () => baseNow,
+        localTime: (utc, _) => utc,
+      ).run();
+      expect(store.deletedVersions, ['1']);
+      expect(store.schedules.values.single.version, '2');
+    },
+  );
+
   test(
     'mutualizes one provider evaluation per stable geographic cell',
     () async {
@@ -255,10 +316,12 @@ final class _NowcastProvider implements RainAlertNowcastProvider {
 
   final List<RainNowcastSample> samples;
   int calls = 0;
+  void Function()? beforeNowcast;
 
   @override
   Future<List<RainNowcastSample>> nowcast(RainAlertCell cell) async {
     calls += 1;
+    beforeNowcast?.call();
     return samples;
   }
 }
@@ -285,11 +348,15 @@ final class _MemoryEngineStore implements RainAlertEngineStore {
         nextCheckAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
         lastCheckedAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
         mode: RainAlertPollingMode.retry,
+        version: '1',
       );
     }
   }
 
   final List<ActiveRainAlert> alerts;
+  final List<String?> savedVersions = [];
+  final List<String?> deletedVersions = [];
+  List<ActiveRainAlert> Function(String)? listCellOverride;
   final Map<String, RainAlertState> _states = <String, RainAlertState>{};
   final Map<String, RainAlertCellSchedule> schedules =
       <String, RainAlertCellSchedule>{};
@@ -338,21 +405,41 @@ final class _MemoryEngineStore implements RainAlertEngineStore {
       .toList(growable: false);
 
   @override
-  Future<List<ActiveRainAlert>> listActiveAlertsForCell(String cellKey) async =>
-      (await listActiveAlerts())
-          .where(
-            (alert) =>
-                RainAlertCell.fromLocation(alert.rule.location).key == cellKey,
-          )
-          .toList(growable: false);
-
-  @override
-  Future<void> saveCellSchedule(RainAlertCellSchedule schedule) async {
-    schedules[schedule.cellKey] = schedule;
+  Future<List<ActiveRainAlert>> listActiveAlertsForCell(String cellKey) async {
+    if (listCellOverride != null) return listCellOverride!(cellKey);
+    return (await listActiveAlerts())
+        .where(
+          (alert) =>
+              RainAlertCell.fromLocation(alert.rule.location).key == cellKey,
+        )
+        .toList(growable: false);
   }
 
   @override
-  Future<void> deleteCellSchedule(String cellKey) async {
+  Future<void> saveCellSchedule(
+    RainAlertCellSchedule schedule, {
+    String? expectedVersion,
+  }) async {
+    savedVersions.add(expectedVersion);
+    if (schedules[schedule.cellKey]?.version != expectedVersion) return;
+    schedules[schedule.cellKey] = RainAlertCellSchedule(
+      cellKey: schedule.cellKey,
+      latitude: schedule.latitude,
+      longitude: schedule.longitude,
+      nextCheckAt: schedule.nextCheckAt,
+      lastCheckedAt: schedule.lastCheckedAt,
+      mode: schedule.mode,
+      version: '${int.parse(expectedVersion ?? '0') + 1}',
+    );
+  }
+
+  @override
+  Future<void> deleteCellSchedule(
+    String cellKey, {
+    String? expectedVersion,
+  }) async {
+    deletedVersions.add(expectedVersion);
+    if (schedules[cellKey]?.version != expectedVersion) return;
     schedules.remove(cellKey);
   }
 

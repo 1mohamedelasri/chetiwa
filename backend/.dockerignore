@@ -4,3 +4,7 @@ build
 coverage
 test
 *.env
+**/*.env
+**/.env
+**/.env.*
+deploy

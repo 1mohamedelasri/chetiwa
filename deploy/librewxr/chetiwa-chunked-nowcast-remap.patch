@@ -1,0 +1,55 @@
+diff --git a/src/librewxr/data/nowcast.py b/src/librewxr/data/nowcast.py
+--- a/src/librewxr/data/nowcast.py
++++ b/src/librewxr/data/nowcast.py
+@@ -103,6 +103,9 @@
+ # stays a small fraction of a global grid's width; ``width // 8`` is
+ # the effective cap for tiny synthetic grids so the pad never dominates.
+ _WRAP_FLOW_PAD = 256
++
++# Bound inverse-remap workspaces without changing source pixels or flow.
++_REMAP_CHUNK_ROWS = 512
+ 
+ # ── Composite NWP flow raster geometry ────────────────────────────────
+ #
+@@ -1363,17 +1366,30 @@
+     elif xs is None or ys is None:
+         ys, xs = np.indices((h, w), dtype=np.float32, sparse=True)
+ 
+-    map_x = xs - steps * flow[..., 0]
+-    map_y = ys - steps * flow[..., 1]
+-
+-    warped = cv2.remap(
+-        frame, map_x, map_y,
+-        interpolation=cv2.INTER_LINEAR,
+-        borderMode=(
+-            cv2.BORDER_WRAP if wrap else cv2.BORDER_CONSTANT
+-        ),
+-        borderValue=0,
+-    )
++    # Maps describe destination pixels in GLOBAL source coordinates. Keep
++    # the full source frame so interpolation can cross output-chunk borders.
++    # OpenCV otherwise holds two full-size maps plus arithmetic temporaries
++    # alongside the upscaled flow and both old/new forecast snapshots.
++    frame = np.ascontiguousarray(frame)
++    warped = np.empty(frame.shape, dtype=frame.dtype)
++    for row_start in range(0, h, _REMAP_CHUNK_ROWS):
++        row_end = min(row_start + _REMAP_CHUNK_ROWS, h)
++        flow_rows = flow[row_start:row_end]
++        # Support both sparse axes and callers supplying dense cached grids.
++        row_xs = xs if xs.shape[0] == 1 else xs[row_start:row_end]
++        row_ys = ys if ys.shape[0] == 1 else ys[row_start:row_end]
++        map_x = row_xs - steps * flow_rows[..., 0]
++        map_y = row_ys - steps * flow_rows[..., 1]
++        cv2.remap(
++            frame, map_x, map_y,
++            interpolation=cv2.INTER_LINEAR,
++            dst=warped[row_start:row_end],
++            borderMode=(
++                cv2.BORDER_WRAP if wrap else cv2.BORDER_CONSTANT
++            ),
++            borderValue=0,
++        )
++        del map_x, map_y
+     if wrap:
+         warped = warped[:, pad : pad + w]
+ 

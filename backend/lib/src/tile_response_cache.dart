@@ -55,6 +55,9 @@ final class TileResponseCache {
   }
 
   void write(String key, CachedTileResponse value) {
+    // Serve an oversized response to its caller without retaining it or
+    // evicting every useful tile to make room for an entry that cannot fit.
+    if (value.bytes.length > maxBytes) return;
     final previous = _entries.remove(key);
     if (previous != null) _bytes -= previous.bytes.length;
     while (_entries.length >= maxEntries ||

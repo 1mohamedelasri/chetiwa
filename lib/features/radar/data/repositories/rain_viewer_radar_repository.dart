@@ -65,15 +65,17 @@ final class RainViewerRadarRepository implements RadarRepository {
             .map((scheme) => (scheme['id'] as num?)?.toInt())
             .whereType<int>()
             .toSet();
-    // During the rollout, scheme 255 is the raw/grey presentation and hides
-    // the intensity contrast users need to compare with other radar apps.
-    // Scheme 12 is already exposed by LibreWXR and keeps yellow/red cores
-    // visible until the Chetiwa grey/red LUT (13) is installed.
-    final libreWxrColorScheme = supportedColorSchemeIds.contains(14)
+    // Scheme 15 keeps light echoes neutral and reserves red for stronger
+    // returns. A distinct ID prevents persisted tiles from the warm palette
+    // being reused as the corrected presentation. Retain older-server support.
+    final libreWxrColorScheme = supportedColorSchemeIds.contains(15)
+        ? 15
+        : supportedColorSchemeIds.contains(14)
         ? 14
         : supportedColorSchemeIds.contains(13)
         ? 13
         : 12;
+    final presentation = libreWxrColorScheme == 15 ? 'neutral-v1' : 'crisp-v3';
     // RainViewer retired future/nowcast frames. LibreWXR exposes a bounded
     // nowcast window, so preserve it in the direct beta path.
     final nowcast = usesLibreWxr
@@ -187,7 +189,7 @@ final class RainViewerRadarRepository implements RadarRepository {
           // observation in forecast URLs so Cloudflare and the persistent
           // mobile cache cannot keep an older forecast for up to six hours.
           tileUrlTemplate:
-              '$tileHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '$libreWxrColorScheme/1_0' : '2/1_0'}.png${usesLibreWxr ? '?presentation=crisp-v2${raw.forecast && latestObservationEpoch > 0 ? '&run=$latestObservationEpoch' : ''}' : ''}',
+              '$tileHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '$libreWxrColorScheme/1_0' : '2/1_0'}.png${usesLibreWxr ? '?presentation=$presentation${raw.forecast && latestObservationEpoch > 0 ? '&run=$latestObservationEpoch' : ''}' : ''}',
           kind: raw.forecast && latestObservationEpoch > 0
               ? RadarFramePolicy.futureKind(
                   latestObservation: DateTime.fromMillisecondsSinceEpoch(

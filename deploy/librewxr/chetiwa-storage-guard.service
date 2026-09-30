@@ -1,0 +1,12 @@
+[Unit]
+Description=Chetiwa disk, inode and cache pressure guard
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/chetiwa-storage-guard.env
+ExecStart=/usr/local/sbin/chetiwa-storage-guard
+
+[Install]
+WantedBy=multi-user.target

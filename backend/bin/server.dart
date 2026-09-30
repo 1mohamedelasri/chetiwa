@@ -41,8 +41,13 @@ Future<void> main(List<String> arguments) async {
           databaseId: config.firestoreDatabaseId,
           rainAlertCellSizeDegrees: config.rainAlertCellSizeDegrees,
         );
+  final provider = ProviderGateway(config: config);
   final server = await shelf_io.serve(
-    createApp(config: config, deviceAlertStore: persistentAlerts),
+    createApp(
+      config: config,
+      deviceAlertStore: persistentAlerts,
+      providers: provider,
+    ),
     InternetAddress.anyIPv4,
     config.port,
     poweredByHeader: null,
@@ -56,6 +61,7 @@ Future<void> main(List<String> arguments) async {
   Future<void> shutdown(ProcessSignal signal) async {
     stdout.writeln('Received ${signal.name}; stopping Chetiwa API');
     await server.close(force: true);
+    provider.close();
     await persistentAlerts?.close();
     exitCode = 0;
   }

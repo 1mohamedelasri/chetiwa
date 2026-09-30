@@ -28,6 +28,22 @@ void main() {
 
       await tester.enterText(
         find.byKey(const Key('location-search-field')),
+        'fgjhh',
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Aucune ville trouvée. Essayez avec le pays ou un code postal.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('current-location-tile')), findsNothing);
+      expect(find.byKey(const Key('choose-on-map-tile')), findsNothing);
+
+      await tester.enterText(
+        find.byKey(const Key('location-search-field')),
         'Tokyo',
       );
       await tester.pump(const Duration(milliseconds: 400));

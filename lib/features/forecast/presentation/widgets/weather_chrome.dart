@@ -546,6 +546,9 @@ final class _LocationPickerState extends State<_LocationPicker> {
 
   void _onSearchChanged(String value) {
     _debounce?.cancel();
+    // Invalidate an in-flight response immediately. Otherwise results for the
+    // previous text can briefly appear below a newly typed query.
+    _searchGeneration++;
     final query = value.trim();
     setState(() {
       _searchError = null;
@@ -704,90 +707,91 @@ final class _LocationPickerState extends State<_LocationPicker> {
               ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Column(
-              children: [
-                ListTile(
-                  key: const Key('current-location-tile'),
-                  enabled: !_isLocating,
-                  minVerticalPadding: 12,
-                  leading: CircleAvatar(
-                    backgroundColor: colors.primary,
-                    child: Icon(
-                      Icons.my_location_rounded,
-                      color: colors.onPrimary,
+          if (!_isQuerying) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Column(
+                children: [
+                  ListTile(
+                    key: const Key('current-location-tile'),
+                    enabled: !_isLocating,
+                    minVerticalPadding: 12,
+                    leading: CircleAvatar(
+                      backgroundColor: colors.primary,
+                      child: Icon(
+                        Icons.my_location_rounded,
+                        color: colors.onPrimary,
+                      ),
                     ),
-                  ),
-                  title: Text(
-                    context.l10n.useCurrentLocation,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: Text(
-                    _locationError ?? context.l10n.onDemandLocation,
-                    style: TextStyle(
-                      color: _locationError == null
-                          ? colors.onSurfaceVariant
-                          : ChetiwaColors.error,
+                    title: Text(
+                      context.l10n.useCurrentLocation,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
+                    subtitle: Text(
+                      _locationError ?? context.l10n.onDemandLocation,
+                      style: TextStyle(
+                        color: _locationError == null
+                            ? colors.onSurfaceVariant
+                            : ChetiwaColors.error,
+                      ),
+                    ),
+                    trailing: _isLocating
+                        ? const SizedBox.square(
+                            dimension: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : _locationRecoveryAction == null
+                        ? const Icon(Icons.chevron_right_rounded)
+                        : TextButton(
+                            key: const Key('open-location-settings-button'),
+                            onPressed: _openLocationRecovery,
+                            child: Text(context.l10n.settings),
+                          ),
+                    onTap: _isLocating ? null : _useCurrentLocation,
                   ),
-                  trailing: _isLocating
-                      ? const SizedBox.square(
-                          dimension: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : _locationRecoveryAction == null
-                      ? const Icon(Icons.chevron_right_rounded)
-                      : TextButton(
-                          key: const Key('open-location-settings-button'),
-                          onPressed: _openLocationRecovery,
-                          child: Text(context.l10n.settings),
-                        ),
-                  onTap: _isLocating ? null : _useCurrentLocation,
-                ),
-                if (_locationRecoveryAction != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(72, 0, 12, 8),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        context.l10n.retryCurrentLocationHelp,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.onSurfaceVariant,
+                  if (_locationRecoveryAction != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(72, 0, 12, 8),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          context.l10n.retryCurrentLocationHelp,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: colors.onSurfaceVariant),
                         ),
                       ),
                     ),
-                  ),
-                const Divider(height: 1),
-                ListTile(
-                  key: const Key('choose-on-map-tile'),
-                  minVerticalPadding: 12,
-                  leading: CircleAvatar(
-                    backgroundColor: colors.surfaceContainer,
-                    child: Icon(Icons.map_outlined, color: colors.primary),
-                  ),
-                  title: Text(
-                    context.l10n.chooseOnMap,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: Text(context.l10n.moveMapToChoose),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () async {
-                    final selected = await Navigator.of(context)
-                        .push<ChetiwaLocation>(
-                          MaterialPageRoute<ChetiwaLocation>(
-                            builder: (_) => MapLocationPickerScreen(
-                              repository: widget.repository,
+                  const Divider(height: 1),
+                  ListTile(
+                    key: const Key('choose-on-map-tile'),
+                    minVerticalPadding: 12,
+                    leading: CircleAvatar(
+                      backgroundColor: colors.surfaceContainer,
+                      child: Icon(Icons.map_outlined, color: colors.primary),
+                    ),
+                    title: Text(
+                      context.l10n.chooseOnMap,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(context.l10n.moveMapToChoose),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () async {
+                      final selected = await Navigator.of(context)
+                          .push<ChetiwaLocation>(
+                            MaterialPageRoute<ChetiwaLocation>(
+                              builder: (_) => MapLocationPickerScreen(
+                                repository: widget.repository,
+                              ),
                             ),
-                          ),
-                        );
-                    if (selected != null && mounted) await _select(selected);
-                  },
-                ),
-              ],
+                          );
+                      if (selected != null && mounted) await _select(selected);
+                    },
+                  ),
+                ],
+              ),
             ),
-          ),
-          const Divider(height: 1),
+            const Divider(height: 1),
+          ],
           Expanded(child: _buildLocationList(context, controller)),
         ],
       ),

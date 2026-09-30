@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import 'api_exception.dart';
+import 'bounded_http.dart';
 import 'runtime_config.dart';
 
 final class ProviderGateway {
@@ -12,13 +13,21 @@ final class ProviderGateway {
     required RuntimeConfig config,
     http.Client? client,
     Future<void> Function(Duration duration)? delay,
+    this.jsonRequestTimeout = const Duration(seconds: 12),
   }) : _config = config,
        _client = client ?? http.Client(),
+       _ownsClient = client == null,
        _delay = delay ?? Future<void>.delayed;
 
   final RuntimeConfig _config;
   final http.Client _client;
+  final bool _ownsClient;
   final Future<void> Function(Duration duration) _delay;
+  final Duration jsonRequestTimeout;
+
+  void close() {
+    if (_ownsClient) _client.close();
+  }
 
   Future<Map<String, Object?>> forecast({
     required double latitude,
@@ -132,8 +141,7 @@ final class ProviderGateway {
       ),
     );
     final address = raw['address'];
-    final point = raw['location'];
-    if (address is! Map<String, dynamic> || point is! Map<String, dynamic>) {
+    if (address is! Map<String, dynamic>) {
       throw const ApiException(
         statusCode: 502,
         code: 'invalid_reverse_geocoding_response',
@@ -145,8 +153,11 @@ final class ProviderGateway {
         'name': address['City'] ?? address['District'] ?? address['Match_addr'],
         'country': address['CountryCode'] ?? address['CntryName'] ?? '',
         'administrativeArea': address['Region'] ?? address['RegionAbbr'],
-        'latitude': (point['y'] as num?)?.toDouble() ?? latitude,
-        'longitude': (point['x'] as num?)?.toDouble() ?? longitude,
+        // ArcGIS returns the nearest address point, which can be tens or
+        // hundreds of metres away. The reverse endpoint adds a label to the
+        // requested point; it must not silently move that point.
+        'latitude': latitude,
+        'longitude': longitude,
       },
       'provider': const <String, Object?>{
         'id': 'arcgis-world-geocoding',
@@ -243,11 +254,15 @@ final class ProviderGateway {
             ? latestObservationEpoch
             : generatedEpoch;
         final query = usesLibreWxr
-            ? '?presentation=crisp-v2${cacheVersion == null ? '' : '&run=$cacheVersion'}'
+            ? '?presentation=neutral-v1${cacheVersion == null ? '' : '&run=$cacheVersion'}'
             : '';
         final tileUrlTemplate = _config.publicBaseUrl == null
-            ? '$directHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '14/1_0.png' : '2/1_0.png'}$query'
-            : '${_config.publicBaseUrl}/v1/radar/tiles/$frameId/{z}/{x}/{y}.png${cacheVersion == null ? '' : '?run=$cacheVersion'}';
+            ? '$directHost$path/256/{z}/{x}/{y}/${usesLibreWxr ? '15/1_0.png' : '2/1_0.png'}$query'
+            : '${_config.publicBaseUrl}/v1/radar/tiles/$frameId/{z}/{x}/{y}.png${usesLibreWxr
+                  ? query
+                  : cacheVersion == null
+                  ? ''
+                  : '?run=$cacheVersion'}';
         frames.add(<String, Object?>{
           'time': _isoFromEpoch(epoch),
           'kind': kind,
@@ -326,28 +341,29 @@ final class ProviderGateway {
     final uri = _config.radarMetadataUri.replace(path: '/mcp/', query: null);
     late final http.Response response;
     try {
-      response = await _client
-          .post(
-            uri,
-            headers: const <String, String>{
-              'accept': 'application/json, text/event-stream',
-              'content-type': 'application/json',
+      response = await boundedHttpRequest(
+        _client,
+        'POST',
+        uri,
+        timeout: const Duration(seconds: 8),
+        headers: const <String, String>{
+          'accept': 'application/json, text/event-stream',
+          'content-type': 'application/json',
+        },
+        body: jsonEncode(<String, Object?>{
+          'jsonrpc': '2.0',
+          'id': 1,
+          'method': 'tools/call',
+          'params': <String, Object?>{
+            'name': 'get_precip_nowcast',
+            'arguments': <String, Object?>{
+              'lat': latitude,
+              'lon': longitude,
+              'minutes': 120,
             },
-            body: jsonEncode(<String, Object?>{
-              'jsonrpc': '2.0',
-              'id': 1,
-              'method': 'tools/call',
-              'params': <String, Object?>{
-                'name': 'get_precip_nowcast',
-                'arguments': <String, Object?>{
-                  'lat': latitude,
-                  'lon': longitude,
-                  'minutes': 120,
-                },
-              },
-            }),
-          )
-          .timeout(const Duration(seconds: 8));
+          },
+        }),
+      );
     } on TimeoutException {
       throw const ApiException(
         statusCode: 503,
@@ -429,6 +445,17 @@ final class ProviderGateway {
     required int y,
     int? cacheVersion,
   }) async {
+    // Frame IDs are public input, even when normally supplied by metadata.
+    // Keep them as path segments: inserting @host, //host, query strings or
+    // encoded traversal after a template authority must never change its URL.
+    if (!RegExp(r'^/[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*$').hasMatch(frame) ||
+        frame.split('/').any((segment) => segment == '.' || segment == '..')) {
+      throw const ApiException(
+        statusCode: 400,
+        code: 'invalid_radar_frame',
+        message: 'frame must be a safe absolute provider path',
+      );
+    }
     final template = _config.radarTileUrlTemplate;
     if (template == null) {
       throw const ApiException(
@@ -444,6 +471,21 @@ final class ProviderGateway {
           .replaceAll('{x}', '$x')
           .replaceAll('{y}', '$y'),
     );
+    final configuredOrigin = Uri.parse(
+      template
+          .replaceAll('{frame}', '/frame')
+          .replaceAll('{z}', '0')
+          .replaceAll('{x}', '0')
+          .replaceAll('{y}', '0'),
+    );
+    if (baseUri.origin != configuredOrigin.origin ||
+        baseUri.userInfo.isNotEmpty) {
+      throw const ApiException(
+        statusCode: 400,
+        code: 'invalid_radar_frame',
+        message: 'frame must preserve the configured provider origin',
+      );
+    }
     final uri = cacheVersion == null
         ? baseUri
         : baseUri.replace(
@@ -452,16 +494,20 @@ final class ProviderGateway {
               'run': '$cacheVersion',
             },
           );
-    Object? lastError;
     try {
       // Mobile waits at most eight seconds for a genuinely cold tile. Retrying
       // three ten-second origin calls after the phone disconnected multiplied
       // CPU work and made the next request slower. One bounded local-origin
       // request is sufficient; cache fallback and the mobile recovery loop own
       // subsequent attempts.
-      final response = await _client
-          .get(uri, headers: const <String, String>{'accept': 'image/png'})
-          .timeout(const Duration(seconds: 7));
+      final response = await boundedHttpRequest(
+        _client,
+        'GET',
+        uri,
+        headers: const <String, String>{'accept': 'image/png'},
+        timeout: const Duration(seconds: 7),
+        followRedirects: false,
+      );
       if (response.statusCode == 200 &&
           _isSupportedRadarImage(response.bodyBytes)) {
         return Uint8List.fromList(response.bodyBytes);
@@ -480,16 +526,15 @@ final class ProviderGateway {
           message: 'Radar tile provider returned HTTP ${response.statusCode}',
         );
       }
-      lastError = 'HTTP ${response.statusCode}';
     } on ApiException {
       rethrow;
-    } on Object catch (error) {
-      lastError = error;
+    } on Object {
+      // Transport diagnostics can include credential-bearing upstream URLs.
     }
-    throw ApiException(
+    throw const ApiException(
       statusCode: 503,
       code: 'radar_tile_provider_unavailable',
-      message: 'Radar tile provider unavailable: $lastError',
+      message: 'Radar tile provider is temporarily unavailable',
     );
   }
 
@@ -518,15 +563,22 @@ final class ProviderGateway {
   }
 
   Future<Map<String, dynamic>> _getJson(Uri uri) async {
-    Object? lastError;
+    // The phone gives the API 15 seconds. All retries share a smaller deadline
+    // so an unhealthy provider reaches stale-cache fallback before that expires.
+    final elapsed = Stopwatch()..start();
     for (var attempt = 0; attempt < 3; attempt++) {
+      final remaining = jsonRequestTimeout - elapsed.elapsed;
+      if (remaining <= Duration.zero) break;
       try {
-        final response = await _client
-            .get(
-              uri,
-              headers: const <String, String>{'accept': 'application/json'},
-            )
-            .timeout(const Duration(seconds: 10));
+        final response = await boundedHttpRequest(
+          _client,
+          'GET',
+          uri,
+          headers: const <String, String>{'accept': 'application/json'},
+          timeout: remaining < const Duration(seconds: 10)
+              ? remaining
+              : const Duration(seconds: 10),
+        );
         if (response.statusCode == 200) {
           final decoded = jsonDecode(response.body);
           if (decoded is Map<String, dynamic>) return decoded;
@@ -539,13 +591,12 @@ final class ProviderGateway {
             message: 'Provider returned HTTP ${response.statusCode}',
           );
         }
-        lastError = 'HTTP ${response.statusCode}';
       } on ApiException {
         rethrow;
-      } on TimeoutException catch (error) {
-        lastError = error;
-      } on http.ClientException catch (error) {
-        lastError = error;
+      } on TimeoutException {
+        // Retry only within the overall deadline.
+      } on http.ClientException {
+        // Never expose a transport exception's URI: it can contain API keys.
       } on FormatException catch (error) {
         throw ApiException(
           statusCode: 502,
@@ -554,13 +605,15 @@ final class ProviderGateway {
         );
       }
       if (attempt < 2) {
-        await _delay(Duration(milliseconds: 200 * (attempt + 1)));
+        final backoff = Duration(milliseconds: 200 * (attempt + 1));
+        if (elapsed.elapsed + backoff >= jsonRequestTimeout) break;
+        await _delay(backoff);
       }
     }
-    throw ApiException(
+    throw const ApiException(
       statusCode: 503,
       code: 'provider_unavailable',
-      message: 'Provider unavailable after retries: $lastError',
+      message: 'Provider is temporarily unavailable',
     );
   }
 

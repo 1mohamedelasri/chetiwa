@@ -71,7 +71,13 @@ final class RadarPlaybackStarted extends RadarEvent {
 }
 
 final class RadarPlaybackPaused extends RadarEvent {
-  const RadarPlaybackPaused();
+  const RadarPlaybackPaused({this.isUserInitiated = true});
+
+  /// Widget disposal stops its clock without changing the user's intent.
+  final bool isUserInitiated;
+
+  @override
+  List<Object> get props => [isUserInitiated];
 }
 
 /// Temporarily stops playback while the application is not visible. Unlike
@@ -84,7 +90,14 @@ final class RadarPlaybackSuspended extends RadarEvent {
 /// Resumes only playback that was running before an application suspension.
 /// A user-paused animation remains paused.
 final class RadarPlaybackResumed extends RadarEvent {
-  const RadarPlaybackResumed();
+  const RadarPlaybackResumed({
+    this.remainingFrameDuration = RadarFramePolicy.playbackFrameDuration,
+  });
+
+  final Duration remainingFrameDuration;
+
+  @override
+  List<Object> get props => [remainingFrameDuration];
 }
 
 /// Stops only the automatic frame clock while the native map is presenting
@@ -100,7 +113,17 @@ final class RadarPlaybackClockHeld extends RadarEvent {
 /// Restarts the automatic frame clock after the selected tile is confirmed on
 /// the native map. It is a no-op when the user paused in the meantime.
 final class RadarPlaybackClockReleased extends RadarEvent {
-  const RadarPlaybackClockReleased();
+  const RadarPlaybackClockReleased({
+    this.remainingFrameDuration = RadarFramePolicy.playbackFrameDuration,
+  });
+
+  /// The visual clock may already be partway through this frame when
+  /// speculative tile work holds it. Resume that phase instead of adding a
+  /// fresh two-second interval to every buffer operation.
+  final Duration remainingFrameDuration;
+
+  @override
+  List<Object> get props => [remainingFrameDuration];
 }
 
 final class RadarPlaybackAdvanced extends RadarEvent {
@@ -224,13 +247,15 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   var _loadGeneration = 0;
   var _resumeAfterSuspension = false;
   var _playbackClockHeld = false;
+  var _playbackSuspended = false;
+  var _autoplaySuppressed = false;
 
   Future<void> _load(RadarEvent event, Emitter<RadarState> emit) async {
     final generation = ++_loadGeneration;
     final requestedCoordinates = _coordinates;
     final backgroundRefresh = event is RadarRefreshed && state is RadarReady;
     final wasPlaying =
-        _resumeAfterSuspension ||
+        !_playbackSuspended &&
         switch (state) {
           RadarReady(:final isPlaying) => isPlaying,
           _ => false,
@@ -270,10 +295,10 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
             cachedAt: cached.cachedAt,
             isRefreshing: true,
           ),
-          isPlaying: wasPlaying,
+          isPlaying: _shouldContinuePlayback(wasPlaying),
         );
         emit(visible);
-        if (wasPlaying && visible.frames.length > 1) {
+        if (visible.isPlaying && visible.frames.length > 1) {
           _resumeAfterSuspension = false;
           _startPlaybackTimer();
         }
@@ -293,10 +318,10 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
             issue: activeBeforeRefresh.health.issue,
             isRefreshing: true,
           ),
-          isPlaying: wasPlaying,
+          isPlaying: _shouldContinuePlayback(wasPlaying),
         );
         emit(visible);
-        if (wasPlaying && visible.frames.length > 1) {
+        if (visible.isPlaying && visible.frames.length > 1) {
           _startPlaybackTimer();
         }
       } else {
@@ -313,11 +338,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
       if (generation != _loadGeneration || emit.isDone) return;
       final active = state;
       final continuePlaying =
-          frames.length > 1 &&
-          (wasPlaying ||
-              active is RadarReady &&
-                  active.coordinates == requestedCoordinates &&
-                  active.isPlaying);
+          frames.length > 1 && _shouldContinuePlayback(wasPlaying);
       final selectedIndex =
           active is RadarReady && active.coordinates == requestedCoordinates
           ? _nearestFrameIndex(frames, active.selectedFrame.time)
@@ -338,13 +359,8 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
       if (generation != _loadGeneration || emit.isDone) return;
       final issue = weatherDataIssueFrom(error);
       if (visible != null) {
-        final active = state;
         final continuePlaying =
-            visible.frames.length > 1 &&
-            (wasPlaying ||
-                active is RadarReady &&
-                    active.coordinates == requestedCoordinates &&
-                    active.isPlaying);
+            visible.frames.length > 1 && _shouldContinuePlayback(wasPlaying);
         emit(
           RadarReady(
             frames: visible.frames,
@@ -368,6 +384,14 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
         emit(RadarFailure(issue));
       }
     }
+  }
+
+  bool _shouldContinuePlayback(bool wasPlaying) {
+    if (_playbackSuspended) return false;
+    final active = state;
+    // A pause or background transition during a slow refresh takes precedence
+    // over the playback state captured before the network request started.
+    return active is RadarReady ? active.isPlaying : wasPlaying;
   }
 
   List<RadarFrame> _limitFrames(List<RadarFrame> frames) {
@@ -409,9 +433,14 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
 
   void _togglePlayback(RadarPlaybackToggled event, Emitter<RadarState> emit) {
     final current = state;
-    if (current is! RadarReady || current.frames.length < 2) return;
+    if (_playbackSuspended ||
+        current is! RadarReady ||
+        current.frames.length < 2) {
+      return;
+    }
 
     if (current.isPlaying) {
+      _autoplaySuppressed = true;
       _resumeAfterSuspension = false;
       _playbackClockHeld = false;
       _stopPlayback();
@@ -422,6 +451,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
     final resumeIndex = current.selectedIndex >= current.frames.length - 1
         ? current.playbackStartIndex
         : current.selectedIndex;
+    _autoplaySuppressed = false;
     emit(_copyReady(current, selectedIndex: resumeIndex, isPlaying: true));
     _resumeAfterSuspension = false;
     _playbackClockHeld = false;
@@ -430,7 +460,9 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
 
   void _startPlayback(RadarPlaybackStarted event, Emitter<RadarState> emit) {
     final current = state;
-    if (current is! RadarReady ||
+    if (_playbackSuspended ||
+        _autoplaySuppressed ||
+        current is! RadarReady ||
         current.frames.length < 2 ||
         current.isPlaying) {
       return;
@@ -446,6 +478,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
 
   void _pausePlayback(RadarPlaybackPaused event, Emitter<RadarState> emit) {
     final current = state;
+    if (event.isUserInitiated) _autoplaySuppressed = true;
     _resumeAfterSuspension = false;
     _playbackClockHeld = false;
     if (current is! RadarReady || !current.isPlaying) return;
@@ -457,6 +490,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
     RadarPlaybackSuspended event,
     Emitter<RadarState> emit,
   ) {
+    _playbackSuspended = true;
     final current = state;
     if (current is! RadarReady) return;
     // Mobile platforms commonly send inactive and then paused for one sleep.
@@ -469,6 +503,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
   }
 
   void _resumePlayback(RadarPlaybackResumed event, Emitter<RadarState> emit) {
+    _playbackSuspended = false;
     final current = state;
     if (!_resumeAfterSuspension ||
         current is! RadarReady ||
@@ -479,7 +514,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
     _resumeAfterSuspension = false;
     _playbackClockHeld = false;
     emit(_copyReady(current, isPlaying: true));
-    _startPlaybackTimer();
+    _startPlaybackTimer(firstDelay: event.remainingFrameDuration);
   }
 
   void _holdPlaybackClock(
@@ -497,7 +532,7 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
     final current = state;
     if (current is! RadarReady || !current.isPlaying) return;
     _playbackClockHeld = false;
-    _startPlaybackTimer();
+    _startPlaybackTimer(firstDelay: event.remainingFrameDuration);
   }
 
   void _advancePlayback(RadarPlaybackAdvanced event, Emitter<RadarState> emit) {
@@ -541,7 +576,12 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
     Emitter<RadarState> emit,
   ) {
     final current = state;
-    if (current is! RadarReady || current.frames.length < 2) return;
+    if (_playbackSuspended ||
+        current is! RadarReady ||
+        current.frames.length < 2) {
+      return;
+    }
+    _autoplaySuppressed = false;
     _stopPlayback();
     _playbackClockHeld = false;
     emit(
@@ -571,13 +611,29 @@ final class RadarBloc extends Bloc<RadarEvent, RadarState> {
     _playbackTimer = null;
   }
 
-  void _startPlaybackTimer() {
+  void _startPlaybackTimer({
+    Duration firstDelay = RadarFramePolicy.playbackFrameDuration,
+  }) {
     _stopPlayback();
-    if (_playbackClockHeld) return;
-    _playbackTimer = Timer.periodic(
-      RadarFramePolicy.playbackFrameDuration,
-      (_) => add(const RadarPlaybackAdvanced()),
-    );
+    if (_playbackClockHeld || _playbackSuspended) return;
+    void startRegularClock() {
+      _playbackTimer = Timer.periodic(
+        RadarFramePolicy.playbackFrameDuration,
+        (_) => add(const RadarPlaybackAdvanced()),
+      );
+    }
+
+    if (firstDelay >= RadarFramePolicy.playbackFrameDuration) {
+      startRegularClock();
+    } else {
+      _playbackTimer = Timer(
+        firstDelay > Duration.zero ? firstDelay : Duration.zero,
+        () {
+          startRegularClock();
+          add(const RadarPlaybackAdvanced());
+        },
+      );
+    }
   }
 
   Future<void> _changeLocation(

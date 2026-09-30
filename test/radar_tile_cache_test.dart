@@ -234,8 +234,30 @@ void main() {
     expect(provider.hasCompletePresentation, isFalse);
   });
 
+  test('Google tile provider does not repeat a full request timeout', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'chetiwa-radar-timeout-test-',
+    );
+    addTearDown(() => _deleteDirectoryEventually(directory));
+    var requests = 0;
+    final cache = RadarTileCache.forTesting(
+      client: MockClient((_) async {
+        requests++;
+        throw TimeoutException('simulated cold edge timeout');
+      }),
+      directory: directory,
+    )..beginSession();
+
+    final tile = await cache
+        .providerFor('https://tiles.test/{z}/{x}/{y}.png')
+        .getTile(64, 44, 7);
+
+    expect(tile.data, isNull);
+    expect(requests, 1);
+  });
+
   test(
-    'keeps the last good geographic tile when a newer frame is unavailable',
+    'does not label the last geographic tile as an unavailable newer frame',
     () async {
       final directory = await Directory.systemTemp.createTemp(
         'chetiwa-radar-last-good-test-',
@@ -262,8 +284,9 @@ void main() {
           .getTile(64, 44, 7);
 
       expect(current.data, png);
-      expect(newer.data, png);
+      expect(newer.data, isNull);
       expect(newerRequests, 1);
+      expect(cache.readyTileCount.value, 1);
     },
   );
 

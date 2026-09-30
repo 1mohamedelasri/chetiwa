@@ -15,6 +15,40 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  for (final legacyScheme in [14, 13]) {
+    test('keeps an advertised legacy palette $legacyScheme usable', () async {
+      final client = MockClient((request) async {
+        if (request.method == 'POST') return http.Response('{}', 503);
+        return http.Response(
+          jsonEncode({
+            'generated': 1787009401,
+            'host': 'https://tiles.example',
+            'radar': {
+              'colorSchemes': [
+                {'id': legacyScheme, 'name': 'Legacy Chetiwa palette'},
+              ],
+              'past': [
+                {'time': 1787008800, 'path': '/v2/radar/observed'},
+              ],
+              'nowcast': const [],
+            },
+          }),
+          200,
+        );
+      });
+      final repository = RainViewerRadarRepository(
+        provider: RainViewerRadarProvider(client),
+        cache: const RadarCacheDataSource(),
+      );
+      final frames = await repository.getFrames(Coordinates.paris);
+      expect(
+        frames.single.tileUrlTemplate,
+        contains('/$legacyScheme/1_0.png?presentation=crisp-v3'),
+      );
+      client.close();
+    });
+  }
+
   test(
     'requests point samples for the complete 120-minute projection',
     () async {
@@ -71,6 +105,7 @@ void main() {
                   'colorSchemes': [
                     {'id': 13, 'name': 'Chetiwa Grey Red'},
                     {'id': 14, 'name': 'Chetiwa Crisp Grey Red'},
+                    {'id': 15, 'name': 'Chetiwa Neutral Reflectivity'},
                   ],
                   'past': [
                     {'time': 1787008800, 'path': '/v2/radar/observed'},
@@ -104,7 +139,7 @@ void main() {
     );
     expect(
       frames.first.tileUrlTemplate,
-      contains('/256/{z}/{x}/{y}/14/1_0.png?presentation=crisp-v2'),
+      contains('/256/{z}/{x}/{y}/15/1_0.png?presentation=neutral-v1'),
     );
     expect(frames.last.kind, WeatherDataKind.radarNowcast);
     expect(frames.last.tileUrlTemplate, contains('&run=1787008800'));

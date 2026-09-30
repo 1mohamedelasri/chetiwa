@@ -1,0 +1,38 @@
+diff --git a/src/librewxr/data/fetcher.py b/src/librewxr/data/fetcher.py
+--- a/src/librewxr/data/fetcher.py
++++ b/src/librewxr/data/fetcher.py
+@@ -292,6 +292,12 @@ class RadarFetcher:
+         cells_s = 0.0
+         try:
+             await self._fetch_all_frames()
++            # ECMWF regridding and radar finalization allocate large temporary
++            # arrays.  Return their freed arenas before atomic nowcast
++            # generation briefly holds the old and replacement forecast sets.
++            # On a 3 GiB origin, waiting until the end of the complete cycle
++            # forced otherwise-dead fetch workspaces into swap every hour.
++            release_memory()
+             # Per-stage timing for the cycle-complete log: nowcast and
+             # storm-cell generation are the post-fetch compute stages
+             # whose cost dominates the cycle duration.
+@@ -332,6 +338,11 @@ class RadarFetcher:
+             cells_s = 0.0
+             try:
+                 await self._fetch_all_frames()
++                # Bound the transition from NWP/radar ingestion to optical-flow
++                # generation.  The stores keep their live arrays; this only
++                # trims temporary decode/regrid arenas that are no longer
++                # reachable and would otherwise inflate the atomic swap peak.
++                release_memory()
+                 _nc_start = time.monotonic()
+                 await self._run_nowcast()
+                 nowcast_s = time.monotonic() - _nc_start
+@@ -518,6 +529,9 @@ class RadarFetcher:
+         logger.info(
+             "Fetch phases: nwp=%.1fs radar=%.1fs post=%.1fs write=%.1fs",
+             self._last_nwp_phase_s, radar_s, post_s, write_s,
+         )
++        # Match the full-cycle path: do not carry dead ingestion workspaces
++        # into the immediate nowcast allocation on quick-start deployments.
++        release_memory()
+         await self._run_nowcast()
+         await self._run_storm_cells()

@@ -33,7 +33,11 @@ migrate_working_dir/
 .pub/
 /build/
 /android/build/
+/ios/build/
 /test/failures/
+
+# Private audit captures and local diagnostic artifacts
+/tmp/
 
 # Backend local configuration and generated artifacts
 backend/.env

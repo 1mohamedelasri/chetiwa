@@ -1,0 +1,50 @@
+diff --git a/src/librewxr/colors/schemes.py b/src/librewxr/colors/schemes.py
+--- a/src/librewxr/colors/schemes.py
++++ b/src/librewxr/colors/schemes.py
+@@ -80,17 +80,17 @@ def _chetiwa_lut() -> np.ndarray:
+ 
+ 
+ def _chetiwa_crisp_lut() -> np.ndarray:
+-    """Calm, discrete radar bands without interpolated red haze."""
++    """Discrete red bands with a visible warm tint for light rain."""
+     bands = (
+         (4.0, (0, 0, 0, 0)),
+-        (10.0, (216, 220, 222, 90)),
+-        (16.0, (185, 190, 193, 125)),
+-        (22.0, (135, 142, 146, 160)),
+-        (28.0, (83, 91, 95, 190)),
+-        (34.0, (225, 155, 152, 195)),
+-        (40.0, (214, 91, 85, 215)),
+-        (50.0, (188, 38, 32, 230)),
+-        (95.0, (132, 0, 0, 240)),
++        (10.0, (232, 218, 218, 110)),
++        (16.0, (225, 170, 167, 150)),
++        (22.0, (216, 120, 114, 180)),
++        (28.0, (206, 77, 70, 205)),
++        (34.0, (197, 47, 41, 220)),
++        (40.0, (185, 31, 25, 230)),
++        (50.0, (164, 14, 9, 240)),
++        (95.0, (120, 0, 0, 245)),
+     )
+     lut = np.zeros((256, 4), dtype=np.uint8)
+     for pixel_value in range(256):
+diff --git a/tests/test_color_schemes.py b/tests/test_color_schemes.py
+--- a/tests/test_color_schemes.py
++++ b/tests/test_color_schemes.py
+@@ -40,6 +40,16 @@ class TestGetLut:
+         expected = get_lut(7)
+         np.testing.assert_array_equal(lut, expected)
+ 
++    def test_chetiwa_light_rain_is_visible_and_warm(self):
++        lut = get_lut(14)
++        # Pixel 92 encodes 14 dBZ, approximately 0.3 mm/h with the
++        # Marshall-Palmer conversion used by point sampling.
++        weak_rain = lut[92]
++        assert tuple(weak_rain) == (225, 170, 167, 150)
++        assert weak_rain[0] > weak_rain[1] >= weak_rain[2]
++        # Noise at or below 4 dBZ remains fully transparent.
++        assert lut[72, 3] == 0
++
+ 
+ class TestColorize:
+     def test_basic_colorize(self):

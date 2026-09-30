@@ -83,6 +83,12 @@ void main() {
                     'source': 'radar',
                     'coverage': 'in_range',
                   },
+                  <String, Object?>{
+                    'time': '2026-08-20T19:10:00.000Z',
+                    'rainRateMmPerHour': 0.5,
+                    'source': 'radar',
+                    'coverage': 'in_range',
+                  },
                 ],
               }
             : <String, Object?>{
@@ -134,7 +140,8 @@ void main() {
     expect(frames.last.providerName, 'librewxr via Chetiwa');
     expect(frames[1].pointRainRateMmPerHour, 2.4);
     expect(frames[1].pointRainSource, 'radar');
-    expect(frames.last.pointRainRateMmPerHour, isNull);
+    expect(frames.last.pointRainRateMmPerHour, 0.5);
+    expect(frames.last.pointRainSource, 'radar');
     expect(frames.first.pointRainRateMmPerHour, isNull);
     expect(
       requestedPaths,
@@ -163,7 +170,7 @@ void main() {
               'frames': <Object?>[
                 <String, Object?>{
                   'time': '2026-08-20T18:00:00.000Z',
-                  'kind': 'nowcast',
+                  'kind': 'model',
                   'tileUrlTemplate':
                       'https://tiles.test/future/{z}/{x}/{y}.png',
                 },
@@ -184,6 +191,50 @@ void main() {
 
     expect(frames, hasLength(1));
     expect(frames.single.pointRainRateMmPerHour, isNull);
+    expect(frames.single.pointRainSource, isNull);
+    expect(frames.single.isModelForecast, isTrue);
+  });
+
+  test('extended point values preserve a non-radar provider source', () async {
+    final api = ChetiwaApiClient(
+      baseUri: Uri.parse('https://api.chetiwa.test'),
+      client: MockClient(
+        (request) async => http.Response(
+          jsonEncode({
+            'data': request.url.path.endsWith('point-nowcast')
+                ? {
+                    'samples': [
+                      {
+                        'time': '2026-08-20T19:10:00Z',
+                        'rainRateMmPerHour': 1.2,
+                        'source': 'nwp',
+                        'coverage': 'in_range',
+                      },
+                    ],
+                  }
+                : {
+                    'frames': [
+                      {
+                        'time': '2026-08-20T19:10:00Z',
+                        'kind': 'model',
+                        'tileUrlTemplate':
+                            'https://tiles.test/model/{z}/{x}/{y}.png',
+                      },
+                    ],
+                    'provider': {'id': 'librewxr'},
+                  },
+          }),
+          200,
+        ),
+      ),
+    );
+    final repository = ChetiwaRadarRepository(
+      api: api,
+      cache: const RadarCacheDataSource(),
+    );
+    final frames = await repository.getFrames(Coordinates.paris);
+    expect(frames.single.pointRainRateMmPerHour, 1.2);
+    expect(frames.single.pointRainSource, 'nwp');
   });
 
   test('location repository maps worldwide backend search results', () async {
@@ -208,6 +259,28 @@ void main() {
     expect(results.single.city, 'Tokyo');
     expect(results.single.country, 'Japon');
     expect(results.single.coordinates.longitude, 139.6503);
+  });
+
+  test('reverse geocoding keeps the exact requested coordinates', () async {
+    const requested = Coordinates(latitude: 48.86011, longitude: 2.34122);
+    final repository = ChetiwaLocationRepository(
+      api: _apiFor('/v1/locations/reverse', <String, Object?>{
+        'location': <String, Object?>{
+          'name': 'Paris',
+          'country': 'France',
+          'administrativeArea': 'Île-de-France',
+          // Simulate a provider snapping to a nearby address.
+          'latitude': 48.86100,
+          'longitude': 2.34300,
+        },
+      }),
+      deviceLocationProvider: const _FakeLocationProvider(),
+    );
+
+    final location = await repository.resolveCoordinates(requested);
+
+    expect(location.label, 'Paris, France');
+    expect(location.coordinates, requested);
   });
 }
 
